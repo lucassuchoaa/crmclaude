@@ -99,6 +99,19 @@ const NOTIF_TYPES = {
   sistema: { emoji: "⚙️", label: "Sistema", color: "#3b82f6" },
 };
 
+const DEFAULT_CADENCE = [
+  { id: "cad_status_kanban", ev: "Status alterado (Kanban)", dest: "Parceiro", tipo: "status", ativo: true },
+  { id: "cad_indicacao_ativa", ev: "Indicação ativa ou recusada", dest: "Superior hierárquico", tipo: "status", ativo: true },
+  { id: "cad_liberacao", ev: "Liberação/Bloqueio", dest: "Parceiro", tipo: "liberacao", ativo: true },
+  { id: "cad_interacao", ev: "Nova interação/nota", dest: "Parceiro", tipo: "sistema", ativo: true },
+  { id: "cad_comissao", ev: "Relatório de comissão enviado", dest: "Parceiro", tipo: "financeiro", ativo: true },
+  { id: "cad_nfe_enviada", ev: "NFe enviada", dest: "Gerente", tipo: "financeiro", ativo: true },
+  { id: "cad_nfe_paga", ev: "NFe marcada como paga", dest: "Parceiro", tipo: "financeiro", ativo: true },
+  { id: "cad_nova_indicacao", ev: "Nova indicação criada", dest: "Gerente", tipo: "sistema", ativo: true },
+];
+
+const isCadenceActive = (cadenceRules, ruleId) => cadenceRules.find(r => r.id === ruleId)?.ativo !== false;
+
 // Notifications loaded from API
 
 function addNotif(setNotifs, { tipo, titulo, msg, para, de, link }) {
@@ -916,7 +929,7 @@ function Dash({ inds, users, comms, nfes }) {
 }
 
 // ===== KANBAN =====
-function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs }) {
+function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenceRules }) {
   const { user } = useAuth();
   const [sel, setSel] = useState(null);
   const [view, setView] = useState("kanban");
@@ -973,7 +986,7 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs }) {
     if (sel && sel.id === id) setSel(prev => ({ ...prev, lib: next, libDt: next === "liberado" ? addDays(0) : prev.libDt, libExp: next === "liberado" ? expDate : prev.libExp, hist: [...(prev.hist || []), hEntry] }));
     // Notify parceiro about liberation/block
     const ind = inds.find(x => x.id === id);
-    if (ind?.pId && (next === "liberado" || next === "bloqueado")) {
+    if (ind?.pId && (next === "liberado" || next === "bloqueado") && isCadenceActive(cadenceRules, "cad_liberacao")) {
       addNotif(setNotifs, { tipo: "liberacao", titulo: next === "liberado" ? "Oportunidade liberada" : "Oportunidade bloqueada", msg: `Sua indicação ${ind.emp} foi ${next === "liberado" ? "liberada. Trava: " + (travaDias || 90) + " dias." : "bloqueada."}`, para: ind.pId, de: user.id, link: "kanban" });
     }
   };
@@ -1002,7 +1015,7 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs }) {
     if (sel && sel.id === id) setSel(prev => ({ ...prev, hist: [...(prev.hist || []), hEntry] }));
     // Notify parceiro about new interaction
     const ind = inds.find(x => x.id === id);
-    if (ind?.pId && ind.pId !== user.id) {
+    if (ind?.pId && ind.pId !== user.id && isCadenceActive(cadenceRules, "cad_interacao")) {
       addNotif(setNotifs, { tipo: "sistema", titulo: "Nova interação", msg: `${user.name} adicionou uma nota em ${ind.emp}.`, para: ind.pId, de: user.id, link: "kanban" });
     }
     setNewNote("");
@@ -1088,7 +1101,7 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs }) {
                   </div>
                   <div style={{ background: T.bg2 + "88", border: `1px solid ${T.bor}`, borderTop: "none", borderRadius: "0 0 8px 8px", padding: 6, minHeight: 100, display: "flex", flexDirection: "column", gap: 6 }}
                     onDragOver={canMove ? e => e.preventDefault() : undefined}
-                    onDrop={canMove ? e => { const id = e.dataTransfer.getData("text/plain"); const ind = inds.find(x => x.id === id); const colLabel = KCOLS.find(c => c.id === col.id)?.label || col.id; setInds(p => p.map(x => x.id === id ? { ...x, st: col.id } : x)); if (ind && ind.pId) { addNotif(setNotifs, { tipo: "status", titulo: "Status alterado", msg: `Sua indicação ${ind.emp} foi movida para ${colLabel}.`, para: ind.pId, de: user.id, link: "kanban" }); } if (ind && (col.id === "ativo" || col.id === "recusado")) { const gerente = users.find(u => u.id === ind.gId); const superiors = []; if (gerente?.dId) superiors.push(gerente.dId); const dir = users.find(u => u.id === gerente?.dId); if (dir?.eId) superiors.push(dir.eId); superiors.forEach(sId => addNotif(setNotifs, { tipo: "status", titulo: col.id === "ativo" ? "Indicação aprovada" : "Indicação recusada", msg: `Indicação ${ind.emp} foi ${col.id === "ativo" ? "aprovada" : "recusada"} por ${user.name}.`, para: sId, de: user.id, link: "kanban" })); } } : undefined}>
+                    onDrop={canMove ? e => { const id = e.dataTransfer.getData("text/plain"); const ind = inds.find(x => x.id === id); const colLabel = KCOLS.find(c => c.id === col.id)?.label || col.id; setInds(p => p.map(x => x.id === id ? { ...x, st: col.id } : x)); if (ind && ind.pId && isCadenceActive(cadenceRules, "cad_status_kanban")) { addNotif(setNotifs, { tipo: "status", titulo: "Status alterado", msg: `Sua indicação ${ind.emp} foi movida para ${colLabel}.`, para: ind.pId, de: user.id, link: "kanban" }); } if (ind && (col.id === "ativo" || col.id === "recusado") && isCadenceActive(cadenceRules, "cad_indicacao_ativa")) { const gerente = users.find(u => u.id === ind.gId); const superiors = []; if (gerente?.dId) superiors.push(gerente.dId); const dir = users.find(u => u.id === gerente?.dId); if (dir?.eId) superiors.push(dir.eId); superiors.forEach(sId => addNotif(setNotifs, { tipo: "status", titulo: col.id === "ativo" ? "Indicação aprovada" : "Indicação recusada", msg: `Indicação ${ind.emp} foi ${col.id === "ativo" ? "aprovada" : "recusada"} por ${user.name}.`, para: sId, de: user.id, link: "kanban" })); } } : undefined}>
                     {cards.map(ind => (
                       <div key={ind.id} draggable={canMove} onDragStart={canMove ? e => e.dataTransfer.setData("text/plain", ind.id) : undefined}
                         onClick={() => setSel(ind)}
@@ -1378,7 +1391,7 @@ function ParcPage({ users, setUsers, inds }) {
 
 // ===== MINHAS INDICAÇÕES =====
 
-function MinhasInd({ inds, setInds, notifs, setNotifs, users }) {
+function MinhasInd({ inds, setInds, notifs, setNotifs, users, cadenceRules }) {
   const { user } = useAuth();
   const [modal, setModal] = useState(false);
   const [sel, setSel] = useState(null);
@@ -1500,7 +1513,7 @@ function MinhasInd({ inds, setInds, notifs, setNotifs, users }) {
     }]);
     setModal(false); setF({ emp: "", cnpj: "", cont: "", tel: "", em: "", nf: "", obs: "" }); setHr(null); setCnpjData(null);
     // Notify gerente about new indication
-    if (user.gId) {
+    if (user.gId && isCadenceActive(cadenceRules, "cad_nova_indicacao")) {
       addNotif(setNotifs, { tipo: "sistema", titulo: "Nova indicação", msg: `Parceiro ${user.name} criou nova indicação: ${f.emp}.`, para: user.gId, de: user.id, link: "kanban" });
     }
   };
@@ -1733,8 +1746,9 @@ function MatsPage({ mats }) {
 }
 
 // ===== CONFIG =====
-function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, notifs, setNotifs }) {
+function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, notifs, setNotifs, cadenceRules, setCadenceRules }) {
   const { user } = useAuth();
+  const isSA = user.role === "super_admin";
   const [cfg, setCfg] = useState({ prazo: 5, minF: 20, hsKey: "pat-na1-xxxx", hsPipe: "default", emOn: true, waOn: false });
   const [saved, setSaved] = useState(false);
   const [tab, setTab] = useState("geral");
@@ -1751,6 +1765,7 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
     { id: "ch2", titulo: "Treinamento Plataforma", msg: "Participe do treinamento sobre a nova plataforma dia 15/02 às 14h.", perfis: ["parceiro", "gerente"], dt: "2025-01-28 15:30", por: "Super Admin", total: 7 },
   ]);
   const [commSent, setCommSent] = useState(false);
+  const [cadEditModal, setCadEditModal] = useState(null);
 
   const addMat = () => {
     if (!mf.t) return;
@@ -1862,7 +1877,7 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
         {/* Canal Preferences */}
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20, marginBottom: 16 }}>
           <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 16 }}>📡 Canais de Notificação</h3>
-          {[{ l: "E-mail", k: "emOn", ico: "📧", desc: "Receba notificações por e-mail" }, { l: "WhatsApp", k: "waOn", ico: "📱", desc: "Receba notificações por WhatsApp" }].map((r, i) => (
+          {[{ l: "E-mail", k: "emOn", ico: "📧", desc: "Receba notificações por e-mail" }].map((r, i) => (
             <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 0", borderBottom: `1px solid ${T.bor}` }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <span style={{ fontSize: 18 }}>{r.ico}</span>
@@ -1881,28 +1896,32 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
         {/* Automatic cadence table */}
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20, marginBottom: 16 }}>
           <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>⚡ Cadência Automática</h3>
-          <p style={{ fontSize: 12, color: T.tm, marginBottom: 16 }}>Notificações disparadas automaticamente a cada ação no sistema.</p>
+          <p style={{ fontSize: 12, color: T.tm, marginBottom: 16 }}>Notificações disparadas automaticamente a cada ação no sistema.{isSA && " Clique no toggle para ativar/desativar ou no lápis para editar."}</p>
           <div style={{ background: T.bg2, borderRadius: 8, border: `1px solid ${T.bor}`, overflow: "hidden" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead><tr>{["Evento", "Notifica", "Tipo", "Status"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
+              <thead><tr>{["Evento", "Notifica", "Tipo", "Status", ...(isSA ? ["Ações"] : [])].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>
-                {[
-                  { ev: "Status alterado (Kanban)", dest: "Parceiro", tipo: "status" },
-                  { ev: "Indicação ativa ou recusada", dest: "Superior hierárquico", tipo: "status" },
-                  { ev: "Liberação/Bloqueio", dest: "Parceiro", tipo: "liberacao" },
-                  { ev: "Nova interação/nota", dest: "Parceiro", tipo: "sistema" },
-                  { ev: "Relatório de comissão enviado", dest: "Parceiro", tipo: "financeiro" },
-                  { ev: "NFe enviada", dest: "Gerente", tipo: "financeiro" },
-                  { ev: "NFe marcada como paga", dest: "Parceiro", tipo: "financeiro" },
-                  { ev: "Nova indicação criada", dest: "Gerente", tipo: "sistema" },
-                ].map((r, i) => {
-                  const nt = NOTIF_TYPES[r.tipo];
+                {cadenceRules.map((r) => {
+                  const nt = NOTIF_TYPES[r.tipo] || NOTIF_TYPES.sistema;
                   return (
-                    <tr key={i}>
+                    <tr key={r.id}>
                       <td style={{ ...tdS, fontWeight: 500 }}>{r.ev}</td>
                       <td style={{ ...tdS, fontSize: 12 }}>{r.dest}</td>
                       <td style={tdS}><span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 10, background: nt.color + "22", color: nt.color }}>{nt.emoji} {nt.label}</span></td>
-                      <td style={tdS}><Badge type="success">✓ Ativo</Badge></td>
+                      <td style={tdS}>
+                        {isSA ? (
+                          <button onClick={() => setCadenceRules(prev => prev.map(x => x.id === r.id ? { ...x, ativo: !x.ativo } : x))} style={{ width: 44, height: 24, borderRadius: 12, border: "none", cursor: "pointer", position: "relative", background: r.ativo ? T.ac : T.bor, transition: "background 0.2s" }}>
+                            <div style={{ width: 18, height: 18, borderRadius: "50%", background: "#fff", position: "absolute", top: 3, left: r.ativo ? 23 : 3, transition: "all 0.2s", boxShadow: "0 1px 4px rgba(0,0,0,0.2)" }} />
+                          </button>
+                        ) : (
+                          <Badge type={r.ativo ? "success" : "muted"}>{r.ativo ? "✓ Ativo" : "✗ Inativo"}</Badge>
+                        )}
+                      </td>
+                      {isSA && (
+                        <td style={tdS}>
+                          <button onClick={() => setCadEditModal({ ...r })} style={{ background: "none", border: `1px solid ${T.bor}`, borderRadius: 6, cursor: "pointer", padding: "4px 8px", color: T.t2, fontSize: 13 }} title="Editar regra">✏️</button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -1910,6 +1929,42 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
             </table>
           </div>
         </div>
+
+        {/* Cadence Edit Modal */}
+        <Modal open={!!cadEditModal} onClose={() => setCadEditModal(null)} title="Editar Regra de Cadência" footer={<>
+          <button onClick={() => setCadEditModal(null)} style={{ padding: "8px 18px", borderRadius: 6, border: `1px solid ${T.bor}`, background: "transparent", color: T.t2, cursor: "pointer", fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>Cancelar</button>
+          <button onClick={() => { setCadenceRules(prev => prev.map(x => x.id === cadEditModal.id ? cadEditModal : x)); setCadEditModal(null); }} style={{ padding: "8px 18px", borderRadius: 6, border: "none", background: T.ac, color: "#fff", cursor: "pointer", fontFamily: "'DM Sans',sans-serif", fontSize: 13, fontWeight: 600 }}>Salvar</button>
+        </>}>
+          {cadEditModal && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <Inp label="Evento" value={cadEditModal.ev} onChange={v => setCadEditModal(prev => ({ ...prev, ev: v }))} />
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.5 }}>Destinatário</label>
+                <select value={cadEditModal.dest} onChange={e => setCadEditModal(prev => ({ ...prev, dest: e.target.value }))} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+                  <option value="Parceiro">Parceiro</option>
+                  <option value="Gerente">Gerente</option>
+                  <option value="Superior hierárquico">Superior hierárquico</option>
+                  <option value="Diretor">Diretor</option>
+                </select>
+              </div>
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.5 }}>Tipo</label>
+                <select value={cadEditModal.tipo} onChange={e => setCadEditModal(prev => ({ ...prev, tipo: e.target.value }))} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+                  <option value="status">📋 Status</option>
+                  <option value="financeiro">💰 Financeiro</option>
+                  <option value="liberacao">🔓 Liberação</option>
+                  <option value="sistema">⚙️ Sistema</option>
+                </select>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <label style={{ fontSize: 13, fontWeight: 600, color: T.txt }}>Ativo</label>
+                <button onClick={() => setCadEditModal(prev => ({ ...prev, ativo: !prev.ativo }))} style={{ width: 48, height: 26, borderRadius: 13, border: "none", cursor: "pointer", position: "relative", background: cadEditModal.ativo ? T.ac : T.bor, transition: "background 0.2s" }}>
+                  <div style={{ width: 20, height: 20, borderRadius: "50%", background: "#fff", position: "absolute", top: 3, left: cadEditModal.ativo ? 25 : 3, transition: "all 0.2s", boxShadow: "0 1px 4px rgba(0,0,0,0.2)" }} />
+                </button>
+              </div>
+            </div>
+          )}
+        </Modal>
 
         {/* Segmented Communication */}
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20, marginBottom: 16 }}>
@@ -2161,7 +2216,7 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
 // ===== FINANCEIRO =====
 function fmtBRL(v) { return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }); }
 
-function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs }) {
+function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cadenceRules }) {
   const { user } = useAuth();
   const isParceiro = user.role === "parceiro";
   const isAdmin = user.role === "super_admin" || user.role === "diretor" || user.role === "executivo";
@@ -2191,7 +2246,9 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs }) {
     setCommModal(false);
     setCf({ pId: "", titulo: "", periodo: "", valor: "" });
     // Notify parceiro about commission report
-    addNotif(setNotifs, { tipo: "financeiro", titulo: "Relatório de comissão", msg: `Novo relatório de comissão: ${cf.titulo} — R$ ${parseFloat(cf.valor).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}.`, para: cf.pId, de: user.id, link: "fin" });
+    if (isCadenceActive(cadenceRules, "cad_comissao")) {
+      addNotif(setNotifs, { tipo: "financeiro", titulo: "Relatório de comissão", msg: `Novo relatório de comissão: ${cf.titulo} — R$ ${parseFloat(cf.valor).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}.`, para: cf.pId, de: user.id, link: "fin" });
+    }
   };
 
   const addNfe = () => {
@@ -2204,7 +2261,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs }) {
     setNfeModal(false);
     setNf({ num: "", valor: "", arq: "" });
     // Notify gerente about NFe
-    if (user.gId) {
+    if (user.gId && isCadenceActive(cadenceRules, "cad_nfe_enviada")) {
       addNotif(setNotifs, { tipo: "financeiro", titulo: "NFe recebida", msg: `Parceiro ${user.name} enviou ${nf.num} — R$ ${parseFloat(nf.valor).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}.`, para: user.gId, de: user.id, link: "fin" });
     }
   };
@@ -2213,7 +2270,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs }) {
     const nfe = nfes.find(n => n.id === nfeId);
     setNfes(prev => prev.map(n => n.id === nfeId ? { ...n, st: "pago", pgDt: new Date().toISOString().split("T")[0] } : n));
     // Notify parceiro about payment
-    if (nfe?.pId) {
+    if (nfe?.pId && isCadenceActive(cadenceRules, "cad_nfe_paga")) {
       addNotif(setNotifs, { tipo: "financeiro", titulo: "NFe paga", msg: `Sua ${nfe.num} foi marcada como paga.`, para: nfe.pId, de: user.id, link: "fin" });
     }
   };
@@ -2616,6 +2673,10 @@ export default function App() {
   const [mats, setMats] = useState([]);
   const [notifs, setNotifs] = useState([]);
   const [travaDias, setTravaDias] = useState(90);
+  const [cadenceRules, setCadenceRules] = useState(() => {
+    const saved = localStorage.getItem("cadenceRules");
+    return saved ? JSON.parse(saved) : DEFAULT_CADENCE;
+  });
   const [theme, setThemeState] = useState(null);
   const [collapsed, setCollapsed] = useState(false);
   const [dataLoading, setDataLoading] = useState(false);
@@ -2722,6 +2783,11 @@ export default function App() {
       setDataLoading(false);
     }
   }, [user]);
+
+  // Persist cadence rules
+  useEffect(() => {
+    localStorage.setItem("cadenceRules", JSON.stringify(cadenceRules));
+  }, [cadenceRules]);
 
   // Load data when user changes
   useEffect(() => {
@@ -2880,13 +2946,13 @@ export default function App() {
           </div>
           <div style={{ padding: "24px 28px" }}>
             {pg === "dash" && <Dash inds={inds} users={users} comms={comms} nfes={nfes} />}
-            {pg === "kanban" && <KanbanPage inds={inds} setInds={setInds} users={users} travaDias={travaDias} notifs={notifs} setNotifs={setNotifs} />}
-            {pg === "inds" && <MinhasInd inds={inds} setInds={setInds} notifs={notifs} setNotifs={setNotifs} users={users} />}
+            {pg === "kanban" && <KanbanPage inds={inds} setInds={setInds} users={users} travaDias={travaDias} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} />}
+            {pg === "inds" && <MinhasInd inds={inds} setInds={setInds} notifs={notifs} setNotifs={setNotifs} users={users} cadenceRules={cadenceRules} />}
             {pg === "parcs" && <ParcPage users={users} setUsers={setUsers} inds={inds} />}
-            {pg === "fin" && <FinPage comms={comms} setComms={setComms} nfes={nfes} setNfes={setNfes} users={users} notifs={notifs} setNotifs={setNotifs} />}
+            {pg === "fin" && <FinPage comms={comms} setComms={setComms} nfes={nfes} setNfes={setNfes} users={users} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} />}
             {pg === "mats" && <MatsPage mats={mats} />}
             {pg === "notifs" && <NotifsPage notifs={notifs} setNotifs={setNotifs} users={users} userId={user.id} />}
-            {pg === "cfg" && <CfgPage mats={mats} setMats={setMats} users={users} setUsers={setUsers} travaDias={travaDias} setTravaDias={setTravaDias} notifs={notifs} setNotifs={setNotifs} />}
+            {pg === "cfg" && <CfgPage mats={mats} setMats={setMats} users={users} setUsers={setUsers} travaDias={travaDias} setTravaDias={setTravaDias} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} setCadenceRules={setCadenceRules} />}
           </div>
         </main>
       </div>

@@ -1,9 +1,9 @@
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../config/database.js';
-// hasPermission import available for future use
 import { authenticate } from '../middleware/auth.js';
 import { requireMinRole } from '../middleware/rbac.js';
+import { sendNotificationEmail } from '../services/emailService.js';
 
 const router = express.Router();
 
@@ -139,6 +139,18 @@ router.post('/send', authenticate, requireMinRole('diretor'), (req, res) => {
       `).run(id, uid, title, message, type, link || null);
 
       notifications.push({ id, user_id: uid, title, message, type, link });
+
+      // Fire-and-forget email
+      const user = db.prepare('SELECT email FROM users WHERE id = ?').get(uid);
+      if (user?.email) {
+        sendNotificationEmail({ to: user.email, title, message })
+          .then(sent => {
+            if (sent) {
+              db.prepare('UPDATE notifications SET email_sent = 1 WHERE id = ?').run(id);
+            }
+          })
+          .catch(err => console.error('[Email] Error:', err.message));
+      }
     }
 
     res.status(201).json({ notifications });
@@ -175,6 +187,18 @@ router.post('/broadcast', authenticate, requireMinRole('executivo'), (req, res) 
       `).run(id, user.id, title, message, type, link || null);
 
       notifications.push({ id, user_id: user.id });
+
+      // Fire-and-forget email
+      const fullUser = db.prepare('SELECT email FROM users WHERE id = ?').get(user.id);
+      if (fullUser?.email) {
+        sendNotificationEmail({ to: fullUser.email, title, message })
+          .then(sent => {
+            if (sent) {
+              db.prepare('UPDATE notifications SET email_sent = 1 WHERE id = ?').run(id);
+            }
+          })
+          .catch(err => console.error('[Email] Error:', err.message));
+      }
     }
 
     res.status(201).json({

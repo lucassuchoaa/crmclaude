@@ -205,6 +205,12 @@ export function initializeDatabase() {
     )
   `);
 
+  // Migrate notifications table: add email_sent column
+  const notifColumns = db.pragma('table_info(notifications)').map(c => c.name);
+  if (!notifColumns.includes('email_sent')) {
+    db.exec(`ALTER TABLE notifications ADD COLUMN email_sent INTEGER DEFAULT 0`);
+  }
+
   // Settings table (for HubSpot API keys, etc.)
   db.exec(`
     CREATE TABLE IF NOT EXISTS settings (
