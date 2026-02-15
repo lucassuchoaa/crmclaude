@@ -1,21 +1,83 @@
-import { useState, createContext, useContext } from "react";
+import { useState, useEffect, createContext, useContext, useCallback } from "react";
+import { authApi, usersApi, indicationsApi, commissionsApi, nfesApi, materialsApi, notificationsApi, cnpjApi, hubspotApi, setTokens, clearTokens } from "./services/api";
 
 const AuthCtx = createContext(null);
 const useAuth = () => useContext(AuthCtx);
 
-const ALL_USERS = [
-  { id: "sa1", email: "admin@somapay.com.br", pw: "admin123", name: "Super Admin", role: "super_admin", av: "SA" },
-  { id: "e1", email: "executivo@somapay.com.br", pw: "exe123", name: "Ricardo Executivo", role: "executivo", av: "RE" },
-  { id: "d1", email: "diretoria@somapay.com.br", pw: "dir123", name: "Carlos Diretor", role: "diretor", av: "CD", eId: "e1" },
-  { id: "d2", email: "diretoria2@somapay.com.br", pw: "dir123", name: "Lucia Diretora", role: "diretor", av: "LD", eId: "e1" },
-  { id: "g1", email: "gerente1@somapay.com.br", pw: "ger123", name: "Ana Gerente", role: "gerente", av: "AG", dId: "d1" },
-  { id: "g2", email: "gerente2@somapay.com.br", pw: "ger123", name: "Bruno Gerente", role: "gerente", av: "BG", dId: "d1" },
-  { id: "g3", email: "gerente3@somapay.com.br", pw: "ger123", name: "Carla Gerente", role: "gerente", av: "CG", dId: "d2" },
-  { id: "p1", email: "parceiro1@email.com", pw: "par123", name: "João Parceiro", role: "parceiro", gId: "g1", empresa: "JM Consultoria", tel: "(85) 99999-1111", comTipo: "pct", comVal: 1.5 },
-  { id: "p2", email: "parceiro2@email.com", pw: "par123", name: "Maria Parceira", role: "parceiro", gId: "g1", empresa: "MP Assessoria", tel: "(85) 99999-2222", comTipo: "valor", comVal: 4.00 },
-  { id: "p3", email: "parceiro3@email.com", pw: "par123", name: "Pedro Parceiro", role: "parceiro", gId: "g2", empresa: "PP Negócios", tel: "(85) 99999-3333", comTipo: "pct", comVal: 1.2 },
-  { id: "p4", email: "parceiro4@email.com", pw: "par123", name: "Rafaela Parceira", role: "parceiro", gId: "g3", empresa: "RF Digital", tel: "(85) 99999-4444", comTipo: "valor", comVal: 5.00 },
-];
+// User data loaded from API - no passwords in frontend code
+const ALL_USERS_INITIAL = [];
+
+// Transform API user data to match frontend structure
+const transformUser = (u) => ({
+  id: u.id,
+  email: u.email,
+  name: u.name,
+  role: u.role,
+  av: u.avatar || u.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase(),
+  empresa: u.empresa,
+  tel: u.tel,
+  comTipo: u.com_tipo,
+  comVal: u.com_val,
+  eId: u.role === 'diretor' ? u.manager_id : undefined,
+  dId: u.role === 'gerente' ? u.manager_id : undefined,
+  gId: u.role === 'parceiro' ? u.manager_id : undefined,
+});
+
+// Transform API indication data to match frontend structure
+const transformIndication = (ind) => {
+  // Parse notes JSON for extra data stored there
+  let notesData = {};
+  try {
+    if (ind.notes) notesData = JSON.parse(ind.notes);
+  } catch {
+    notesData = {};
+  }
+
+  return {
+    id: ind.id,
+    emp: ind.nome_fantasia || ind.razao_social,
+    cnpj: ind.cnpj,
+    cont: ind.contato_nome,
+    tel: ind.contato_telefone,
+    em: ind.contato_email,
+    nf: notesData.nf || ind.num_funcionarios || ind.value,
+    st: notesData.kanbSt || mapStatusToKanban(ind.status),
+    pId: ind.owner_id,
+    gId: ind.manager_id,
+    hsId: notesData.hsId || ind.hubspot_id,
+    hsSt: notesData.hsSt || ind.hubspot_status,
+    lib: notesData.lib || ind.liberacao_status,
+    libDt: notesData.libDt || ind.liberacao_data,
+    libExp: notesData.libExp || ind.liberacao_expiry,
+    dt: ind.created_at?.split('T')[0] || ind.created_at,
+    obs: typeof ind.notes === 'string' && !ind.notes.startsWith('{') ? ind.notes : '',
+    razao: ind.razao_social,
+    fantasia: ind.nome_fantasia,
+    capital: notesData.capital || (ind.capital ? formatCapital(ind.capital) : null),
+    abertura: notesData.abertura || ind.abertura,
+    cnae: notesData.cnae || ind.cnae,
+    endereco: notesData.endereco || ind.endereco,
+    hist: [],
+  };
+};
+
+// Map DB status to Kanban status (fallback if kanbSt not in notes)
+const mapStatusToKanban = (dbStatus) => {
+  const map = {
+    'novo': 'nova',
+    'em_contato': 'analise',
+    'proposta': 'docs',
+    'negociacao': 'aprovado',
+    'fechado': 'ativo',
+    'perdido': 'recusado',
+  };
+  return map[dbStatus] || 'nova';
+};
+
+const formatCapital = (val) => {
+  if (typeof val === 'number') return val.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+  return val;
+};
 
 const KCOLS = [
   { id: "nova", label: "Nova Indicação", co: "#6366f1" },
@@ -27,43 +89,7 @@ const KCOLS = [
   { id: "recusado", label: "Recusado", co: "#ef4444" },
 ];
 
-const INDS0 = [
-  { id: "i1", emp: "Tech Solutions LTDA", cnpj: "44.555.666/0001-77", cont: "Roberto Silva", tel: "(85) 98888-1111", em: "roberto@techsol.com", nf: 150, st: "analise", pId: "p1", gId: "g1", hsId: "HS-001", hsSt: "open", lib: "liberado", libDt: "2025-01-16", libExp: "2025-04-16", dt: "2025-01-15", obs: "Grande potencial", razao: "Tech Solutions Ltda", fantasia: "TechSol", capital: "500.000,00", abertura: "2015-03-10", cnae: "62.01-5-01 - Desenvolvimento de software", endereco: "Rua das Flores, 123 - Aldeota, Fortaleza/CE", hist: [{ dt: "2025-01-15 09:30", autor: "João Parceiro", txt: "Indicação criada" }, { dt: "2025-01-16 14:20", autor: "Ana Gerente", txt: "Oportunidade liberada. Prazo 90 dias." }] },
-  { id: "i2", emp: "Construtora Norte", cnpj: "55.666.777/0001-88", cont: "Fernanda Lima", tel: "(85) 97777-2222", em: "fernanda@cn.com", nf: 300, st: "nova", pId: "p1", gId: "g1", hsId: null, hsSt: null, lib: null, libDt: null, libExp: null, dt: "2025-02-01", obs: "", razao: "Construtora Norte S.A.", fantasia: "Norte Construções", capital: "2.000.000,00", abertura: "2008-07-22", cnae: "41.20-4-00 - Construção de edifícios", endereco: "Av. Santos Dumont, 1500 - Centro, Fortaleza/CE", hist: [{ dt: "2025-02-01 10:00", autor: "João Parceiro", txt: "Indicação criada" }] },
-  { id: "i3", emp: "Agro Ceará SA", cnpj: "66.777.888/0001-99", cont: "Marcos Oliveira", tel: "(85) 96666-3333", em: "marcos@agro.com", nf: 500, st: "docs", pId: "p2", gId: "g1", hsId: "HS-002", hsSt: "open", lib: "liberado", libDt: "2025-01-21", libExp: "2025-04-21", dt: "2025-01-20", obs: "Docs pendentes", razao: "Agro Ceará S.A.", fantasia: "AgroCE", capital: "10.000.000,00", abertura: "2001-11-05", cnae: "01.11-3-01 - Cultivo de arroz", endereco: "Rod. BR-116, Km 20 - Eusébio/CE", hist: [{ dt: "2025-01-20 11:15", autor: "Maria Parceira", txt: "Indicação criada" }, { dt: "2025-01-21 09:00", autor: "Ana Gerente", txt: "Liberado. Aguardando documentação." }] },
-  { id: "i4", emp: "Logística Express", cnpj: "77.888.999/0001-00", cont: "Carla Souza", tel: "(85) 95555-4444", em: "carla@log.com", nf: 80, st: "aprovado", pId: "p3", gId: "g2", hsId: "HS-003", hsSt: "won", lib: "liberado", libDt: "2024-12-11", libExp: "2025-03-11", dt: "2024-12-10", obs: "Concluído", razao: "Logística Express Ltda", fantasia: "LogExpress", capital: "800.000,00", abertura: "2012-01-15", cnae: "49.30-2-02 - Transporte rodoviário de carga", endereco: "Rua A, 500 - Distrito Industrial, Maracanaú/CE", hist: [{ dt: "2024-12-10 08:45", autor: "Pedro Parceiro", txt: "Indicação criada" }, { dt: "2024-12-11 16:30", autor: "Bruno Gerente", txt: "Aprovado e liberado." }] },
-  { id: "i5", emp: "Escola Futuro", cnpj: "88.999.000/0001-11", cont: "Paula Santos", tel: "(85) 94444-5555", em: "paula@ef.com", nf: 45, st: "implant", pId: "p3", gId: "g2", hsId: "HS-004", hsSt: "open", lib: "liberado", libDt: "2025-01-06", libExp: "2025-04-06", dt: "2025-01-05", obs: "Implantando", razao: "Escola Futuro Ltda", fantasia: "Escola Futuro", capital: "300.000,00", abertura: "2018-02-28", cnae: "85.13-9-00 - Ensino fundamental", endereco: "Rua Prof. João Bosco, 88 - Meireles, Fortaleza/CE", hist: [{ dt: "2025-01-05 13:00", autor: "Pedro Parceiro", txt: "Indicação criada" }, { dt: "2025-01-06 10:20", autor: "Bruno Gerente", txt: "Em implantação." }] },
-  { id: "i6", emp: "Farmácia Vida", cnpj: "99.000.111/0001-22", cont: "Lucas Mendes", tel: "(85) 93333-6666", em: "lucas@fv.com", nf: 25, st: "recusado", pId: "p1", gId: "g1", hsId: "HS-005", hsSt: "lost", lib: "bloqueado", libDt: null, libExp: null, dt: "2025-01-25", obs: "Abaixo do mínimo de funcionários", razao: "Farmácia Vida Ltda ME", fantasia: "Farmácia Vida", capital: "50.000,00", abertura: "2020-06-10", cnae: "47.71-7-01 - Comércio varejista de produtos farmacêuticos", endereco: "Rua Barão de Aracati, 45 - Joaquim Távora, Fortaleza/CE", hist: [{ dt: "2025-01-25 15:00", autor: "João Parceiro", txt: "Indicação criada" }, { dt: "2025-01-26 11:00", autor: "Ana Gerente", txt: "Bloqueado — abaixo do mínimo de funcionários." }] },
-  { id: "i7", emp: "Hospital São José", cnpj: "10.111.222/0001-33", cont: "Dra. Ana Beatriz", tel: "(85) 92222-7777", em: "ana@hsj.com", nf: 800, st: "ativo", pId: "p2", gId: "g1", hsId: "HS-006", hsSt: "won", lib: "liberado", libDt: "2024-11-16", libExp: "2025-02-16", dt: "2024-11-15", obs: "Ativo e satisfeito", razao: "Hospital São José S.A.", fantasia: "HSJ", capital: "25.000.000,00", abertura: "1995-04-01", cnae: "86.10-1-01 - Atividades de atendimento hospitalar", endereco: "Av. Imperador, 545 - Centro, Fortaleza/CE", hist: [{ dt: "2024-11-15 09:00", autor: "Maria Parceira", txt: "Indicação criada" }, { dt: "2024-11-16 14:00", autor: "Ana Gerente", txt: "Liberado para implantação." }, { dt: "2024-12-20 10:30", autor: "Ana Gerente", txt: "Cliente ativo. Folha processada com sucesso." }] },
-  { id: "i8", emp: "Padaria Central", cnpj: "11.222.333/0001-44", cont: "Seu José", tel: "(85) 91111-8888", em: "jose@padaria.com", nf: 35, st: "nova", pId: "p4", gId: "g3", hsId: null, hsSt: null, lib: null, libDt: null, libExp: null, dt: "2025-02-10", obs: "", razao: "Padaria Central Ltda", fantasia: "Padaria Central", capital: "150.000,00", abertura: "2010-05-20", cnae: "10.91-1-02 - Fabricação de produtos de padaria", endereco: "Rua Major Facundo, 200 - Centro, Fortaleza/CE", hist: [{ dt: "2025-02-10 11:00", autor: "Rafaela Parceira", txt: "Indicação criada" }] },
-  { id: "i9", emp: "Auto Peças Ceará", cnpj: "12.333.444/0001-55", cont: "Marcos Reis", tel: "(85) 90000-9999", em: "marcos@autoce.com", nf: 120, st: "analise", pId: "p4", gId: "g3", hsId: "HS-007", hsSt: "open", lib: "liberado", libDt: "2025-02-05", libExp: "2025-05-05", dt: "2025-02-03", obs: "Grande rede de lojas", razao: "Auto Peças Ceará S.A.", fantasia: "AutoCE", capital: "3.000.000,00", abertura: "2005-08-15", cnae: "45.30-7-03 - Comércio de peças para veículos", endereco: "Av. Bezerra de Menezes, 1800 - São Gerardo, Fortaleza/CE", hist: [{ dt: "2025-02-03 09:30", autor: "Rafaela Parceira", txt: "Indicação criada" }, { dt: "2025-02-05 14:00", autor: "Carla Gerente", txt: "Liberado. Rede com 3 filiais." }] },
-];
-
-const MATS = [
-  { id: "m1", t: "Apresentação Comercial 2025", tipo: "pdf", cat: "comercial", sz: "2.4 MB", dt: "2025-01-10" },
-  { id: "m2", t: "Tabela de Comissionamento", tipo: "xlsx", cat: "financeiro", sz: "540 KB", dt: "2025-01-15" },
-  { id: "m3", t: "Manual do Parceiro", tipo: "pdf", cat: "treinamento", sz: "5.1 MB", dt: "2024-12-20" },
-  { id: "m4", t: "Vídeo - Como Indicar", tipo: "mp4", cat: "treinamento", sz: "45 MB", dt: "2025-01-05" },
-  { id: "m5", t: "Modelo de Proposta", tipo: "docx", cat: "comercial", sz: "1.2 MB", dt: "2025-02-01" },
-  { id: "m6", t: "FAQ - Perguntas Frequentes", tipo: "pdf", cat: "suporte", sz: "890 KB", dt: "2025-01-20" },
-  { id: "m7", t: "Regulamento do Programa", tipo: "pdf", cat: "legal", sz: "1.8 MB", dt: "2024-11-10" },
-  { id: "m8", t: "Cases de Sucesso 2024", tipo: "pdf", cat: "comercial", sz: "3.2 MB", dt: "2025-01-30" },
-];
-
-const COMMS0 = [
-  { id: "c1", pId: "p1", titulo: "Comissão Janeiro 2025", periodo: "Jan/2025", valor: 2450.00, arq: "comissao_jan25_joao.pdf", dt: "2025-02-05", by: "g1" },
-  { id: "c2", pId: "p2", titulo: "Comissão Janeiro 2025", periodo: "Jan/2025", valor: 3820.50, arq: "comissao_jan25_maria.pdf", dt: "2025-02-05", by: "g1" },
-  { id: "c3", pId: "p3", titulo: "Comissão Janeiro 2025", periodo: "Jan/2025", valor: 1200.00, arq: "comissao_jan25_pedro.pdf", dt: "2025-02-06", by: "g2" },
-  { id: "c4", pId: "p1", titulo: "Comissão Dezembro 2024", periodo: "Dez/2024", valor: 1890.75, arq: "comissao_dez24_joao.pdf", dt: "2025-01-05", by: "g1" },
-  { id: "c5", pId: "p2", titulo: "Comissão Dezembro 2024", periodo: "Dez/2024", valor: 4100.00, arq: "comissao_dez24_maria.pdf", dt: "2025-01-05", by: "g1" },
-];
-
-const NFES0 = [
-  { id: "nf1", pId: "p1", num: "NFe 001234", valor: 2450.00, arq: "nfe_001234.pdf", dt: "2025-02-06", st: "pago", pgDt: "2025-02-15" },
-  { id: "nf2", pId: "p2", num: "NFe 005678", valor: 3820.50, arq: "nfe_005678.pdf", dt: "2025-02-07", st: "pendente", pgDt: null },
-  { id: "nf3", pId: "p3", num: "NFe 009012", valor: 1200.00, arq: "nfe_009012.pdf", dt: "2025-02-08", st: "pendente", pgDt: null },
-  { id: "nf4", pId: "p1", num: "NFe 000890", valor: 1890.75, arq: "nfe_000890.pdf", dt: "2025-01-06", st: "pago", pgDt: "2025-01-20" },
-];
+// Data is loaded from API - no hardcoded sensitive data
 
 const NOTIF_TYPES = {
   status: { emoji: "📋", label: "Status", color: "#6366f1" },
@@ -73,16 +99,7 @@ const NOTIF_TYPES = {
   sistema: { emoji: "⚙️", label: "Sistema", color: "#3b82f6" },
 };
 
-const NOTIFS0 = [
-  { id: "nt1", tipo: "status", titulo: "Status alterado", msg: "Indicação Tech Solutions LTDA movida para Em Análise.", dt: "2025-02-10 14:30", lido: false, para: "p1", de: "g1", link: "kanban" },
-  { id: "nt2", tipo: "financeiro", titulo: "Relatório de comissão", msg: "Novo relatório de comissão: Comissão Janeiro 2025 — R$ 2.450,00.", dt: "2025-02-05 10:15", lido: true, para: "p1", de: "g1", link: "fin" },
-  { id: "nt3", tipo: "liberacao", titulo: "Oportunidade liberada", msg: "Sua indicação Digital Commerce SA foi liberada. Trava: 90 dias.", dt: "2025-02-08 09:00", lido: false, para: "p2", de: "g1", link: "kanban" },
-  { id: "nt4", tipo: "status", titulo: "Indicação aprovada", msg: "Indicação MegaPay Serviços foi aprovada e está ativa.", dt: "2025-02-07 16:45", lido: false, para: "d1", de: "g2", link: "kanban" },
-  { id: "nt5", tipo: "financeiro", titulo: "NFe recebida", msg: "Parceiro João Silva enviou NFe 001234 — R$ 2.450,00.", dt: "2025-02-06 11:20", lido: true, para: "g1", de: "p1", link: "fin" },
-  { id: "nt6", tipo: "sistema", titulo: "Nova indicação", msg: "Parceiro Maria Santos criou nova indicação: FinTech Brasil LTDA.", dt: "2025-02-09 08:30", lido: false, para: "g1", de: "p2", link: "kanban" },
-  { id: "nt7", tipo: "comunicado", titulo: "Novo material disponível", msg: "Apresentação Comercial 2025 foi adicionada à biblioteca de materiais.", dt: "2025-01-10 12:00", lido: true, para: "*", de: "sa1", link: "mats" },
-  { id: "nt8", tipo: "financeiro", titulo: "NFe paga", msg: "Sua NFe 000890 foi marcada como paga.", dt: "2025-01-20 15:30", lido: true, para: "p1", de: "sa1", link: "fin" },
-];
+// Notifications loaded from API
 
 function addNotif(setNotifs, { tipo, titulo, msg, para, de, link }) {
   const n = { id: "nt" + Date.now() + Math.random().toString(36).slice(2, 5), tipo, titulo, msg, dt: new Date().toISOString().replace("T", " ").slice(0, 16), lido: false, para, de, link: link || "notifs" };
@@ -158,11 +175,24 @@ function Login({ onLogin }) {
   const [em, setEm] = useState("");
   const [pw, setPw] = useState("");
   const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const go = () => {
-    const u = ALL_USERS.find(x => x.email === em && x.pw === pw);
-    if (u) onLogin(u);
-    else setErr("E-mail ou senha inválidos");
+  const go = async () => {
+    if (loading) return;
+    setLoading(true);
+    setErr("");
+
+    try {
+      const response = await authApi.login(em, pw);
+      const { user, accessToken, refreshToken } = response.data;
+      setTokens(accessToken, refreshToken);
+      onLogin(transformUser(user));
+    } catch (error) {
+      const message = error.response?.data?.error || "E-mail ou senha inválidos";
+      setErr(message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -178,7 +208,7 @@ function Login({ onLogin }) {
         <Inp label="E-mail" value={em} onChange={v => { setEm(v); setErr(""); }} placeholder="seu@email.com" />
         <Inp label="Senha" value={pw} onChange={v => { setPw(v); setErr(""); }} type="password" placeholder="••••••••" />
         {err && <p style={{ color: T.er, fontSize: 13, textAlign: "center", margin: "8px 0" }}>{err}</p>}
-        <Btn v="primary" full onClick={go} style={{ marginTop: 12, padding: 14 }}>Entrar</Btn>
+        <Btn v="primary" full onClick={go} disabled={loading} style={{ marginTop: 12, padding: 14 }}>{loading ? "Entrando..." : "Entrar"}</Btn>
         <div style={{ marginTop: 20, padding: 14, background: T.inp, borderRadius: 6, fontSize: 11, color: T.tm, lineHeight: 1.9 }}>
           <strong style={{ color: T.t2 }}>Usuários Demo:</strong><br />
           🔑 admin@somapay.com.br / admin123<br />
@@ -1347,11 +1377,6 @@ function ParcPage({ users, setUsers, inds }) {
 }
 
 // ===== MINHAS INDICAÇÕES =====
-const CNPJ_DB = {
-  "11.222.333/0001-44": { razao: "Padaria Pão Quente Ltda", fantasia: "Pão Quente", capital: "120.000,00", abertura: "2019-05-12", cnae: "10.91-1-02 - Fabricação de produtos de padaria", endereco: "Rua do Comércio, 200 - Montese, Fortaleza/CE" },
-  "22.333.444/0001-55": { razao: "Clínica Saúde Total S.A.", fantasia: "Saúde Total", capital: "1.500.000,00", abertura: "2010-09-01", cnae: "86.30-5-03 - Atividade médica ambulatorial", endereco: "Av. Abolição, 3000 - Meireles, Fortaleza/CE" },
-  "33.444.555/0001-66": { razao: "Auto Peças Nordeste Ltda", fantasia: "Auto Nordeste", capital: "350.000,00", abertura: "2014-03-20", cnae: "45.30-7-03 - Comércio de peças para veículos", endereco: "Av. Bezerra de Menezes, 1800 - São Gerardo, Fortaleza/CE" },
-};
 
 function MinhasInd({ inds, setInds, notifs, setNotifs, users }) {
   const { user } = useAuth();
@@ -1365,23 +1390,102 @@ function MinhasInd({ inds, setInds, notifs, setNotifs, users }) {
   const my = inds.filter(i => i.pId === user.id);
   const today = new Date().toISOString().split("T")[0];
 
-  const checkHS = () => {
+  const checkHS = async () => {
+    if (!f.cnpj || f.cnpj.replace(/\D/g, '').length < 14) {
+      setHr({ error: true, message: 'CNPJ deve ter 14 dígitos' });
+      return;
+    }
+
     setCk(true); setHr(null); setCnpjData(null);
-    setTimeout(() => {
-      const found = inds.find(i => i.cnpj === f.cnpj);
-      setHr(found ? { found: true, d: found.hsId } : { found: false });
-      // Simulate CNPJ enrichment lookup
-      const enrichment = CNPJ_DB[f.cnpj];
-      if (enrichment) {
+
+    try {
+      // 1. Consulta CNPJ na Receita Federal via BrasilAPI
+      let cnpjResult = null;
+      try {
+        const cnpjRes = await cnpjApi.lookup(f.cnpj);
+        cnpjResult = cnpjRes.data;
+
+        // Formata dados da Receita
+        const enrichment = {
+          razao: cnpjResult.razao_social,
+          fantasia: cnpjResult.nome_fantasia || cnpjResult.razao_social,
+          capital: cnpjResult.capital_social?.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) || '—',
+          abertura: cnpjResult.data_inicio_atividade || '—',
+          cnae: `${cnpjResult.cnae_codigo || ''} - ${cnpjResult.cnae_principal || ''}`.trim() || '—',
+          endereco: cnpjResult.endereco?.completo || '—',
+          telefone: cnpjResult.telefone || '—',
+          email: cnpjResult.email || '—',
+          situacao: cnpjResult.situacao,
+          socios: cnpjResult.socios || []
+        };
+
         setCnpjData(enrichment);
-        setF(prev => ({ ...prev, emp: enrichment.razao }));
-      } else if (!found) {
-        // Simulate a generic response for unknown CNPJs
-        const fake = { razao: f.emp || "Empresa Consultada", fantasia: f.emp || "—", capital: "100.000,00", abertura: "2020-01-01", cnae: "—", endereco: "—" };
-        setCnpjData(fake);
+        setF(prev => ({
+          ...prev,
+          emp: enrichment.razao,
+          tel: enrichment.telefone !== '—' ? enrichment.telefone : prev.tel,
+          em: enrichment.email !== '—' ? enrichment.email : prev.em
+        }));
+      } catch (cnpjError) {
+        console.error('Erro ao consultar CNPJ:', cnpjError);
+        // Se falhar na Receita, ainda tenta consultar HubSpot
+        setCnpjData({
+          razao: f.emp || 'Não encontrado na Receita',
+          fantasia: '—', capital: '—', abertura: '—',
+          cnae: '—', endereco: '—', situacao: 'Erro na consulta'
+        });
       }
+
+      // 2. Consulta HubSpot para verificar empresa e oportunidades
+      try {
+        const hsRes = await hubspotApi.search(f.cnpj);
+        const hsData = hsRes.data;
+
+        if (hsData.found && hsData.hasOpenDeals) {
+          // Empresa encontrada COM oportunidades abertas - BLOQUEIA
+          setHr({
+            found: true,
+            d: hsData.company?.name || 'Empresa',
+            deals: hsData.openDeals,
+            message: `${hsData.openDeals.length} oportunidade(s) aberta(s)`
+          });
+        } else if (hsData.found) {
+          // Empresa encontrada SEM oportunidades abertas - PERMITE
+          setHr({
+            found: false,
+            company: hsData.company,
+            message: 'Empresa no HubSpot sem oportunidades abertas'
+          });
+        } else {
+          // Empresa NÃO encontrada no HubSpot - PERMITE
+          setHr({
+            found: false,
+            localIndication: hsData.localIndication,
+            message: hsData.localIndication
+              ? 'Indicação já existe no sistema local'
+              : 'CNPJ não encontrado no HubSpot - pode indicar'
+          });
+
+          // Se já existe indicação local, bloqueia
+          if (hsData.localIndication) {
+            setHr(prev => ({ ...prev, found: true, d: hsData.localIndication.razao_social }));
+          }
+        }
+      } catch (hsError) {
+        console.error('Erro ao consultar HubSpot:', hsError);
+        // Se HubSpot falhar, verifica apenas localmente
+        const localFound = inds.find(i => i.cnpj.replace(/\D/g, '') === f.cnpj.replace(/\D/g, ''));
+        setHr(localFound
+          ? { found: true, d: localFound.emp, message: 'Já existe indicação local' }
+          : { found: false, message: 'HubSpot indisponível - verificação local OK' }
+        );
+      }
+    } catch (error) {
+      console.error('Erro na consulta:', error);
+      setHr({ error: true, message: 'Erro na consulta. Tente novamente.' });
+    } finally {
       setCk(false);
-    }, 1500);
+    }
   };
 
   const submit = () => {
@@ -1530,22 +1634,60 @@ function MinhasInd({ inds, setInds, notifs, setNotifs, users }) {
             </div>
           </div>
 
-          {hr && <div style={{ gridColumn: "1/-1", padding: 10, borderRadius: 6, background: hr.found ? T.er + "11" : T.ok + "11", border: `1px solid ${hr.found ? T.er : T.ok}33`, fontSize: 12, color: hr.found ? T.er : T.ok }}>
-            {hr.found ? `❌ Deal existente (${hr.d}). Não é possível indicar.` : "✅ Nenhum deal no HubSpot. Pode indicar!"}
+          {/* Resultado HubSpot */}
+          {hr && <div style={{ gridColumn: "1/-1", padding: 12, borderRadius: 6, background: hr.error ? T.wa + "11" : hr.found ? T.er + "11" : T.ok + "11", border: `1px solid ${hr.error ? T.wa : hr.found ? T.er : T.ok}33`, fontSize: 12 }}>
+            {hr.error ? (
+              <div style={{ color: T.wa }}>⚠️ {hr.message}</div>
+            ) : hr.found ? (
+              <div>
+                <div style={{ color: T.er, fontWeight: 600 }}>❌ Não é possível indicar!</div>
+                <div style={{ color: T.t2, marginTop: 4 }}>{hr.message || `Empresa já existe: ${hr.d}`}</div>
+                {hr.deals && hr.deals.length > 0 && (
+                  <div style={{ marginTop: 8, padding: 8, background: T.bg2, borderRadius: 4 }}>
+                    <div style={{ fontSize: 10, color: T.tm, marginBottom: 6 }}>OPORTUNIDADES ABERTAS:</div>
+                    {hr.deals.map((deal, i) => (
+                      <div key={i} style={{ fontSize: 11, color: T.t2, padding: "4px 0", borderBottom: i < hr.deals.length - 1 ? `1px solid ${T.bor}` : 'none' }}>
+                        <strong>{deal.name}</strong> - {deal.stage} {deal.amount && `(R$ ${Number(deal.amount).toLocaleString('pt-BR')})`}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ color: T.ok }}>✅ {hr.message || "Pode indicar!"}</div>
+            )}
           </div>}
 
           {/* CNPJ Enrichment Result */}
-          {cnpjData && !hr?.found && (
-            <div style={{ gridColumn: "1/-1", padding: 14, background: T.inp, borderRadius: 8, border: `1px solid ${T.inf}33` }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: T.inf, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>📋 Dados da Receita Federal</div>
+          {cnpjData && (
+            <div style={{ gridColumn: "1/-1", padding: 14, background: T.inp, borderRadius: 8, border: `1px solid ${cnpjData.situacao === 'ATIVA' ? T.ok : T.wa}33` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: T.inf, textTransform: "uppercase", letterSpacing: 0.5 }}>📋 Dados da Receita Federal</div>
+                {cnpjData.situacao && (
+                  <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 4, background: cnpjData.situacao === 'ATIVA' ? T.ok + '22' : T.wa + '22', color: cnpjData.situacao === 'ATIVA' ? T.ok : T.wa, fontWeight: 600 }}>
+                    {cnpjData.situacao}
+                  </span>
+                )}
+              </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 16px", fontSize: 12 }}>
-                {[["Razão Social", cnpjData.razao], ["Nome Fantasia", cnpjData.fantasia], ["Capital Social", `R$ ${cnpjData.capital}`], ["Data Abertura", cnpjData.abertura], ["CNAE", cnpjData.cnae], ["Endereço", cnpjData.endereco]].map(([l, v], i) => (
+                {[["Razão Social", cnpjData.razao], ["Nome Fantasia", cnpjData.fantasia], ["Capital Social", `R$ ${cnpjData.capital}`], ["Data Abertura", cnpjData.abertura], ["CNAE", cnpjData.cnae], ["Endereço", cnpjData.endereco], ["Telefone", cnpjData.telefone], ["E-mail", cnpjData.email]].map(([l, v], i) => (
                   <div key={i} style={{ padding: "4px 0" }}>
                     <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>{l}</div>
-                    <div style={{ color: T.t2, marginTop: 2 }}>{v}</div>
+                    <div style={{ color: T.t2, marginTop: 2 }}>{v || '—'}</div>
                   </div>
                 ))}
               </div>
+              {cnpjData.socios && cnpjData.socios.length > 0 && (
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.bor}` }}>
+                  <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", marginBottom: 6 }}>👥 Sócios ({cnpjData.socios.length})</div>
+                  {cnpjData.socios.slice(0, 3).map((s, i) => (
+                    <div key={i} style={{ fontSize: 11, color: T.t2, padding: "3px 0" }}>
+                      {s.nome} <span style={{ color: T.tm }}>({s.qualificacao})</span>
+                    </div>
+                  ))}
+                  {cnpjData.socios.length > 3 && <div style={{ fontSize: 10, color: T.tm }}>+{cnpjData.socios.length - 3} sócio(s)</div>}
+                </div>
+              )}
             </div>
           )}
 
@@ -2467,21 +2609,149 @@ const EMO = { dash: "📊", kanban: "📋", inds: "🏢", parcs: "👥", fin: "�
 export default function App() {
   const [user, setUser] = useState(null);
   const [pg, setPg] = useState("dash");
-  const [users, setUsers] = useState([...ALL_USERS]);
-  const [inds, setInds] = useState([...INDS0]);
-  const [comms, setComms] = useState([...COMMS0]);
-  const [nfes, setNfes] = useState([...NFES0]);
-  const [mats, setMats] = useState([...MATS]);
-  const [notifs, setNotifs] = useState([...NOTIFS0]);
+  const [users, setUsers] = useState([]);
+  const [inds, setInds] = useState([]);
+  const [comms, setComms] = useState([]);
+  const [nfes, setNfes] = useState([]);
+  const [mats, setMats] = useState([]);
+  const [notifs, setNotifs] = useState([]);
   const [travaDias, setTravaDias] = useState(90);
-  const [theme, setThemeState] = useState(null); // null = not chosen yet
+  const [theme, setThemeState] = useState(null);
   const [collapsed, setCollapsed] = useState(false);
+  const [dataLoading, setDataLoading] = useState(false);
   const [, forceUpdate] = useState(0);
+
+  // Check for existing session on mount
+  useEffect(() => {
+    const checkAuth = async () => {
+      const token = localStorage.getItem('accessToken');
+      if (token) {
+        try {
+          const response = await authApi.me();
+          setUser(transformUser(response.data.user));
+        } catch {
+          clearTokens();
+        }
+      }
+    };
+    checkAuth();
+  }, []);
+
+  // Load all data when user logs in
+  const loadAllData = useCallback(async () => {
+    if (!user) return;
+    setDataLoading(true);
+
+    try {
+      // Fetch all data in parallel
+      const [usersRes, indsRes, matsRes, notifsRes] = await Promise.all([
+        usersApi.getAll(),
+        indicationsApi.getAll(),
+        materialsApi.getAll(),
+        notificationsApi.getAll(),
+      ]);
+
+      // Transform and set users
+      const transformedUsers = (usersRes.data.users || usersRes.data || []).map(transformUser);
+      setUsers(transformedUsers);
+
+      // Transform and set indications
+      const transformedInds = (indsRes.data.indications || indsRes.data || []).map(transformIndication);
+      setInds(transformedInds);
+
+      // Set materials
+      const materials = (matsRes.data.materials || matsRes.data || []).map(m => ({
+        id: m.id,
+        t: m.title,
+        tipo: m.file_type,
+        cat: m.category,
+        sz: m.description?.match(/Tamanho: ([^|]+)/)?.[1] || "—",
+        dt: m.created_at?.split('T')[0] || m.created_at,
+      }));
+      setMats(materials);
+
+      // Set notifications
+      const notifications = (notifsRes.data.notifications || notifsRes.data || []).map(n => ({
+        id: n.id,
+        tipo: n.type === 'success' ? 'liberacao' : n.type === 'warning' ? 'comunicado' : n.type === 'info' ? 'status' : 'sistema',
+        titulo: n.title,
+        msg: n.message,
+        dt: n.created_at?.replace('T', ' ').slice(0, 16) || n.created_at,
+        lido: n.is_read,
+        para: n.user_id,
+        de: 'sa1',
+        link: n.link || 'notifs',
+      }));
+      setNotifs(notifications);
+
+      // Load commissions and NFes based on role
+      if (['super_admin', 'executivo', 'diretor', 'gerente', 'parceiro'].includes(user.role)) {
+        try {
+          const commsRes = await commissionsApi.getAll();
+          const commissions = (commsRes.data.commissions || commsRes.data || []).map(c => ({
+            id: c.id,
+            pId: c.user_id,
+            titulo: `Comissão`,
+            periodo: c.created_at?.slice(0, 7) || '',
+            valor: c.amount,
+            arq: null,
+            dt: c.created_at?.split('T')[0] || c.created_at,
+            by: c.manager_id || 'g1',
+          }));
+          setComms(commissions);
+
+          const nfesRes = await nfesApi.getAll();
+          const nfesData = (nfesRes.data.nfes || nfesRes.data || []).map(n => ({
+            id: n.id,
+            pId: n.user_id,
+            num: n.number,
+            valor: n.value,
+            arq: n.file_path,
+            dt: n.created_at?.split('T')[0] || n.created_at,
+            st: n.status === 'paid' ? 'pago' : 'pendente',
+            pgDt: n.payment_date,
+          }));
+          setNfes(nfesData);
+        } catch {
+          // Financial data may not be available for all users
+        }
+      }
+    } catch (error) {
+      console.error('Error loading data:', error);
+    } finally {
+      setDataLoading(false);
+    }
+  }, [user]);
+
+  // Load data when user changes
+  useEffect(() => {
+    if (user) {
+      loadAllData();
+    }
+  }, [user, loadAllData]);
 
   const applyTheme = (mode) => {
     setTheme(mode);
     setThemeState(mode);
     forceUpdate(n => n + 1);
+  };
+
+  const handleLogout = async () => {
+    try {
+      await authApi.logout();
+    } catch {
+      // Ignore logout errors
+    } finally {
+      clearTokens();
+      setUser(null);
+      setThemeState(null);
+      setUsers([]);
+      setInds([]);
+      setComms([]);
+      setNfes([]);
+      setMats([]);
+      setNotifs([]);
+    }
   };
 
   // Theme chooser screen (after login, before dashboard)
@@ -2594,7 +2864,7 @@ export default function App() {
               style={{ display: "flex", alignItems: "center", justifyContent: collapsed ? "center" : "flex-start", gap: 10, padding: collapsed ? "10px 0" : "10px 12px", borderRadius: 6, color: T.t2, fontSize: 13, cursor: "pointer", border: "none", background: "transparent", width: "100%", textAlign: "left", fontFamily: "'DM Sans',sans-serif", marginTop: 4 }}>
               <span>{theme === "dark" ? "☀️" : "🌙"}</span>{!collapsed && <span>{theme === "dark" ? "Modo Claro" : "Modo Escuro"}</span>}
             </button>
-            <button onClick={() => { setUser(null); setThemeState(null); }} title="Sair"
+            <button onClick={handleLogout} title="Sair"
               style={{ display: "flex", alignItems: "center", justifyContent: collapsed ? "center" : "flex-start", gap: 10, padding: collapsed ? "10px 0" : "10px 12px", borderRadius: 6, color: T.t2, fontSize: 13, cursor: "pointer", border: "none", background: "transparent", width: "100%", textAlign: "left", fontFamily: "'DM Sans',sans-serif", marginTop: 2 }}>
               🚪 {!collapsed && "Sair"}
             </button>
