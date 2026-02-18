@@ -271,4 +271,30 @@ export const hubspotApi = {
     api.post('/hubspot/config', { apiKey }),
 };
 
+// Groups API (Chat Gerente-Parceiro)
+export const groupsApi = {
+  getAll: () => api.get('/groups'),
+  getMessages: (gId, pId, params) => api.get(`/groups/${gId}/${pId}/messages`, { params }),
+  sendMessage: (gId, pId, data) => api.post(`/groups/${gId}/${pId}/messages`, data),
+};
+
+// CNPJ Agent API
+export const cnpjAgentApi = {
+  check: (data) => api.post('/cnpj-agent/check', data),
+  createIndication: (data) => api.post('/cnpj-agent/create-indication', data),
+};
+
+// Diretoria API
+export const diretoriaApi = {
+  getSummary: () => api.get('/diretoria/summary'),
+};
+
+// WhatsApp API
+export const whatsappApi = {
+  connectInstance: () => api.post('/whatsapp/instance/connect'),
+  getStatus: () => api.get('/whatsapp/instance/status'),
+  getQr: () => api.get('/whatsapp/instance/qr'),
+  disconnect: () => api.post('/whatsapp/instance/disconnect'),
+};
+
 export default api;

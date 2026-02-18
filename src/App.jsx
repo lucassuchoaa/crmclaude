@@ -1,5 +1,5 @@
 import { useState, useEffect, createContext, useContext, useCallback } from "react";
-import { authApi, usersApi, indicationsApi, commissionsApi, nfesApi, materialsApi, notificationsApi, cnpjApi, hubspotApi, setTokens, clearTokens } from "./services/api";
+import { authApi, usersApi, indicationsApi, commissionsApi, nfesApi, materialsApi, notificationsApi, cnpjApi, hubspotApi, groupsApi, cnpjAgentApi, diretoriaApi, whatsappApi, setTokens, clearTokens } from "./services/api";
 
 const AuthCtx = createContext(null);
 const useAuth = () => useContext(AuthCtx);
@@ -2648,6 +2648,501 @@ function NotifsPage({ notifs, setNotifs, users, userId }) {
   );
 }
 
+// ===== GROUPS PAGE =====
+function GroupsPage({ users, inds }) {
+  const { user } = useAuth();
+  const [groups, setGroups] = useState([]);
+  const [selectedGroup, setSelectedGroup] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [msgInput, setMsgInput] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [cnpjMode, setCnpjMode] = useState(false);
+  const [cnpjInput, setCnpjInput] = useState("");
+  const [cnpjLoading, setCnpjLoading] = useState(false);
+  const [lastCnpjResult, setLastCnpjResult] = useState(null);
+  // WhatsApp state
+  const [waStatus, setWaStatus] = useState("disconnected");
+  const [qrCode, setQrCode] = useState(null);
+  const [showQrModal, setShowQrModal] = useState(false);
+  const [waLoading, setWaLoading] = useState(false);
+
+  const loadGroups = useCallback(async () => {
+    try {
+      const res = await groupsApi.getAll();
+      setGroups(res.data.groups || []);
+    } catch (e) { console.error("Error loading groups:", e); }
+    finally { setLoading(false); }
+  }, []);
+
+  const loadMessages = useCallback(async () => {
+    if (!selectedGroup) return;
+    try {
+      const res = await groupsApi.getMessages(selectedGroup.gerente_id, selectedGroup.parceiro_id, { limit: 200 });
+      setMessages(res.data.messages || []);
+    } catch (e) { console.error("Error loading messages:", e); }
+  }, [selectedGroup]);
+
+  useEffect(() => { loadGroups(); }, [loadGroups]);
+  useEffect(() => { loadMessages(); }, [loadMessages]);
+
+  // Load WhatsApp status on mount (gerente only)
+  useEffect(() => {
+    if (user.role !== "gerente") return;
+    (async () => {
+      try {
+        const res = await whatsappApi.getStatus();
+        setWaStatus(res.data.status || "disconnected");
+      } catch {}
+    })();
+  }, [user.role]);
+
+  // QR polling: every 3s when modal is open
+  useEffect(() => {
+    if (!showQrModal) return;
+    const iv = setInterval(async () => {
+      try {
+        const statusRes = await whatsappApi.getStatus();
+        const st = statusRes.data.status || "disconnected";
+        setWaStatus(st);
+        if (st === "connected") {
+          setShowQrModal(false);
+          setQrCode(null);
+          return;
+        }
+        const qrRes = await whatsappApi.getQr();
+        if (qrRes.data.qr_code) setQrCode(qrRes.data.qr_code);
+      } catch {}
+    }, 3000);
+    return () => clearInterval(iv);
+  }, [showQrModal]);
+
+  // Polling 15s
+  useEffect(() => {
+    if (!selectedGroup) return;
+    const iv = setInterval(loadMessages, 15000);
+    return () => clearInterval(iv);
+  }, [selectedGroup, loadMessages]);
+
+  // Auto-scroll to bottom
+  useEffect(() => {
+    const el = document.getElementById("chat-messages");
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages]);
+
+  const sendMessage = async () => {
+    if (!msgInput.trim() || !selectedGroup) return;
+    try {
+      await groupsApi.sendMessage(selectedGroup.gerente_id, selectedGroup.parceiro_id, { content: msgInput });
+      setMsgInput("");
+      loadMessages();
+    } catch (e) { console.error("Send error:", e); }
+  };
+
+  const handleWaConnect = async () => {
+    setWaLoading(true);
+    try {
+      const res = await whatsappApi.connectInstance();
+      setWaStatus(res.data.status || "connecting");
+      if (res.data.qr_code) setQrCode(res.data.qr_code);
+      setShowQrModal(true);
+    } catch (e) { console.error("WA connect error:", e); }
+    finally { setWaLoading(false); }
+  };
+
+  const handleWaDisconnect = async () => {
+    setWaLoading(true);
+    try {
+      await whatsappApi.disconnect();
+      setWaStatus("disconnected");
+      setQrCode(null);
+    } catch (e) { console.error("WA disconnect error:", e); }
+    finally { setWaLoading(false); }
+  };
+
+  const handleCnpjCheck = async () => {
+    if (!cnpjInput.trim() || !selectedGroup) return;
+    setCnpjLoading(true);
+    try {
+      const res = await cnpjAgentApi.check({
+        cnpj: cnpjInput,
+        gerente_id: selectedGroup.gerente_id,
+        parceiro_id: selectedGroup.parceiro_id
+      });
+      setLastCnpjResult(res.data);
+      setCnpjInput("");
+      setCnpjMode(false);
+      loadMessages();
+    } catch (e) { console.error("CNPJ check error:", e); }
+    finally { setCnpjLoading(false); }
+  };
+
+  const handleCreateIndication = async (cnpjData) => {
+    if (!selectedGroup) return;
+    try {
+      await cnpjAgentApi.createIndication({
+        cnpj: cnpjData.cnpj,
+        gerente_id: selectedGroup.gerente_id,
+        parceiro_id: selectedGroup.parceiro_id,
+        cnpj_data: cnpjData
+      });
+      loadMessages();
+    } catch (e) { console.error("Create indication error:", e); }
+  };
+
+  const sourceLabel = (source) => {
+    if (source === "whatsapp") return <span style={{ fontSize: 9, background: "#25D36622", color: "#25D366", borderRadius: 4, padding: "1px 5px", marginLeft: 6, fontWeight: 600 }}>via WhatsApp</span>;
+    if (source === "crm_to_whatsapp") return <span style={{ fontSize: 9, background: T.inf + "22", color: T.inf, borderRadius: 4, padding: "1px 5px", marginLeft: 6, fontWeight: 600 }}>enviado via WhatsApp</span>;
+    return null;
+  };
+
+  const renderBotMessage = (msg) => {
+    let meta = {};
+    try { meta = JSON.parse(msg.metadata || "{}"); } catch {}
+
+    if (msg.message_type === "cnpj_result") {
+      const d = meta.cnpj_data || {};
+      return (
+        <div style={{ background: T.inf + "15", border: `1px solid ${T.inf}33`, borderRadius: 10, padding: 14, maxWidth: 400 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: T.inf, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>🤖 Agente CNPJ</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: T.txt, marginBottom: 4 }}>{d.razao_social}</div>
+          {d.nome_fantasia && d.nome_fantasia !== d.razao_social && <div style={{ fontSize: 11, color: T.t2, marginBottom: 4 }}>Fantasia: {d.nome_fantasia}</div>}
+          <div style={{ fontSize: 11, color: T.t2, marginBottom: 2 }}>Situação: <span style={{ color: d.situacao === "ATIVA" ? T.ok : T.wn }}>{d.situacao || "N/A"}</span></div>
+          {d.capital_social > 0 && <div style={{ fontSize: 11, color: T.t2, marginBottom: 2 }}>Capital: R$ {Number(d.capital_social).toLocaleString("pt-BR")}</div>}
+          {d.cnae_principal && <div style={{ fontSize: 11, color: T.t2, marginBottom: 2 }}>CNAE: {d.cnae_principal}</div>}
+          {d.socios?.length > 0 && <div style={{ fontSize: 11, color: T.t2, marginBottom: 2 }}>Sócios: {d.socios.map(s => s.nome).join(", ")}</div>}
+          {d.endereco?.completo && <div style={{ fontSize: 11, color: T.t2, marginBottom: 6 }}>Endereço: {d.endereco.completo}</div>}
+          {user.role === "gerente" && (
+            <Btn sm v="primary" onClick={() => handleCreateIndication(d)} style={{ marginTop: 6 }}>+ Criar Indicação</Btn>
+          )}
+        </div>
+      );
+    }
+
+    if (msg.message_type === "cnpj_duplicate") {
+      const dup = meta.duplicate || {};
+      return (
+        <div style={{ background: T.wn + "15", border: `1px solid ${T.wn}33`, borderRadius: 10, padding: 14, maxWidth: 400 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: T.wn, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>⚠️ CNPJ Duplicado</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: T.txt, marginBottom: 4 }}>{msg.content}</div>
+          <div style={{ fontSize: 11, color: T.t2, marginBottom: 2 }}>Status: <Badge type="warning">{dup.status}</Badge></div>
+          <div style={{ fontSize: 11, color: T.t2, marginBottom: 2 }}>Responsável: {dup.owner_name}</div>
+          <div style={{ fontSize: 11, color: T.t2 }}>Criada em: {dup.created_at ? new Date(dup.created_at).toLocaleDateString("pt-BR") : "N/A"}</div>
+        </div>
+      );
+    }
+
+    if (msg.message_type === "indication_created") {
+      return (
+        <div style={{ background: T.ok + "15", border: `1px solid ${T.ok}33`, borderRadius: 10, padding: 14, maxWidth: 400 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: T.ok, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>✅ Indicação Criada</div>
+          <div style={{ fontSize: 13, color: T.txt }}>{msg.content}</div>
+        </div>
+      );
+    }
+
+    return <div style={{ fontSize: 13, color: T.t2 }}>{msg.content}</div>;
+  };
+
+  if (loading) return <div style={{ padding: 40, textAlign: "center", color: T.t2 }}>Carregando conversas...</div>;
+
+  return (
+    <div style={{ display: "flex", height: "calc(100vh - 120px)", gap: 0 }}>
+      {/* QR Code Modal */}
+      {showQrModal && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.6)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={() => setShowQrModal(false)}>
+          <div style={{ background: T.card, borderRadius: 16, padding: 32, maxWidth: 400, textAlign: "center", border: `1px solid ${T.bor}` }}
+            onClick={e => e.stopPropagation()}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, color: T.txt, margin: "0 0 8px" }}>Conectar WhatsApp</h3>
+            <p style={{ fontSize: 12, color: T.t2, marginBottom: 20 }}>Abra o WhatsApp no celular, vá em Dispositivos Conectados e escaneie o QR code abaixo.</p>
+            {qrCode ? (
+              <img src={qrCode.startsWith("data:") ? qrCode : `data:image/png;base64,${qrCode}`} alt="QR Code" style={{ width: 256, height: 256, borderRadius: 8, border: `1px solid ${T.bor}` }} />
+            ) : (
+              <div style={{ width: 256, height: 256, display: "flex", alignItems: "center", justifyContent: "center", background: T.bg2, borderRadius: 8, margin: "0 auto", color: T.tm, fontSize: 13 }}>Gerando QR code...</div>
+            )}
+            <p style={{ fontSize: 11, color: T.tm, marginTop: 12 }}>O QR code atualiza automaticamente. A janela fecha ao conectar.</p>
+            <Btn sm v="secondary" onClick={() => setShowQrModal(false)} style={{ marginTop: 12 }}>Fechar</Btn>
+          </div>
+        </div>
+      )}
+
+      {/* Sidebar - Lista de Parceiros */}
+      <div style={{ width: 300, borderRight: `1px solid ${T.bor}`, overflowY: "auto", background: T.bg2 }}>
+        <div style={{ padding: "16px", borderBottom: `1px solid ${T.bor}` }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <h3 style={{ fontSize: 14, fontWeight: 700, color: T.txt, margin: 0 }}>📱 Conversas</h3>
+            {user.role === "gerente" && (
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: waStatus === "connected" ? "#25D366" : T.er, display: "inline-block" }} title={waStatus === "connected" ? "WhatsApp conectado" : "WhatsApp desconectado"} />
+            )}
+          </div>
+          <span style={{ fontSize: 11, color: T.t2 }}>{groups.length} parceiros</span>
+        </div>
+        {groups.length === 0 && <div style={{ padding: 20, textAlign: "center", fontSize: 12, color: T.tm }}>Nenhum parceiro encontrado</div>}
+        {groups.map(g => {
+          const isSelected = selectedGroup?.parceiro_id === g.parceiro_id && selectedGroup?.gerente_id === g.gerente_id;
+          const displayName = g.parceiro_name;
+          const displaySub = g.parceiro_empresa || "Parceiro";
+          return (
+            <div key={`${g.gerente_id}-${g.parceiro_id}`}
+              onClick={() => { setSelectedGroup(g); setCnpjMode(false); }}
+              style={{ padding: "12px 16px", cursor: "pointer", borderBottom: `1px solid ${T.bor}22`, background: isSelected ? T.ac + "15" : "transparent", borderLeft: isSelected ? `3px solid ${T.ac}` : "3px solid transparent", transition: "all 0.15s" }}
+              onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = T.ac + "08"; }} onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = "transparent"; }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: T.ac + "22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: T.ac }}>
+                  {(displayName || "?").substring(0, 2).toUpperCase()}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: T.txt, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</span>
+                    {g.unread_count > 0 && <span style={{ background: T.ac, color: "#fff", fontSize: 10, fontWeight: 700, borderRadius: 10, padding: "2px 6px", minWidth: 18, textAlign: "center" }}>{g.unread_count}</span>}
+                  </div>
+                  <div style={{ fontSize: 11, color: T.t2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displaySub}</div>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                <Badge type="info">{g.indications_count || 0} ind.</Badge>
+                <Badge type="success">{g.active_count || 0} ativas</Badge>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Chat Area */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", background: T.bg }}>
+        {!selectedGroup ? (
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: T.tm, fontSize: 14, gap: 16 }}>
+            <span>Selecione um parceiro para ver a conversa</span>
+            {user.role === "gerente" && waStatus !== "connected" && (
+              <Btn sm v="primary" onClick={handleWaConnect} disabled={waLoading}>
+                {waLoading ? "Conectando..." : "Conectar WhatsApp"}
+              </Btn>
+            )}
+          </div>
+        ) : (
+          <>
+            {/* Chat Header */}
+            <div style={{ padding: "12px 20px", borderBottom: `1px solid ${T.bor}`, background: T.bg2, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: T.txt }}>{selectedGroup.parceiro_name}</span>
+                <span style={{ fontSize: 11, color: T.t2 }}>{selectedGroup.parceiro_empresa || ""}</span>
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {user.role === "gerente" && (
+                  <>
+                    {/* WhatsApp status indicator */}
+                    <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: waStatus === "connected" ? "#25D366" : T.tm, padding: "4px 8px", background: waStatus === "connected" ? "#25D36612" : T.bg, borderRadius: 6, border: `1px solid ${waStatus === "connected" ? "#25D36633" : T.bor}` }}>
+                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: waStatus === "connected" ? "#25D366" : T.er }} />
+                      {waStatus === "connected" ? "WhatsApp" : "Desconectado"}
+                    </span>
+                    {waStatus === "connected" ? (
+                      <Btn sm v="secondary" onClick={handleWaDisconnect} disabled={waLoading}>Desconectar</Btn>
+                    ) : (
+                      <Btn sm v="primary" onClick={handleWaConnect} disabled={waLoading}>
+                        {waLoading ? "..." : "Conectar WA"}
+                      </Btn>
+                    )}
+                    <Btn sm v={cnpjMode ? "danger" : "secondary"} onClick={() => setCnpjMode(!cnpjMode)}>
+                      {cnpjMode ? "✕ Cancelar" : "🔍 CNPJ"}
+                    </Btn>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* CNPJ Input bar */}
+            {cnpjMode && user.role === "gerente" && (
+              <div style={{ padding: "10px 20px", background: T.inf + "0D", borderBottom: `1px solid ${T.inf}22`, display: "flex", gap: 8, alignItems: "center" }}>
+                <span style={{ fontSize: 12, color: T.inf, fontWeight: 600 }}>🤖 Agente CNPJ:</span>
+                <input value={cnpjInput} onChange={e => setCnpjInput(e.target.value)} placeholder="Digite o CNPJ..."
+                  onKeyDown={e => e.key === "Enter" && handleCnpjCheck()}
+                  style={{ flex: 1, padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 13, fontFamily: "'DM Sans',sans-serif", outline: "none" }} />
+                <Btn sm v="primary" onClick={handleCnpjCheck} disabled={cnpjLoading || !cnpjInput.trim()}>
+                  {cnpjLoading ? "Consultando..." : "Consultar"}
+                </Btn>
+              </div>
+            )}
+
+            {/* Messages */}
+            <div id="chat-messages" style={{ flex: 1, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
+              {messages.length === 0 && (
+                <div style={{ textAlign: "center", color: T.tm, fontSize: 12, padding: 40 }}>Nenhuma mensagem ainda. Inicie a conversa!</div>
+              )}
+              {messages.map(msg => {
+                const isMe = msg.sender_id === user.id;
+                const isBot = msg.sender_type === "bot";
+                return (
+                  <div key={msg.id} style={{ display: "flex", justifyContent: isBot ? "center" : isMe ? "flex-end" : "flex-start", marginBottom: 2 }}>
+                    <div style={{
+                      maxWidth: isBot ? 440 : 360,
+                      padding: isBot ? 0 : "10px 14px",
+                      borderRadius: 12,
+                      background: isBot ? "transparent" : isMe ? T.ac + "22" : T.card,
+                      border: isBot ? "none" : isMe ? `1px solid ${T.ac}33` : `1px solid ${T.bor}`,
+                    }}>
+                      {!isMe && !isBot && <div style={{ fontSize: 10, fontWeight: 700, color: T.ac, marginBottom: 4 }}>{msg.sender_name}</div>}
+                      {isBot ? renderBotMessage(msg) : <div style={{ fontSize: 13, color: T.txt, lineHeight: 1.5, wordBreak: "break-word" }}>{msg.content}</div>}
+                      <div style={{ fontSize: 9, color: T.tm, marginTop: 4, textAlign: isMe ? "right" : "left", display: "flex", alignItems: "center", justifyContent: isMe ? "flex-end" : "flex-start", gap: 2 }}>
+                        {new Date(msg.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                        {sourceLabel(msg.source)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Input - apenas gerente */}
+            {user.role === "gerente" && (
+              <div style={{ padding: "12px 20px", borderTop: `1px solid ${T.bor}`, background: T.bg2, display: "flex", gap: 8 }}>
+                <input value={msgInput} onChange={e => setMsgInput(e.target.value)} placeholder={waStatus === "connected" ? "Mensagem (enviada via WhatsApp)..." : "Mensagem (somente CRM)..."}
+                  onKeyDown={e => e.key === "Enter" && sendMessage()}
+                  style={{ flex: 1, padding: "10px 14px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 8, color: T.txt, fontSize: 13, fontFamily: "'DM Sans',sans-serif", outline: "none" }} />
+                <Btn sm v="primary" onClick={sendMessage} disabled={!msgInput.trim()}>Enviar</Btn>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ===== DIRETORIA PAGE =====
+function DiretoriaPage() {
+  const { user } = useAuth();
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState({});
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await diretoriaApi.getSummary();
+        setData(res.data);
+      } catch (e) { console.error("Diretoria error:", e); }
+      finally { setLoading(false); }
+    })();
+  }, []);
+
+  const toggleExpand = (id) => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
+
+  const convColor = (rate) => rate >= 30 ? T.ok : rate >= 15 ? T.wn : T.er;
+
+  const renderGerenteCard = (item) => {
+    const g = item.gerente;
+    const isExp = expanded[g.id];
+    return (
+      <div key={g.id} style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden", marginBottom: 12 }}>
+        <div onClick={() => toggleExpand(g.id)} style={{ padding: "16px 20px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}
+          onMouseEnter={e => e.currentTarget.style.background = T.ac + "08"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 10, background: T.ac + "22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: T.ac }}>
+              {g.name.substring(0, 2).toUpperCase()}
+            </div>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: T.txt }}>{g.name}</div>
+              <div style={{ fontSize: 11, color: T.t2 }}>{item.parceiro_count} parceiros</div>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: T.txt }}>{item.total_indications}</div>
+              <div style={{ fontSize: 10, color: T.t2 }}>Total</div>
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: T.ok }}>{item.active_count}</div>
+              <div style={{ fontSize: 10, color: T.t2 }}>Ativas</div>
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: T.inf }}>{item.pipeline_count}</div>
+              <div style={{ fontSize: 10, color: T.t2 }}>Pipeline</div>
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: convColor(item.conversion_rate) }}>{item.conversion_rate}%</div>
+              <div style={{ fontSize: 10, color: T.t2 }}>Conversão</div>
+            </div>
+            <span style={{ fontSize: 14, color: T.t2, transition: "transform 0.2s", transform: isExp ? "rotate(180deg)" : "rotate(0)" }}>▼</span>
+          </div>
+        </div>
+
+        {/* Conversion bar */}
+        <div style={{ height: 3, background: T.bor }}>
+          <div style={{ height: "100%", width: `${Math.min(item.conversion_rate, 100)}%`, background: convColor(item.conversion_rate), transition: "width 0.3s" }} />
+        </div>
+
+        {/* Expanded: parceiros table */}
+        {isExp && (
+          <div style={{ padding: "12px 20px", borderTop: `1px solid ${T.bor}` }}>
+            {item.parceiros.length === 0 ? (
+              <div style={{ fontSize: 12, color: T.tm, textAlign: "center", padding: 12 }}>Nenhum parceiro</div>
+            ) : (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr style={{ borderBottom: `1px solid ${T.bor}` }}>
+                    <th style={{ textAlign: "left", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Parceiro</th>
+                    <th style={{ textAlign: "left", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Empresa</th>
+                    <th style={{ textAlign: "center", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Total</th>
+                    <th style={{ textAlign: "center", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Ativas</th>
+                    <th style={{ textAlign: "center", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Pipeline</th>
+                    <th style={{ textAlign: "center", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Conversão</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {item.parceiros.map(p => (
+                    <tr key={p.id} style={{ borderBottom: `1px solid ${T.bor}22` }}>
+                      <td style={{ padding: "8px 6px", color: T.txt, fontWeight: 500 }}>{p.name}</td>
+                      <td style={{ padding: "8px 6px", color: T.t2 }}>{p.empresa || "—"}</td>
+                      <td style={{ padding: "8px 6px", color: T.txt, textAlign: "center" }}>{p.total_indications || 0}</td>
+                      <td style={{ padding: "8px 6px", color: T.ok, textAlign: "center" }}>{p.active_count || 0}</td>
+                      <td style={{ padding: "8px 6px", color: T.inf, textAlign: "center" }}>{p.pipeline_count || 0}</td>
+                      <td style={{ padding: "8px 6px", textAlign: "center" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "center" }}>
+                          <div style={{ width: 40, height: 4, background: T.bor, borderRadius: 2, overflow: "hidden" }}>
+                            <div style={{ height: "100%", width: `${Math.min(p.conversion_rate, 100)}%`, background: convColor(p.conversion_rate), borderRadius: 2 }} />
+                          </div>
+                          <span style={{ color: convColor(p.conversion_rate), fontWeight: 600 }}>{p.conversion_rate}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  if (loading) return <div style={{ padding: 40, textAlign: "center", color: T.t2 }}>Carregando dados da diretoria...</div>;
+  if (!data) return <div style={{ padding: 40, textAlign: "center", color: T.er }}>Erro ao carregar dados.</div>;
+
+  return (
+    <div>
+      {data.grouped ? (
+        // Executivo view: grouped by director
+        (data.summary || []).map(dir => (
+          <div key={dir.diretor_id} style={{ marginBottom: 24 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: T.txt, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ width: 28, height: 28, borderRadius: 8, background: T.inf + "22", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: T.inf }}>👔</span>
+              {dir.diretor_name}
+              <Badge type="muted">{dir.gerentes.length} gerentes</Badge>
+            </div>
+            {dir.gerentes.map(renderGerenteCard)}
+          </div>
+        ))
+      ) : (
+        // Diretor view: flat list
+        (data.summary || []).map(renderGerenteCard)
+      )}
+      {(data.summary || []).length === 0 && (
+        <div style={{ padding: 40, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhum dado disponível.</div>
+      )}
+    </div>
+  );
+}
+
 // ===== APP =====
 const RL = { super_admin: "Super Admin", executivo: "Executivo", diretor: "Diretoria", gerente: "Gerente", parceiro: "Parceiro" };
 const NAV = [
@@ -2655,13 +3150,15 @@ const NAV = [
   { id: "kanban", l: "Kanban", r: ["super_admin", "executivo", "diretor", "gerente"] },
   { id: "inds", l: "Minhas Indicações", r: ["parceiro"] },
   { id: "parcs", l: "Parceiros", r: ["super_admin", "executivo", "diretor", "gerente"] },
+  { id: "groups", l: "WhatsApp", r: ["super_admin", "executivo", "diretor", "gerente"] },
+  { id: "diretoria", l: "Visão Diretoria", r: ["super_admin", "executivo", "diretor"] },
   { id: "fin", l: "Financeiro", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro"] },
   { id: "mats", l: "Material de Apoio", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro"] },
   { id: "notifs", l: "Notificações", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro"] },
   { id: "cfg", l: "Configurações", r: ["super_admin"] },
 ];
-const TIT = { dash: "Dashboard", kanban: "Pipeline de Indicações", inds: "Minhas Indicações", parcs: "Parceiros Indicadores", fin: "Financeiro", mats: "Material de Apoio", notifs: "Central de Notificações", cfg: "Configurações" };
-const EMO = { dash: "📊", kanban: "📋", inds: "🏢", parcs: "👥", fin: "💰", mats: "📁", notifs: "🔔", cfg: "⚙️" };
+const TIT = { dash: "Dashboard", kanban: "Pipeline de Indicações", inds: "Minhas Indicações", parcs: "Parceiros Indicadores", groups: "WhatsApp - Conversas", diretoria: "Visão Diretoria", fin: "Financeiro", mats: "Material de Apoio", notifs: "Central de Notificações", cfg: "Configurações" };
+const EMO = { dash: "📊", kanban: "📋", inds: "🏢", parcs: "👥", groups: "📱", diretoria: "📈", fin: "💰", mats: "📁", notifs: "🔔", cfg: "⚙️" };
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -2949,6 +3446,8 @@ export default function App() {
             {pg === "kanban" && <KanbanPage inds={inds} setInds={setInds} users={users} travaDias={travaDias} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} />}
             {pg === "inds" && <MinhasInd inds={inds} setInds={setInds} notifs={notifs} setNotifs={setNotifs} users={users} cadenceRules={cadenceRules} />}
             {pg === "parcs" && <ParcPage users={users} setUsers={setUsers} inds={inds} />}
+            {pg === "groups" && <GroupsPage users={users} inds={inds} />}
+            {pg === "diretoria" && <DiretoriaPage />}
             {pg === "fin" && <FinPage comms={comms} setComms={setComms} nfes={nfes} setNfes={setNfes} users={users} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} />}
             {pg === "mats" && <MatsPage mats={mats} />}
             {pg === "notifs" && <NotifsPage notifs={notifs} setNotifs={setNotifs} users={users} userId={user.id} />}

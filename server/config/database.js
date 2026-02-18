@@ -211,6 +211,52 @@ export function initializeDatabase() {
     db.exec(`ALTER TABLE notifications ADD COLUMN email_sent INTEGER DEFAULT 0`);
   }
 
+  // Messages table (groups chat)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id TEXT PRIMARY KEY,
+      group_gerente_id TEXT NOT NULL,
+      group_parceiro_id TEXT NOT NULL,
+      sender_id TEXT NOT NULL,
+      sender_type TEXT NOT NULL DEFAULT 'user' CHECK(sender_type IN ('user', 'bot')),
+      content TEXT NOT NULL,
+      message_type TEXT NOT NULL DEFAULT 'text' CHECK(message_type IN ('text', 'cnpj_query', 'cnpj_result', 'cnpj_duplicate', 'indication_created')),
+      metadata TEXT,
+      is_read INTEGER DEFAULT 0,
+      source TEXT DEFAULT 'crm',
+      whatsapp_message_id TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (group_gerente_id) REFERENCES users(id),
+      FOREIGN KEY (group_parceiro_id) REFERENCES users(id),
+      FOREIGN KEY (sender_id) REFERENCES users(id)
+    )
+  `);
+
+  // Migrate messages table: add WhatsApp columns
+  const msgColumns = db.pragma('table_info(messages)').map(c => c.name);
+  if (!msgColumns.includes('source')) {
+    db.exec(`ALTER TABLE messages ADD COLUMN source TEXT DEFAULT 'crm'`);
+  }
+  if (!msgColumns.includes('whatsapp_message_id')) {
+    db.exec(`ALTER TABLE messages ADD COLUMN whatsapp_message_id TEXT`);
+  }
+
+  // WhatsApp instances table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS whatsapp_instances (
+      id TEXT PRIMARY KEY,
+      gerente_id TEXT UNIQUE NOT NULL,
+      instance_name TEXT UNIQUE NOT NULL,
+      status TEXT DEFAULT 'disconnected' CHECK(status IN ('disconnected', 'connecting', 'connected', 'qr_pending')),
+      qr_code TEXT,
+      qr_expires_at TEXT,
+      connected_phone TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (gerente_id) REFERENCES users(id)
+    )
+  `);
+
   // Settings table (for HubSpot API keys, etc.)
   db.exec(`
     CREATE TABLE IF NOT EXISTS settings (
@@ -237,6 +283,11 @@ export function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(is_read);
     CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id);
     CREATE INDEX IF NOT EXISTS idx_refresh_tokens_token ON refresh_tokens(token);
+    CREATE INDEX IF NOT EXISTS idx_messages_group ON messages(group_gerente_id, group_parceiro_id);
+    CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(created_at);
+    CREATE INDEX IF NOT EXISTS idx_whatsapp_instances_gerente ON whatsapp_instances(gerente_id);
+    CREATE INDEX IF NOT EXISTS idx_messages_whatsapp_id ON messages(whatsapp_message_id);
+    CREATE INDEX IF NOT EXISTS idx_users_tel ON users(tel);
   `);
 
   console.log('Database initialized successfully');
