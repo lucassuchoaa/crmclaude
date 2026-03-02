@@ -74,11 +74,23 @@ export function checkResourceOwnership(getResourceOwner) {
         return next();
       }
 
-      // Directors can manage their team's resources
+      // Directors and gerentes can manage their team's resources
       if (req.user.role === 'diretor' || req.user.role === 'gerente') {
-        // This would need a more complex query to check team hierarchy
-        // For now, allow directors to access but implement proper check
-        return next();
+        const { getDatabase } = await import('../config/database.js');
+        const db = getDatabase();
+        const owner = db.prepare('SELECT manager_id FROM users WHERE id = ?').get(ownerId);
+        if (owner && owner.manager_id === req.user.id) {
+          return next();
+        }
+        // For directors, also check 2 levels deep (gerente's parceiros)
+        if (req.user.role === 'diretor') {
+          const indirectReport = db.prepare(`
+            SELECT id FROM users WHERE id = ? AND manager_id IN (
+              SELECT id FROM users WHERE manager_id = ?
+            )
+          `).get(ownerId, req.user.id);
+          if (indirectReport) return next();
+        }
       }
 
       return res.status(403).json({ error: 'Not authorized to access this resource' });

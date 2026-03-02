@@ -4,6 +4,8 @@ import { getDatabase } from '../config/database.js';
 import { hasPermission } from '../config/auth.js';
 import { authenticate } from '../middleware/auth.js';
 import { requireMinRole } from '../middleware/rbac.js';
+import { validateStatus, NFE_STATUSES } from '../utils/validators.js';
+import { createNotification } from '../utils/notificationHelper.js';
 
 const router = express.Router();
 
@@ -22,8 +24,14 @@ router.get('/', authenticate, (req, res) => {
     const params = [];
 
     if (!hasPermission(req.user.role, 'diretor')) {
-      query += ` AND n.user_id = ?`;
-      params.push(req.user.id);
+      if (req.user.role === 'gerente') {
+        // Gerentes see their parceiros' NFEs
+        query += ` AND (n.user_id = ? OR n.user_id IN (SELECT id FROM users WHERE manager_id = ?))`;
+        params.push(req.user.id, req.user.id);
+      } else {
+        query += ` AND n.user_id = ?`;
+        params.push(req.user.id);
+      }
     } else if (user_id) {
       query += ` AND n.user_id = ?`;
       params.push(user_id);
@@ -92,22 +100,28 @@ router.post('/', authenticate, (req, res) => {
 
     const nfe = db.prepare('SELECT * FROM nfes WHERE id = ?').get(id);
 
-    // Notify admins
+    // Notify admins and parceiro's gerente
     const admins = db.prepare(`
       SELECT id FROM users WHERE role IN ('super_admin', 'executivo') AND is_active = 1
     `).all();
 
+    // Also notify the parceiro's manager (gerente)
+    const owner = db.prepare('SELECT manager_id FROM users WHERE id = ?').get(req.user.id);
+    if (owner && owner.manager_id) {
+      admins.push({ id: owner.manager_id });
+    }
+
+    const notifiedIds = new Set();
     admins.forEach(admin => {
-      db.prepare(`
-        INSERT INTO notifications (id, user_id, title, message, type, link)
-        VALUES (?, ?, ?, ?, 'info', ?)
-      `).run(
-        uuidv4(),
-        admin.id,
-        'Nova NFE enviada',
-        `${req.user.name} enviou uma nova NFE no valor de R$ ${value.toFixed(2)}`,
-        `/nfes/${id}`
-      );
+      if (notifiedIds.has(admin.id)) return;
+      notifiedIds.add(admin.id);
+      createNotification({
+        userId: admin.id,
+        title: 'Nova NFE enviada',
+        message: `${req.user.name} enviou uma nova NFE no valor de R$ ${parseFloat(value).toFixed(2)}`,
+        type: 'info',
+        link: `/nfes/${id}`
+      });
     });
 
     res.status(201).json({ nfe });
@@ -121,11 +135,8 @@ router.post('/', authenticate, (req, res) => {
 router.patch('/:id/status', authenticate, requireMinRole('diretor'), (req, res) => {
   try {
     const { status, notes } = req.body;
-    const validStatuses = ['pending', 'approved', 'rejected', 'paid'];
-
-    if (!status || !validStatuses.includes(status)) {
-      return res.status(400).json({ error: 'Invalid status' });
-    }
+    const { valid, error: statusError } = validateStatus(status, NFE_STATUSES);
+    if (!valid) return res.status(400).json({ error: statusError });
 
     const db = getDatabase();
     const nfe = db.prepare('SELECT * FROM nfes WHERE id = ?').get(req.params.id);
@@ -146,17 +157,13 @@ router.patch('/:id/status', authenticate, requireMinRole('diretor'), (req, res) 
     };
 
     if (statusMessages[status]) {
-      db.prepare(`
-        INSERT INTO notifications (id, user_id, title, message, type, link)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(
-        uuidv4(),
-        nfe.user_id,
-        'Atualizacao de NFE',
-        statusMessages[status],
-        status === 'rejected' ? 'warning' : 'success',
-        `/nfes/${req.params.id}`
-      );
+      createNotification({
+        userId: nfe.user_id,
+        title: 'Atualizacao de NFE',
+        message: statusMessages[status],
+        type: status === 'rejected' ? 'warning' : 'success',
+        link: `/nfes/${req.params.id}`
+      });
     }
 
     const updated = db.prepare(`

@@ -26,7 +26,7 @@ export function initializeDatabase() {
       email TEXT UNIQUE NOT NULL,
       password TEXT NOT NULL,
       name TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('super_admin', 'executivo', 'diretor', 'gerente', 'parceiro')),
+      role TEXT NOT NULL CHECK(role IN ('super_admin', 'executivo', 'diretor', 'gerente', 'convenio', 'parceiro')),
       avatar TEXT,
       manager_id TEXT,
       empresa TEXT,
@@ -39,6 +39,61 @@ export function initializeDatabase() {
       FOREIGN KEY (manager_id) REFERENCES users(id)
     )
   `);
+
+  // Migrate users table CHECK constraint to include 'convenio' role
+  try {
+    db.exec(`INSERT INTO users (id, email, password, name, role) VALUES ('__migrate_test__', '__test__', '__test__', '__test__', 'convenio')`);
+    db.exec(`DELETE FROM users WHERE id = '__migrate_test__'`);
+  } catch (e) {
+    // CHECK constraint rejects 'convenio' — recreate table
+    console.log('Migrating users table to include convenio role...');
+    // Get existing columns to match them in INSERT
+    const oldCols = db.pragma('table_info(users)').map(c => c.name);
+    db.pragma('foreign_keys = OFF');
+    db.exec(`ALTER TABLE users RENAME TO users_old`);
+    db.exec(`
+      CREATE TABLE users (
+        id TEXT PRIMARY KEY,
+        email TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL CHECK(role IN ('super_admin', 'executivo', 'diretor', 'gerente', 'convenio', 'parceiro')),
+        avatar TEXT,
+        manager_id TEXT,
+        empresa TEXT,
+        tel TEXT,
+        cnpj TEXT,
+        com_tipo TEXT CHECK(com_tipo IN ('pct', 'valor') OR com_tipo IS NULL),
+        com_val REAL,
+        is_active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (manager_id) REFERENCES users(id)
+      )
+    `);
+    const newCols = db.pragma('table_info(users)').map(c => c.name);
+    const commonCols = oldCols.filter(c => newCols.includes(c));
+    const colList = commonCols.join(', ');
+    db.exec(`INSERT INTO users (${colList}) SELECT ${colList} FROM users_old`);
+    db.exec(`DROP TABLE users_old`);
+    // Fix FKs in dependent tables that now reference users_old instead of users
+    const depTables = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name != 'users'`).all().map(t => t.name);
+    for (const tbl of depTables) {
+      const fks = db.pragma(`foreign_key_list(${tbl})`);
+      if (fks.some(fk => fk.table === 'users_old')) {
+        const info = db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name=?`).get(tbl);
+        if (!info) continue;
+        const fixedSql = info.sql.replace(/users_old/g, 'users');
+        const tblCols = db.pragma(`table_info(${tbl})`).map(c => c.name).join(', ');
+        db.exec(`ALTER TABLE ${tbl} RENAME TO ${tbl}_fk_fix`);
+        db.exec(fixedSql);
+        db.exec(`INSERT INTO ${tbl} (${tblCols}) SELECT ${tblCols} FROM ${tbl}_fk_fix`);
+        db.exec(`DROP TABLE ${tbl}_fk_fix`);
+      }
+    }
+    db.pragma('foreign_keys = ON');
+    console.log('Users table migrated successfully');
+  }
 
   // Migrate users table: add parceiro fields if they don't exist
   const userColumns = db.pragma('table_info(users)').map(c => c.name);
@@ -53,6 +108,9 @@ export function initializeDatabase() {
   }
   if (!userColumns.includes('com_val')) {
     db.exec(`ALTER TABLE users ADD COLUMN com_val REAL`);
+  }
+  if (!userColumns.includes('cnpj')) {
+    db.exec(`ALTER TABLE users ADD COLUMN cnpj TEXT`);
   }
 
   // Refresh tokens table
@@ -257,6 +315,42 @@ export function initializeDatabase() {
     )
   `);
 
+  // Convenios table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS convenios (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      is_active INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Parceiro-Convenio junction table (many-to-many)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS parceiro_convenios (
+      parceiro_id TEXT NOT NULL,
+      convenio_id TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (parceiro_id, convenio_id),
+      FOREIGN KEY (parceiro_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (convenio_id) REFERENCES convenios(id) ON DELETE CASCADE
+    )
+  `);
+
+  // User-Convenio junction table (links convenio-role users to their convenios)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS user_convenios (
+      user_id TEXT NOT NULL,
+      convenio_id TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (user_id, convenio_id),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (convenio_id) REFERENCES convenios(id) ON DELETE CASCADE
+    )
+  `);
+
   // Settings table (for HubSpot API keys, etc.)
   db.exec(`
     CREATE TABLE IF NOT EXISTS settings (
@@ -288,6 +382,11 @@ export function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS idx_whatsapp_instances_gerente ON whatsapp_instances(gerente_id);
     CREATE INDEX IF NOT EXISTS idx_messages_whatsapp_id ON messages(whatsapp_message_id);
     CREATE INDEX IF NOT EXISTS idx_users_tel ON users(tel);
+    CREATE INDEX IF NOT EXISTS idx_convenios_active ON convenios(is_active);
+    CREATE INDEX IF NOT EXISTS idx_parceiro_convenios_parceiro ON parceiro_convenios(parceiro_id);
+    CREATE INDEX IF NOT EXISTS idx_parceiro_convenios_convenio ON parceiro_convenios(convenio_id);
+    CREATE INDEX IF NOT EXISTS idx_user_convenios_user ON user_convenios(user_id);
+    CREATE INDEX IF NOT EXISTS idx_user_convenios_convenio ON user_convenios(convenio_id);
   `);
 
   console.log('Database initialized successfully');

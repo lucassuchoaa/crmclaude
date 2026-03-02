@@ -122,6 +122,9 @@ export const usersApi = {
 
   getTeam: (id) =>
     api.get(`/users/${id}/team`),
+
+  resetPassword: (id) =>
+    api.post(`/users/${id}/reset-password`),
 };
 
 // Indications API
@@ -143,6 +146,12 @@ export const indicationsApi = {
 
   getKanban: () =>
     api.get('/indications/board/kanban'),
+
+  addHistory: (id, txt, action = 'obs') =>
+    api.post(`/indications/${id}/history`, { txt, action }),
+
+  getActivity: (limit = 20) =>
+    api.get('/indications/activity/recent', { params: { limit } }),
 };
 
 // Commissions API
@@ -189,8 +198,10 @@ export const materialsApi = {
   getById: (id) =>
     api.get(`/materials/${id}`),
 
-  create: (data) =>
-    api.post('/materials', data),
+  create: (formData) =>
+    api.post('/materials', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }),
 
   update: (id, data) =>
     api.put(`/materials/${id}`, data),
@@ -200,6 +211,9 @@ export const materialsApi = {
 
   getCategories: () =>
     api.get('/materials/meta/categories'),
+
+  download: (id) =>
+    api.get(`/materials/${id}/download`, { responseType: 'blob' }),
 };
 
 // Notifications API
@@ -238,37 +252,22 @@ export const dashboardApi = {
     api.get('/dashboard/charts', { params: { period } }),
 };
 
-// CNPJ API (Receita Federal via BrasilAPI)
-export const cnpjApi = {
-  /**
-   * Consulta CNPJ na Receita Federal
-   * @param {string} cnpj - CNPJ com ou sem formatação
-   */
-  lookup: (cnpj) =>
-    api.get(`/cnpj/${encodeURIComponent(cnpj)}`),
-};
-
 // HubSpot Integration API
 export const hubspotApi = {
-  /**
-   * Busca empresa no HubSpot pelo CNPJ e verifica oportunidades
-   * @param {string} cnpj - CNPJ para buscar
-   */
   search: (cnpj) =>
     api.post('/hubspot/search', { cnpj }),
 
-  /**
-   * Testa conexão com HubSpot
-   */
   test: () =>
     api.get('/hubspot/test'),
 
-  /**
-   * Salva configuração do HubSpot (API Key)
-   * @param {string} apiKey - API Key do HubSpot
-   */
-  saveConfig: (apiKey) =>
-    api.post('/hubspot/config', { apiKey }),
+  getConfig: () =>
+    api.get('/hubspot/config'),
+
+  saveConfig: ({ apiKey, pipelineId }) =>
+    api.post('/hubspot/config', { apiKey, pipelineId }),
+
+  getPipelines: () =>
+    api.get('/hubspot/pipelines'),
 };
 
 // Groups API (Chat Gerente-Parceiro)
@@ -280,8 +279,23 @@ export const groupsApi = {
 
 // CNPJ Agent API
 export const cnpjAgentApi = {
+  lookup: (cnpj) => api.get(`/cnpj-agent/lookup/${encodeURIComponent(cnpj)}`),
   check: (data) => api.post('/cnpj-agent/check', data),
   createIndication: (data) => api.post('/cnpj-agent/create-indication', data),
+};
+
+// Convenios API
+export const conveniosApi = {
+  getAll: () => api.get('/convenios'),
+  create: (data) => api.post('/convenios', data),
+  update: (id, data) => api.put(`/convenios/${id}`, data),
+  delete: (id) => api.delete(`/convenios/${id}`),
+  getParceiros: (id) => api.get(`/convenios/${id}/parceiros`),
+  getIndications: (id) => api.get(`/convenios/${id}/indications`),
+  getStats: (id) => api.get(`/convenios/${id}/stats`),
+  addParceiro: (id, parceiroId) => api.post(`/convenios/${id}/parceiros`, { parceiro_id: parceiroId }),
+  removeParceiro: (id, parceiroId) => api.delete(`/convenios/${id}/parceiros/${parceiroId}`),
+  getParceiroConvenios: (parceiroId) => api.get(`/convenios/parceiro/${parceiroId}/convenios`),
 };
 
 // Diretoria API

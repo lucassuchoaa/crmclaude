@@ -42,13 +42,17 @@ router.post('/instance/connect', authenticate, async (req, res) => {
     let qrData = null;
     try {
       const connectRes = await evo.connectInstance(instance.instance_name);
-      if (connectRes?.base64) {
-        qrData = connectRes.base64;
+      console.log('Evolution connectInstance response keys:', Object.keys(connectRes || {}));
+
+      // Evolution API pode retornar QR em diferentes caminhos
+      const qr = connectRes?.base64 || connectRes?.qrcode?.base64 || connectRes?.qrcode || null;
+      if (qr && typeof qr === 'string') {
+        qrData = qr;
         db.prepare(`
           UPDATE whatsapp_instances SET status = 'qr_pending', qr_code = ?, qr_expires_at = datetime('now', '+2 minutes'), updated_at = CURRENT_TIMESTAMP
           WHERE gerente_id = ?
         `).run(qrData, userId);
-      } else if (connectRes?.instance?.state === 'open') {
+      } else if (connectRes?.instance?.state === 'open' || connectRes?.state === 'open') {
         db.prepare(`
           UPDATE whatsapp_instances SET status = 'connected', updated_at = CURRENT_TIMESTAMP
           WHERE gerente_id = ?
@@ -114,21 +118,52 @@ router.get('/instance/status', authenticate, async (req, res) => {
 
 /**
  * GET /api/whatsapp/instance/qr
+ * Busca QR code do DB; se expirado ou ausente, solicita novo à Evolution API
  */
-router.get('/instance/qr', authenticate, (req, res) => {
+router.get('/instance/qr', authenticate, async (req, res) => {
   try {
     const { role, id: userId } = req.user;
     if (role !== 'gerente') return res.status(403).json({ error: 'Acesso negado.' });
 
     const db = getDatabase();
-    const instance = db.prepare('SELECT qr_code, status, qr_expires_at FROM whatsapp_instances WHERE gerente_id = ?').get(userId);
+    const instance = db.prepare('SELECT * FROM whatsapp_instances WHERE gerente_id = ?').get(userId);
 
     if (!instance) return res.json({ qr_code: null, status: 'disconnected' });
+
+    // Se já conectado, não precisa de QR
+    if (instance.status === 'connected') {
+      return res.json({ qr_code: null, status: 'connected', expired: false });
+    }
+
+    const isExpired = !instance.qr_code || !instance.qr_expires_at || new Date(instance.qr_expires_at) < new Date();
+
+    // Se QR expirado ou ausente, buscar novo da Evolution API
+    if (isExpired && instance.instance_name) {
+      try {
+        const connectRes = await evo.connectInstance(instance.instance_name);
+        if (connectRes?.base64) {
+          const qr = connectRes.base64;
+          db.prepare(`
+            UPDATE whatsapp_instances SET status = 'qr_pending', qr_code = ?, qr_expires_at = datetime('now', '+2 minutes'), updated_at = CURRENT_TIMESTAMP
+            WHERE gerente_id = ?
+          `).run(qr, userId);
+          return res.json({ qr_code: qr, status: 'qr_pending', expired: false });
+        }
+        // Se retornou state open, está conectado
+        if (connectRes?.instance?.state === 'open') {
+          db.prepare('UPDATE whatsapp_instances SET status = ?, qr_code = NULL, updated_at = CURRENT_TIMESTAMP WHERE gerente_id = ?')
+            .run('connected', userId);
+          return res.json({ qr_code: null, status: 'connected', expired: false });
+        }
+      } catch (e) {
+        console.warn('QR refresh from Evolution API failed:', e.message);
+      }
+    }
 
     res.json({
       qr_code: instance.qr_code,
       status: instance.status,
-      expired: instance.qr_expires_at && new Date(instance.qr_expires_at) < new Date(),
+      expired: isExpired,
     });
   } catch (error) {
     console.error('WhatsApp QR error:', error);
@@ -172,13 +207,18 @@ router.post('/instance/disconnect', authenticate, async (req, res) => {
  */
 router.post('/webhook', (req, res) => {
   try {
-    // Validar API key
-    const apiKey = req.headers.apikey || req.query.apikey;
-    if (apiKey !== process.env.EVOLUTION_API_KEY) {
+    // Validar API key (Evolution API pode enviar de diferentes formas)
+    const apiKey = req.headers.apikey || req.headers['x-api-key'] || req.query.apikey;
+    const expectedKey = process.env.EVOLUTION_API_KEY;
+    if (expectedKey && apiKey !== expectedKey) {
+      console.warn('Webhook: invalid API key received. Header keys:', Object.keys(req.headers).join(', '));
       return res.status(401).json({ error: 'Invalid API key' });
     }
 
-    const { event, data, instance } = req.body;
+    const body = req.body;
+    console.log('[Webhook] Event received:', body?.event, 'Instance:', body?.instance || body?.data?.instance);
+
+    const { event, data, instance } = body;
     const instanceName = instance || data?.instance;
 
     if (!event || !instanceName) {

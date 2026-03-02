@@ -5,8 +5,15 @@ const SALT_ROUNDS = 12;
 const ACCESS_TOKEN_EXPIRY = '15m';
 const REFRESH_TOKEN_EXPIRY = '7d';
 
-export const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production';
-export const REFRESH_SECRET = process.env.REFRESH_SECRET || 'your-refresh-secret-key-change-in-production';
+if (!process.env.JWT_SECRET || !process.env.REFRESH_SECRET) {
+  console.error('FATAL: JWT_SECRET and REFRESH_SECRET must be set in environment variables');
+  if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging') {
+    process.exit(1);
+  }
+}
+
+export const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-jwt-secret-do-not-use-in-prod';
+export const REFRESH_SECRET = process.env.REFRESH_SECRET || 'dev-only-refresh-secret-do-not-use-in-prod';
 
 export async function hashPassword(password) {
   return bcrypt.hash(password, SALT_ROUNDS);
@@ -54,10 +61,11 @@ export function verifyRefreshToken(token) {
 }
 
 export const ROLE_HIERARCHY = {
-  super_admin: 5,
-  executivo: 4,
-  diretor: 3,
-  gerente: 2,
+  super_admin: 6,
+  executivo: 5,
+  diretor: 4,
+  gerente: 3,
+  convenio: 2,
   parceiro: 1
 };
 

@@ -4,8 +4,28 @@ import { getDatabase } from '../config/database.js';
 import { hasPermission } from '../config/auth.js';
 import { authenticate } from '../middleware/auth.js';
 import { lookupCnpj } from '../utils/cnpjLookup.js';
+import { validateCnpj } from '../utils/validators.js';
+import { createNotification } from '../utils/notificationHelper.js';
 
 const router = express.Router();
+
+/**
+ * GET /api/cnpj-agent/lookup/:cnpj
+ * Consulta simples de CNPJ na Receita Federal
+ */
+router.get('/lookup/:cnpj', authenticate, async (req, res) => {
+  try {
+    const { valid, cleaned, error } = validateCnpj(req.params.cnpj);
+    if (!valid) return res.status(400).json({ error });
+
+    const result = await lookupCnpj(cleaned);
+    res.json(result);
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    console.error('CNPJ lookup error:', error);
+    res.status(500).json({ error: 'Erro ao consultar CNPJ. Tente novamente.' });
+  }
+});
 
 /**
  * POST /api/cnpj-agent/check
@@ -25,10 +45,8 @@ router.post('/check', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'CNPJ, gerente_id e parceiro_id são obrigatórios.' });
     }
 
-    const cleanCnpj = cnpj.replace(/[^\d]/g, '');
-    if (cleanCnpj.length !== 14) {
-      return res.status(400).json({ error: 'CNPJ inválido. Deve conter 14 dígitos.' });
-    }
+    const { valid, cleaned: cleanCnpj, error: cnpjError } = validateCnpj(cnpj);
+    if (!valid) return res.status(400).json({ error: cnpjError });
 
     // Consulta CNPJ
     let cnpjData;
@@ -75,14 +93,12 @@ router.post('/check', authenticate, async (req, res) => {
         metadata
       );
 
-      // Notificação para o gerente
-      const notifId = uuidv4();
-      db.prepare(`
-        INSERT INTO notifications (id, user_id, title, message, type)
-        VALUES (?, ?, ?, ?, 'warning')
-      `).run(notifId, gerente_id, 'CNPJ Duplicado',
-        `O CNPJ ${cleanCnpj} (${cnpjData.razao_social}) já está cadastrado por ${existing.owner_name} com status "${existing.status}".`
-      );
+      createNotification({
+        userId: gerente_id,
+        title: 'CNPJ Duplicado',
+        message: `O CNPJ ${cleanCnpj} (${cnpjData.razao_social}) já está cadastrado por ${existing.owner_name} com status "${existing.status}".`,
+        type: 'warning'
+      });
 
       const message = db.prepare(`
         SELECT m.*, u.name as sender_name FROM messages m LEFT JOIN users u ON m.sender_id = u.id WHERE m.id = ?
@@ -177,14 +193,12 @@ router.post('/create-indication', authenticate, (req, res) => {
       JSON.stringify({ indication_id: indId, cnpj_data })
     );
 
-    // Notificação para o gerente
-    const notifId = uuidv4();
-    db.prepare(`
-      INSERT INTO notifications (id, user_id, title, message, type)
-      VALUES (?, ?, ?, ?, 'success')
-    `).run(notifId, gerente_id, 'Nova Indicação Criada',
-      `Indicação ${cnpj_data.razao_social} (${cleanCnpj}) criada via Agente CNPJ.`
-    );
+    createNotification({
+      userId: gerente_id,
+      title: 'Nova Indicação Criada',
+      message: `Indicação ${cnpj_data.razao_social} (${cleanCnpj}) criada via Agente CNPJ.`,
+      type: 'success'
+    });
 
     const indication = db.prepare('SELECT * FROM indications WHERE id = ?').get(indId);
     const message = db.prepare(`

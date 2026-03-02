@@ -26,7 +26,14 @@ router.get('/stats', authenticate, (req, res) => {
     `;
     const indicationParams = [];
 
-    if (!isAdmin) {
+    if (req.user.role === 'convenio') {
+      indicationsQuery += ` WHERE owner_id IN (
+        SELECT pc.parceiro_id FROM parceiro_convenios pc
+        INNER JOIN user_convenios uc ON uc.convenio_id = pc.convenio_id
+        WHERE uc.user_id = ?
+      )`;
+      indicationParams.push(req.user.id);
+    } else if (!isAdmin) {
       indicationsQuery += ` WHERE owner_id = ? OR owner_id IN (SELECT id FROM users WHERE manager_id = ?)`;
       indicationParams.push(req.user.id, req.user.id);
     }
@@ -44,7 +51,14 @@ router.get('/stats', authenticate, (req, res) => {
     `;
     const commissionParams = [];
 
-    if (!isAdmin) {
+    if (req.user.role === 'convenio') {
+      commissionsQuery += ` WHERE user_id IN (
+        SELECT pc.parceiro_id FROM parceiro_convenios pc
+        INNER JOIN user_convenios uc ON uc.convenio_id = pc.convenio_id
+        WHERE uc.user_id = ?
+      )`;
+      commissionParams.push(req.user.id);
+    } else if (!isAdmin) {
       commissionsQuery += ` WHERE user_id = ?`;
       commissionParams.push(req.user.id);
     }
@@ -64,15 +78,26 @@ router.get('/stats', authenticate, (req, res) => {
       LEFT JOIN users u ON i.owner_id = u.id
     `;
 
-    if (!isAdmin) {
+    if (req.user.role === 'convenio') {
+      activityQuery += ` WHERE i.owner_id IN (
+        SELECT pc.parceiro_id FROM parceiro_convenios pc
+        INNER JOIN user_convenios uc ON uc.convenio_id = pc.convenio_id
+        WHERE uc.user_id = ?
+      )`;
+    } else if (!isAdmin) {
       activityQuery += ` WHERE i.owner_id = ? OR i.owner_id IN (SELECT id FROM users WHERE manager_id = ?)`;
     }
 
     activityQuery += ` ORDER BY i.updated_at DESC LIMIT 10`;
 
-    const recentActivity = isAdmin
-      ? db.prepare(activityQuery).all()
-      : db.prepare(activityQuery).all(req.user.id, req.user.id);
+    let recentActivity;
+    if (req.user.role === 'convenio') {
+      recentActivity = db.prepare(activityQuery).all(req.user.id);
+    } else if (isAdmin) {
+      recentActivity = db.prepare(activityQuery).all();
+    } else {
+      recentActivity = db.prepare(activityQuery).all(req.user.id, req.user.id);
+    }
 
     // Conversion rate
     const conversionRate = indications.total > 0
@@ -91,7 +116,14 @@ router.get('/stats', authenticate, (req, res) => {
     `;
     const monthlyParams = [thisMonth.toISOString()];
 
-    if (!isAdmin) {
+    if (req.user.role === 'convenio') {
+      monthlyQuery += ` AND owner_id IN (
+        SELECT pc.parceiro_id FROM parceiro_convenios pc
+        INNER JOIN user_convenios uc ON uc.convenio_id = pc.convenio_id
+        WHERE uc.user_id = ?
+      )`;
+      monthlyParams.push(req.user.id);
+    } else if (!isAdmin) {
       monthlyQuery += ` AND (owner_id = ? OR owner_id IN (SELECT id FROM users WHERE manager_id = ?))`;
       monthlyParams.push(req.user.id, req.user.id);
     }
@@ -194,7 +226,14 @@ router.get('/charts', authenticate, (req, res) => {
     `;
     const timelineParams = [daysAgo.toISOString()];
 
-    if (!isAdmin) {
+    if (req.user.role === 'convenio') {
+      timelineQuery += ` AND owner_id IN (
+        SELECT pc.parceiro_id FROM parceiro_convenios pc
+        INNER JOIN user_convenios uc ON uc.convenio_id = pc.convenio_id
+        WHERE uc.user_id = ?
+      )`;
+      timelineParams.push(req.user.id);
+    } else if (!isAdmin) {
       timelineQuery += ` AND (owner_id = ? OR owner_id IN (SELECT id FROM users WHERE manager_id = ?))`;
       timelineParams.push(req.user.id, req.user.id);
     }
@@ -211,7 +250,14 @@ router.get('/charts', authenticate, (req, res) => {
     `;
     const statusParams = [];
 
-    if (!isAdmin) {
+    if (req.user.role === 'convenio') {
+      statusQuery += ` AND owner_id IN (
+        SELECT pc.parceiro_id FROM parceiro_convenios pc
+        INNER JOIN user_convenios uc ON uc.convenio_id = pc.convenio_id
+        WHERE uc.user_id = ?
+      )`;
+      statusParams.push(req.user.id);
+    } else if (!isAdmin) {
       statusQuery += ` AND (owner_id = ? OR owner_id IN (SELECT id FROM users WHERE manager_id = ?))`;
       statusParams.push(req.user.id, req.user.id);
     }
@@ -227,7 +273,14 @@ router.get('/charts', authenticate, (req, res) => {
     `;
     const valueParams = [];
 
-    if (!isAdmin) {
+    if (req.user.role === 'convenio') {
+      valueQuery += ` WHERE owner_id IN (
+        SELECT pc.parceiro_id FROM parceiro_convenios pc
+        INNER JOIN user_convenios uc ON uc.convenio_id = pc.convenio_id
+        WHERE uc.user_id = ?
+      )`;
+      valueParams.push(req.user.id);
+    } else if (!isAdmin) {
       valueQuery += ` WHERE (owner_id = ? OR owner_id IN (SELECT id FROM users WHERE manager_id = ?))`;
       valueParams.push(req.user.id, req.user.id);
     }

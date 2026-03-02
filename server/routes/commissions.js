@@ -4,6 +4,8 @@ import { getDatabase } from '../config/database.js';
 import { hasPermission } from '../config/auth.js';
 import { authenticate } from '../middleware/auth.js';
 import { requireMinRole } from '../middleware/rbac.js';
+import { validateStatus, COMMISSION_STATUSES } from '../utils/validators.js';
+import { createNotification } from '../utils/notificationHelper.js';
 
 const router = express.Router();
 
@@ -122,17 +124,13 @@ router.post('/', authenticate, requireMinRole('diretor'), (req, res) => {
       WHERE c.id = ?
     `).get(id);
 
-    // Create notification
-    db.prepare(`
-      INSERT INTO notifications (id, user_id, title, message, type, link)
-      VALUES (?, ?, ?, ?, 'success', ?)
-    `).run(
-      uuidv4(),
-      user_id,
-      'Nova comissao',
-      `Voce tem uma nova comissao de R$ ${amount.toFixed(2)} pendente`,
-      `/commissions/${id}`
-    );
+    createNotification({
+      userId: user_id,
+      title: 'Nova comissao',
+      message: `Voce tem uma nova comissao de R$ ${amount.toFixed(2)} pendente`,
+      type: 'success',
+      link: `/commissions/${id}`
+    });
 
     res.status(201).json({ commission });
   } catch (error) {
@@ -145,11 +143,8 @@ router.post('/', authenticate, requireMinRole('diretor'), (req, res) => {
 router.patch('/:id/status', authenticate, requireMinRole('diretor'), (req, res) => {
   try {
     const { status, payment_date } = req.body;
-    const validStatuses = ['pending', 'approved', 'paid', 'cancelled'];
-
-    if (!status || !validStatuses.includes(status)) {
-      return res.status(400).json({ error: 'Invalid status' });
-    }
+    const { valid, error: statusError } = validateStatus(status, COMMISSION_STATUSES);
+    if (!valid) return res.status(400).json({ error: statusError });
 
     const db = getDatabase();
     const commission = db.prepare('SELECT * FROM commissions WHERE id = ?').get(req.params.id);
@@ -170,17 +165,13 @@ router.patch('/:id/status', authenticate, requireMinRole('diretor'), (req, res) 
     };
 
     if (statusMessages[status]) {
-      db.prepare(`
-        INSERT INTO notifications (id, user_id, title, message, type, link)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(
-        uuidv4(),
-        commission.user_id,
-        'Atualizacao de comissao',
-        statusMessages[status],
-        status === 'cancelled' ? 'warning' : 'success',
-        `/commissions/${req.params.id}`
-      );
+      createNotification({
+        userId: commission.user_id,
+        title: 'Atualizacao de comissao',
+        message: statusMessages[status],
+        type: status === 'cancelled' ? 'warning' : 'success',
+        link: `/commissions/${req.params.id}`
+      });
     }
 
     const updated = db.prepare(`

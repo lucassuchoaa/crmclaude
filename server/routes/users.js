@@ -1,9 +1,15 @@
 import express from 'express';
+import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../config/database.js';
 import { hashPassword, hasPermission, canManageUser } from '../config/auth.js';
 import { authenticate } from '../middleware/auth.js';
 import { requireMinRole } from '../middleware/rbac.js';
+
+function generatePassword(len = 8) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  return Array.from(crypto.randomBytes(len), b => chars[b % chars.length]).join('');
+}
 
 const router = express.Router();
 
@@ -15,7 +21,7 @@ router.get('/', authenticate, (req, res) => {
 
     let query = `
       SELECT u.id, u.email, u.name, u.role, u.avatar, u.manager_id, u.is_active,
-             u.empresa, u.tel, u.com_tipo, u.com_val, u.created_at,
+             u.empresa, u.tel, u.com_tipo, u.com_val, u.cnpj, u.created_at,
              m.name as manager_name
       FROM users u
       LEFT JOIN users m ON u.manager_id = m.id
@@ -24,7 +30,15 @@ router.get('/', authenticate, (req, res) => {
     const params = [];
 
     // Filter by role if not super_admin/executivo
-    if (!hasPermission(req.user.role, 'executivo')) {
+    if (req.user.role === 'convenio') {
+      // Convenio role: only parceiros linked to their convenios
+      query += ` AND u.id IN (
+        SELECT pc.parceiro_id FROM parceiro_convenios pc
+        INNER JOIN user_convenios uc ON uc.convenio_id = pc.convenio_id
+        WHERE uc.user_id = ?
+      )`;
+      params.push(req.user.id);
+    } else if (!hasPermission(req.user.role, 'executivo')) {
       if (req.user.role === 'diretor') {
         // Directors see their gerentes and parceiros
         query += ` AND (u.manager_id = ? OR u.id = ?)`;
@@ -71,7 +85,7 @@ router.get('/:id', authenticate, (req, res) => {
     const db = getDatabase();
     const user = db.prepare(`
       SELECT u.id, u.email, u.name, u.role, u.avatar, u.manager_id, u.is_active,
-             u.empresa, u.tel, u.com_tipo, u.com_val, u.created_at,
+             u.empresa, u.tel, u.com_tipo, u.com_val, u.cnpj, u.created_at,
              m.name as manager_name
       FROM users u
       LEFT JOIN users m ON u.manager_id = m.id
@@ -100,7 +114,7 @@ router.get('/:id', authenticate, (req, res) => {
 // Create user
 router.post('/', authenticate, requireMinRole('gerente'), async (req, res) => {
   try {
-    const { email, password, name, role, manager_id, empresa, tel, com_tipo, com_val } = req.body;
+    const { email, password, name, role, manager_id, empresa, tel, com_tipo, com_val, cnpj, convenio_ids } = req.body;
 
     if (!email || !password || !name || !role) {
       return res.status(400).json({ error: 'Email, password, name and role required' });
@@ -129,19 +143,36 @@ router.post('/', authenticate, requireMinRole('gerente'), async (req, res) => {
     const avatar = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
 
     db.prepare(`
-      INSERT INTO users (id, email, password, name, role, avatar, manager_id, empresa, tel, com_tipo, com_val)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO users (id, email, password, name, role, avatar, manager_id, empresa, tel, com_tipo, com_val, cnpj)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, email.toLowerCase(), hashedPassword, name, role, avatar,
       manager_id || null,
       empresa || null,
       tel || null,
       com_tipo || null,
-      com_val !== undefined ? com_val : null
+      com_val !== undefined ? com_val : null,
+      cnpj || null
     );
 
+    // Link parceiro to convenios if provided
+    if (convenio_ids && Array.isArray(convenio_ids) && convenio_ids.length > 0 && role === 'parceiro') {
+      const insertConvenio = db.prepare('INSERT OR IGNORE INTO parceiro_convenios (parceiro_id, convenio_id) VALUES (?, ?)');
+      for (const cid of convenio_ids) {
+        insertConvenio.run(id, cid);
+      }
+    }
+
+    // Link convenio-role user to convenios if provided
+    if (convenio_ids && Array.isArray(convenio_ids) && convenio_ids.length > 0 && role === 'convenio') {
+      const insertUserConvenio = db.prepare('INSERT OR IGNORE INTO user_convenios (user_id, convenio_id) VALUES (?, ?)');
+      for (const cid of convenio_ids) {
+        insertUserConvenio.run(id, cid);
+      }
+    }
+
     const user = db.prepare(`
-      SELECT id, email, name, role, avatar, manager_id, empresa, tel, com_tipo, com_val, is_active, created_at
+      SELECT id, email, name, role, avatar, manager_id, empresa, tel, com_tipo, com_val, cnpj, is_active, created_at
       FROM users WHERE id = ?
     `).get(id);
 
@@ -155,7 +186,7 @@ router.post('/', authenticate, requireMinRole('gerente'), async (req, res) => {
 // Update user
 router.put('/:id', authenticate, async (req, res) => {
   try {
-    const { name, role, manager_id, is_active, empresa, tel, com_tipo, com_val } = req.body;
+    const { name, role, manager_id, is_active, empresa, tel, com_tipo, com_val, cnpj, convenio_ids } = req.body;
     const userId = req.params.id;
 
     // Validate com_tipo if provided
@@ -178,17 +209,16 @@ router.put('/:id', authenticate, async (req, res) => {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // Users can only update their own name and parceiro profile fields
+    // Users can only update their own name and basic profile fields (NOT commission values)
     if (isSelf && !hasPermission(req.user.role, 'gerente')) {
       db.prepare(`
-        UPDATE users SET name = ?, empresa = ?, tel = ?, com_tipo = ?, com_val = ?, updated_at = ?
+        UPDATE users SET name = ?, empresa = ?, tel = ?, cnpj = ?, updated_at = ?
         WHERE id = ?
       `).run(
         name || user.name,
         empresa !== undefined ? empresa : user.empresa,
         tel !== undefined ? tel : user.tel,
-        com_tipo !== undefined ? com_tipo : user.com_tipo,
-        com_val !== undefined ? com_val : user.com_val,
+        cnpj !== undefined ? cnpj : user.cnpj,
         new Date().toISOString(),
         userId
       );
@@ -198,7 +228,7 @@ router.put('/:id', authenticate, async (req, res) => {
 
       db.prepare(`
         UPDATE users SET name = ?, role = ?, manager_id = ?, is_active = ?,
-          empresa = ?, tel = ?, com_tipo = ?, com_val = ?, updated_at = ?
+          empresa = ?, tel = ?, com_tipo = ?, com_val = ?, cnpj = ?, updated_at = ?
         WHERE id = ?
       `).run(
         name || user.name,
@@ -209,9 +239,24 @@ router.put('/:id', authenticate, async (req, res) => {
         tel !== undefined ? tel : user.tel,
         com_tipo !== undefined ? com_tipo : user.com_tipo,
         com_val !== undefined ? com_val : user.com_val,
+        cnpj !== undefined ? cnpj : user.cnpj,
         new Date().toISOString(),
         userId
       );
+    }
+
+    // Update convenio links if provided
+    if (convenio_ids && Array.isArray(convenio_ids)) {
+      const effectiveRole = role || user.role;
+      if (effectiveRole === 'parceiro') {
+        db.prepare('DELETE FROM parceiro_convenios WHERE parceiro_id = ?').run(userId);
+        const ins = db.prepare('INSERT OR IGNORE INTO parceiro_convenios (parceiro_id, convenio_id) VALUES (?, ?)');
+        for (const cid of convenio_ids) { ins.run(userId, cid); }
+      } else if (effectiveRole === 'convenio') {
+        db.prepare('DELETE FROM user_convenios WHERE user_id = ?').run(userId);
+        const ins = db.prepare('INSERT OR IGNORE INTO user_convenios (user_id, convenio_id) VALUES (?, ?)');
+        for (const cid of convenio_ids) { ins.run(userId, cid); }
+      }
     }
 
     const updatedUser = db.prepare(`
@@ -251,6 +296,36 @@ router.delete('/:id', authenticate, requireMinRole('diretor'), (req, res) => {
   } catch (error) {
     console.error('Delete user error:', error);
     res.status(500).json({ error: 'Failed to delete user' });
+  }
+});
+
+// Reset password (admin/manager generates new password)
+router.post('/:id/reset-password', authenticate, requireMinRole('gerente'), async (req, res) => {
+  try {
+    const db = getDatabase();
+    const targetUser = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+
+    if (!targetUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (!canManageUser(req.user.role, targetUser.role)) {
+      return res.status(403).json({ error: 'Cannot reset password for this user' });
+    }
+
+    const newPassword = generatePassword(8);
+    const hashed = await hashPassword(newPassword);
+
+    db.prepare('UPDATE users SET password = ?, updated_at = ? WHERE id = ?')
+      .run(hashed, new Date().toISOString(), req.params.id);
+
+    // Invalidate all refresh tokens
+    db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(req.params.id);
+
+    res.json({ password: newPassword });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ error: 'Failed to reset password' });
   }
 });
 

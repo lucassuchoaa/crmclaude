@@ -1,5 +1,4 @@
 import express from 'express';
-// v4 import removed - not currently used
 import { getDatabase } from '../config/database.js';
 import {
   comparePassword,
@@ -120,12 +119,8 @@ router.post('/logout', authenticate, (req, res) => {
     const { refreshToken } = req.body;
     const db = getDatabase();
 
-    if (refreshToken) {
-      db.prepare('DELETE FROM refresh_tokens WHERE token = ?').run(refreshToken);
-    }
-
-    // Optionally delete all refresh tokens for this user
-    // db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(req.user.id);
+    // Delete ALL refresh tokens for this user (full logout from all devices)
+    db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(req.user.id);
 
     res.json({ message: 'Logged out successfully' });
   } catch (error) {

@@ -3,10 +3,10 @@ import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../config/database.js';
 import { hasPermission } from '../config/auth.js';
 import { authenticate } from '../middleware/auth.js';
+import { validateStatus, INDICATION_STATUSES } from '../utils/validators.js';
+import { createNotification } from '../utils/notificationHelper.js';
 
 const router = express.Router();
-
-const VALID_STATUSES = ['novo', 'em_contato', 'proposta', 'negociacao', 'fechado', 'perdido'];
 
 // Get all indications
 router.get('/', authenticate, (req, res) => {
@@ -26,9 +26,27 @@ router.get('/', authenticate, (req, res) => {
     const params = [];
 
     // Filter by access
-    if (!hasPermission(req.user.role, 'executivo')) {
-      if (req.user.role === 'diretor' || req.user.role === 'gerente') {
-        // See own and team's indications
+    if (req.user.role === 'convenio') {
+      // Convenio role: only indications from parceiros linked to their convenios
+      query += ` AND i.owner_id IN (
+        SELECT pc.parceiro_id FROM parceiro_convenios pc
+        INNER JOIN user_convenios uc ON uc.convenio_id = pc.convenio_id
+        WHERE uc.user_id = ?
+      )`;
+      params.push(req.user.id);
+    } else if (!hasPermission(req.user.role, 'executivo')) {
+      if (req.user.role === 'diretor') {
+        // Directors see indications from their gerentes' parceiros (2 levels deep)
+        query += ` AND (i.owner_id = ? OR i.owner_id IN (
+          SELECT id FROM users WHERE manager_id = ?
+          UNION
+          SELECT id FROM users WHERE manager_id IN (
+            SELECT id FROM users WHERE manager_id = ?
+          )
+        ))`;
+        params.push(req.user.id, req.user.id, req.user.id);
+      } else if (req.user.role === 'gerente') {
+        // Gerentes see their own and their parceiros' indications
         query += ` AND (i.owner_id = ? OR i.owner_id IN (SELECT id FROM users WHERE manager_id = ?))`;
         params.push(req.user.id, req.user.id);
       } else {
@@ -60,14 +78,126 @@ router.get('/', authenticate, (req, res) => {
     const indications = db.prepare(query).all(...params);
 
     // Get total count
-    let countQuery = query.replace(/SELECT i\.\*.*FROM/, 'SELECT COUNT(*) as total FROM').replace(/ORDER BY.*$/, '');
+    let countQuery = query.replace(/SELECT[\s\S]*?FROM/, 'SELECT COUNT(*) as total FROM').replace(/ORDER BY[\s\S]*$/, '');
     const countParams = params.slice(0, -2);
-    const { total } = db.prepare(countQuery).get(...countParams);
+    const result = db.prepare(countQuery).get(...countParams);
+    const total = result?.total || 0;
 
     res.json({ indications, total, limit: parseInt(limit), offset: parseInt(offset) });
   } catch (error) {
     console.error('Get indications error:', error);
     res.status(500).json({ error: 'Failed to get indications' });
+  }
+});
+
+// Get recent activity across all accessible indications
+router.get('/activity/recent', authenticate, (req, res) => {
+  try {
+    const db = getDatabase();
+    const limit = parseInt(req.query.limit) || 20;
+
+    let query = `
+      SELECT h.id, h.action, h.old_value, h.new_value, h.txt, h.created_at,
+             u.name as user_name, u.id as user_id,
+             i.nome_fantasia, i.razao_social, i.id as indication_id
+      FROM indication_history h
+      LEFT JOIN users u ON h.user_id = u.id
+      LEFT JOIN indications i ON h.indication_id = i.id
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (req.user.role === 'convenio') {
+      query += ` AND i.owner_id IN (
+        SELECT pc.parceiro_id FROM parceiro_convenios pc
+        INNER JOIN user_convenios uc ON uc.convenio_id = pc.convenio_id
+        WHERE uc.user_id = ?
+      )`;
+      params.push(req.user.id);
+    } else if (!hasPermission(req.user.role, 'executivo')) {
+      if (req.user.role === 'diretor' || req.user.role === 'gerente') {
+        query += ` AND (i.owner_id = ? OR i.owner_id IN (SELECT id FROM users WHERE manager_id = ?))`;
+        params.push(req.user.id, req.user.id);
+      } else {
+        query += ` AND i.owner_id = ?`;
+        params.push(req.user.id);
+      }
+    }
+
+    query += ` ORDER BY h.created_at DESC LIMIT ?`;
+    params.push(limit);
+
+    const history = db.prepare(query).all(...params);
+
+    const activity = history.map(h => ({
+      id: h.id,
+      dt: h.created_at,
+      autor: h.user_name,
+      autorId: h.user_id,
+      txt: h.txt || h.new_value || h.action,
+      emp: h.nome_fantasia || h.razao_social,
+      indId: h.indication_id,
+    }));
+
+    res.json({ activity });
+  } catch (error) {
+    console.error('Get recent activity error:', error);
+    res.status(500).json({ error: 'Failed to get activity' });
+  }
+});
+
+// Get Kanban board data
+router.get('/board/kanban', authenticate, (req, res) => {
+  try {
+    const db = getDatabase();
+
+    let query = `
+      SELECT i.*, u.name as owner_name, u.avatar as owner_avatar
+      FROM indications i
+      LEFT JOIN users u ON i.owner_id = u.id
+      WHERE i.status != 'perdido'
+    `;
+    const params = [];
+
+    if (req.user.role === 'convenio') {
+      query += ` AND i.owner_id IN (
+        SELECT pc.parceiro_id FROM parceiro_convenios pc
+        INNER JOIN user_convenios uc ON uc.convenio_id = pc.convenio_id
+        WHERE uc.user_id = ?
+      )`;
+      params.push(req.user.id);
+    } else if (!hasPermission(req.user.role, 'executivo')) {
+      if (req.user.role === 'diretor' || req.user.role === 'gerente') {
+        query += ` AND (i.owner_id = ? OR i.owner_id IN (SELECT id FROM users WHERE manager_id = ?))`;
+        params.push(req.user.id, req.user.id);
+      } else {
+        query += ` AND i.owner_id = ?`;
+        params.push(req.user.id);
+      }
+    }
+
+    query += ` ORDER BY i.updated_at DESC`;
+
+    const indications = db.prepare(query).all(...params);
+
+    const columns = {
+      novo: [],
+      em_contato: [],
+      proposta: [],
+      negociacao: [],
+      fechado: []
+    };
+
+    indications.forEach(ind => {
+      if (columns[ind.status]) {
+        columns[ind.status].push(ind);
+      }
+    });
+
+    res.json({ columns });
+  } catch (error) {
+    console.error('Get kanban error:', error);
+    res.status(500).json({ error: 'Failed to get kanban data' });
   }
 });
 
@@ -204,6 +334,18 @@ router.post('/', authenticate, (req, res) => {
       VALUES (?, ?, 'created', 'novo')
     `).run(id, req.user.id);
 
+    // Notify gerente (parceiro's manager)
+    const owner = db.prepare('SELECT manager_id FROM users WHERE id = ?').get(req.user.id);
+    if (owner && owner.manager_id) {
+      createNotification({
+        userId: owner.manager_id,
+        title: 'Nova indicação recebida',
+        message: `${req.user.name} cadastrou: ${razao_social}`,
+        type: 'info',
+        link: `/indications/${id}`
+      });
+    }
+
     const indication = db.prepare('SELECT * FROM indications WHERE id = ?').get(id);
 
     res.status(201).json({ indication });
@@ -253,9 +395,9 @@ router.put('/:id', authenticate, (req, res) => {
       }
     }
 
-    // Validate status
-    if (status && !VALID_STATUSES.includes(status)) {
-      return res.status(400).json({ error: 'Invalid status' });
+    if (status) {
+      const { valid, error: statusError } = validateStatus(status, INDICATION_STATUSES);
+      if (!valid) return res.status(400).json({ error: statusError });
     }
 
     // Log status change
@@ -413,55 +555,6 @@ router.post('/:id/history', authenticate, (req, res) => {
   } catch (error) {
     console.error('Add history error:', error);
     res.status(500).json({ error: 'Failed to add history entry' });
-  }
-});
-
-// Get Kanban board data
-router.get('/board/kanban', authenticate, (req, res) => {
-  try {
-    const db = getDatabase();
-
-    let query = `
-      SELECT i.*, u.name as owner_name, u.avatar as owner_avatar
-      FROM indications i
-      LEFT JOIN users u ON i.owner_id = u.id
-      WHERE i.status != 'perdido'
-    `;
-    const params = [];
-
-    if (!hasPermission(req.user.role, 'executivo')) {
-      if (req.user.role === 'diretor' || req.user.role === 'gerente') {
-        query += ` AND (i.owner_id = ? OR i.owner_id IN (SELECT id FROM users WHERE manager_id = ?))`;
-        params.push(req.user.id, req.user.id);
-      } else {
-        query += ` AND i.owner_id = ?`;
-        params.push(req.user.id);
-      }
-    }
-
-    query += ` ORDER BY i.updated_at DESC`;
-
-    const indications = db.prepare(query).all(...params);
-
-    // Group by status
-    const columns = {
-      novo: [],
-      em_contato: [],
-      proposta: [],
-      negociacao: [],
-      fechado: []
-    };
-
-    indications.forEach(ind => {
-      if (columns[ind.status]) {
-        columns[ind.status].push(ind);
-      }
-    });
-
-    res.json({ columns });
-  } catch (error) {
-    console.error('Get kanban error:', error);
-    res.status(500).json({ error: 'Failed to get kanban data' });
   }
 });
 

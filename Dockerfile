@@ -16,7 +16,7 @@ RUN npm run build
 # Stage 2: Production
 FROM node:20-alpine
 
-RUN apk add --no-cache tini
+RUN apk add --no-cache tini su-exec
 
 WORKDIR /app
 
@@ -26,13 +26,14 @@ RUN npm ci --omit=dev
 COPY server/ ./server/
 COPY --from=builder /app/dist ./dist/
 
-# Create data directory for SQLite
-RUN mkdir -p server/data
+# Ensure data directory exists and app files are readable by node user
+RUN mkdir -p server/data && chown -R node:node /app
 
 ENV NODE_ENV=production
 ENV PORT=3001
 
 EXPOSE 3001
 
+# Use entrypoint that fixes data dir ownership then drops to non-root
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["node", "server/index.js"]
+CMD ["sh", "-c", "chown -R node:node /app/server/data && exec su-exec node node server/index.js"]

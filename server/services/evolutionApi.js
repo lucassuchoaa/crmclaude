@@ -2,6 +2,7 @@ const BASE_URL = process.env.EVOLUTION_API_URL || 'http://localhost:8080';
 const API_KEY = process.env.EVOLUTION_API_KEY || '';
 
 async function request(method, path, body) {
+  const url = `${BASE_URL}${path}`;
   const opts = {
     method,
     headers: {
@@ -11,23 +12,37 @@ async function request(method, path, body) {
   };
   if (body) opts.body = JSON.stringify(body);
 
-  const res = await fetch(`${BASE_URL}${path}`, opts);
+  console.log(`[EvolutionAPI] ${method} ${path}`);
+  const res = await fetch(url, opts);
+
+  const text = await res.text().catch(() => '');
+
   if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Evolution API ${method} ${path} → ${res.status}: ${text}`);
+    console.error(`[EvolutionAPI] ${method} ${path} → ${res.status}: ${text.slice(0, 500)}`);
+    throw new Error(`Evolution API ${method} ${path} → ${res.status}: ${text.slice(0, 200)}`);
   }
-  return res.json();
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    console.warn(`[EvolutionAPI] Non-JSON response for ${path}:`, text.slice(0, 200));
+    return { raw: text };
+  }
 }
 
 export async function createInstance(name) {
   return request('POST', '/instance/create', {
     instanceName: name,
-    integration: 'WHATSAPP-BAILEYS',
     qrcode: true,
+    token: '',
   });
 }
 
 export async function connectInstance(name) {
+  return request('GET', `/instance/connect/${name}`);
+}
+
+export async function fetchQrCode(name) {
   return request('GET', `/instance/connect/${name}`);
 }
 
@@ -38,7 +53,7 @@ export async function getInstanceStatus(name) {
 export async function sendText(name, jid, text) {
   return request('POST', `/message/sendText/${name}`, {
     number: jid,
-    text,
+    textMessage: { text },
   });
 }
 

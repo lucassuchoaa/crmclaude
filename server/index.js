@@ -16,38 +16,50 @@ import nfesRoutes from './routes/nfes.js';
 import materialsRoutes from './routes/materials.js';
 import notificationsRoutes from './routes/notifications.js';
 import dashboardRoutes from './routes/dashboard.js';
-import cnpjRoutes from './routes/cnpj.js';
 import hubspotRoutes from './routes/hubspot.js';
 import groupsRoutes from './routes/groups.js';
 import cnpjAgentRoutes from './routes/cnpjAgent.js';
 import diretoriaRoutes from './routes/diretoria.js';
 import whatsappRoutes from './routes/whatsapp.js';
+import conveniosRoutes from './routes/convenios.js';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Trust proxy (behind Nginx in production/staging)
+if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging') {
+  app.set('trust proxy', 1);
+}
+
 // Security middleware
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+}));
 app.use(cors({
   origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
   credentials: true
 }));
 
-// Rate limiting (exclude webhook from rate limiter)
+// Rate limiting (exclude webhook and polling routes)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  max: 600, // 600 requests per 15min (~40/min)
   message: { error: 'Too many requests, please try again later.' },
-  skip: (req) => req.path.startsWith('/whatsapp/webhook'),
+  skip: (req) =>
+    req.path.startsWith('/whatsapp/webhook') ||
+    req.path.startsWith('/whatsapp/instance/qr') ||
+    req.path.startsWith('/whatsapp/instance/status') ||
+    req.path.startsWith('/notifications'),
 });
 app.use('/api/', limiter);
 
 // Auth rate limiting (stricter)
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: 15,
   message: { error: 'Too many login attempts, please try again later.' }
 });
 app.use('/api/auth/login', authLimiter);
@@ -69,20 +81,20 @@ app.use('/api/nfes', nfesRoutes);
 app.use('/api/materials', materialsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/cnpj', cnpjRoutes);
 app.use('/api/hubspot', hubspotRoutes);
 app.use('/api/groups', groupsRoutes);
 app.use('/api/cnpj-agent', cnpjAgentRoutes);
 app.use('/api/diretoria', diretoriaRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
+app.use('/api/convenios', conveniosRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Serve frontend static files in production
-if (process.env.NODE_ENV === 'production') {
+// Serve frontend static files in production/staging
+if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging') {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const distPath = path.join(__dirname, '..', 'dist');
   app.use(express.static(distPath));

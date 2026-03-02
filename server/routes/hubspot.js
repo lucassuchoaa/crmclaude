@@ -1,6 +1,7 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { getDatabase } from '../config/database.js';
+import { validateCnpj } from '../utils/validators.js';
 
 const router = express.Router();
 
@@ -12,12 +13,8 @@ router.post('/search', authenticate, async (req, res) => {
   try {
     const { cnpj } = req.body;
 
-    if (!cnpj) {
-      return res.status(400).json({ error: 'CNPJ é obrigatório' });
-    }
-
-    // Limpa o CNPJ para busca
-    const cleanCnpj = cnpj.replace(/[^\d]/g, '');
+    const { valid, cleaned: cleanCnpj, error: cnpjError } = validateCnpj(cnpj);
+    if (!valid) return res.status(400).json({ error: cnpjError });
 
     // Obtém a API Key do HubSpot das configurações
     const db = getDatabase();
@@ -31,6 +28,8 @@ router.post('/search', authenticate, async (req, res) => {
     }
 
     const apiKey = config.value;
+    const pipelineConfig = db.prepare('SELECT value FROM settings WHERE key = ?').get('hubspot_pipeline_id');
+    const configuredPipelineId = pipelineConfig?.value || null;
     const hubspotBaseUrl = 'https://api.hubapi.com';
 
     // 1. Buscar empresa pelo CNPJ (propriedade customizada ou no campo de identificação fiscal)
@@ -147,8 +146,12 @@ router.post('/search', authenticate, async (req, res) => {
             probability: d.properties.hs_deal_stage_probability
           })) || [];
 
+          // Filtrar por pipeline configurado (se houver)
+          if (configuredPipelineId) {
+            deals = deals.filter(d => d.pipeline === configuredPipelineId);
+          }
+
           // Filtrar deals abertos (não fechados/perdidos)
-          // Stages típicos de fechado: closedwon, closedlost
           openDeals = deals.filter(d =>
             !['closedwon', 'closedlost', 'closed_won', 'closed_lost', 'ganhou', 'perdeu'].includes(d.stage?.toLowerCase())
           );
@@ -227,35 +230,111 @@ router.get('/test', authenticate, async (req, res) => {
 });
 
 /**
- * Salva configuração do HubSpot
+ * Salva configuração do HubSpot (API Key + Pipeline ID)
  * POST /api/hubspot/config
  */
 router.post('/config', authenticate, async (req, res) => {
   try {
-    const { apiKey } = req.body;
+    const { apiKey, pipelineId } = req.body;
 
-    // Verifica se usuário tem permissão (super_admin ou executivo)
     if (!['super_admin', 'executivo'].includes(req.user.role)) {
       return res.status(403).json({ error: 'Sem permissão para configurar HubSpot' });
     }
 
     const db = getDatabase();
+    const now = new Date().toISOString();
 
-    // Upsert na tabela settings
-    const existing = db.prepare('SELECT * FROM settings WHERE key = ?').get('hubspot_api_key');
+    const upsert = (key, value) => {
+      if (!value) return;
+      const existing = db.prepare('SELECT * FROM settings WHERE key = ?').get(key);
+      if (existing) {
+        db.prepare('UPDATE settings SET value = ?, updated_at = ? WHERE key = ?').run(value, now, key);
+      } else {
+        db.prepare('INSERT INTO settings (key, value, created_at) VALUES (?, ?, ?)').run(key, value, now);
+      }
+    };
 
-    if (existing) {
-      db.prepare('UPDATE settings SET value = ?, updated_at = ? WHERE key = ?')
-        .run(apiKey, new Date().toISOString(), 'hubspot_api_key');
-    } else {
-      db.prepare('INSERT INTO settings (key, value, created_at) VALUES (?, ?, ?)')
-        .run('hubspot_api_key', apiKey, new Date().toISOString());
-    }
+    if (apiKey) upsert('hubspot_api_key', apiKey);
+    if (pipelineId) upsert('hubspot_pipeline_id', pipelineId);
 
     res.json({ success: true, message: 'Configuração salva' });
   } catch (error) {
     console.error('HubSpot config error:', error);
     res.status(500).json({ error: 'Erro ao salvar configuração' });
+  }
+});
+
+/**
+ * Obtém configuração atual do HubSpot
+ * GET /api/hubspot/config
+ */
+router.get('/config', authenticate, async (req, res) => {
+  try {
+    if (!['super_admin', 'executivo'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Sem permissão' });
+    }
+
+    const db = getDatabase();
+    const apiKey = db.prepare('SELECT value FROM settings WHERE key = ?').get('hubspot_api_key');
+    const pipelineId = db.prepare('SELECT value FROM settings WHERE key = ?').get('hubspot_pipeline_id');
+
+    res.json({
+      hasApiKey: !!apiKey?.value,
+      apiKeyPreview: apiKey?.value ? `...${apiKey.value.slice(-8)}` : null,
+      pipelineId: pipelineId?.value || null
+    });
+  } catch (error) {
+    console.error('HubSpot get config error:', error);
+    res.status(500).json({ error: 'Erro ao obter configuração' });
+  }
+});
+
+/**
+ * Lista pipelines do HubSpot
+ * GET /api/hubspot/pipelines
+ */
+router.get('/pipelines', authenticate, async (req, res) => {
+  try {
+    if (!['super_admin', 'executivo'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Sem permissão' });
+    }
+
+    const db = getDatabase();
+    const config = db.prepare('SELECT value FROM settings WHERE key = ?').get('hubspot_api_key');
+
+    if (!config?.value) {
+      return res.status(400).json({ error: 'API Key não configurada' });
+    }
+
+    const response = await fetch('https://api.hubapi.com/crm/v3/pipelines/deals', {
+      headers: {
+        'Authorization': `Bearer ${config.value}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      return res.status(response.status).json({
+        error: error.message || 'Erro ao buscar pipelines'
+      });
+    }
+
+    const data = await response.json();
+    const pipelines = (data.results || []).map(p => ({
+      id: p.id,
+      label: p.label,
+      stages: (p.stages || []).map(s => ({
+        id: s.id,
+        label: s.label,
+        displayOrder: s.displayOrder
+      })).sort((a, b) => a.displayOrder - b.displayOrder)
+    }));
+
+    res.json({ pipelines });
+  } catch (error) {
+    console.error('HubSpot pipelines error:', error);
+    res.status(500).json({ error: 'Erro ao buscar pipelines' });
   }
 });
 

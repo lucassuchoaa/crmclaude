@@ -47,3 +47,24 @@ table {
 tr:hover {
   background: rgba(255, 255, 255, 0.02);
 }
+
+@media (max-width: 768px) {
+  input, select, textarea {
+    min-height: 44px;
+    font-size: 16px !important;
+  }
+  button {
+    min-height: 44px;
+  }
+  .table-responsive {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .table-responsive::-webkit-scrollbar {
+    height: 4px;
+  }
+  .table-responsive::-webkit-scrollbar-thumb {
+    background: #475569;
+    border-radius: 2px;
+  }
+}

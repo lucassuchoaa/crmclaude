@@ -1,5 +1,6 @@
 import { useState, useEffect, createContext, useContext, useCallback } from "react";
-import { authApi, usersApi, indicationsApi, commissionsApi, nfesApi, materialsApi, notificationsApi, cnpjApi, hubspotApi, groupsApi, cnpjAgentApi, diretoriaApi, whatsappApi, setTokens, clearTokens } from "./services/api";
+import { authApi, usersApi, indicationsApi, commissionsApi, nfesApi, materialsApi, notificationsApi, hubspotApi, groupsApi, cnpjAgentApi, diretoriaApi, whatsappApi, conveniosApi, setTokens, clearTokens } from "./services/api";
+import { useBreakpoint, responsive } from "./hooks/useBreakpoint";
 
 const AuthCtx = createContext(null);
 const useAuth = () => useContext(AuthCtx);
@@ -16,6 +17,7 @@ const transformUser = (u) => ({
   av: u.avatar || u.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase(),
   empresa: u.empresa,
   tel: u.tel,
+  cnpj: u.cnpj,
   comTipo: u.com_tipo,
   comVal: u.com_val,
   eId: u.role === 'diretor' ? u.manager_id : undefined,
@@ -74,6 +76,32 @@ const mapStatusToKanban = (dbStatus) => {
   return map[dbStatus] || 'nova';
 };
 
+// Map Kanban status back to DB status
+const mapKanbanToDb = (kanbSt) => {
+  const map = {
+    'nova': 'novo',
+    'analise': 'em_contato',
+    'docs': 'proposta',
+    'aprovado': 'negociacao',
+    'implant': 'negociacao',
+    'ativo': 'fechado',
+    'recusado': 'perdido',
+  };
+  return map[kanbSt] || 'novo';
+};
+
+// Build notes JSON preserving existing data + updating kanban status
+const buildNotesJson = (ind, updates = {}) => {
+  let notesData = {};
+  try { if (ind.obs && ind.obs.startsWith('{')) notesData = JSON.parse(ind.obs); } catch {}
+  return JSON.stringify({ ...notesData, kanbSt: ind.st, ...updates });
+};
+
+// Helper to update indication via API (fire-and-forget with local state update)
+const updateIndApi = (id, data) => {
+  indicationsApi.update(id, data).catch(e => console.error("Erro ao atualizar indicação:", e));
+};
+
 const formatCapital = (val) => {
   if (typeof val === 'number') return val.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
   return val;
@@ -117,6 +145,10 @@ const isCadenceActive = (cadenceRules, ruleId) => cadenceRules.find(r => r.id ==
 function addNotif(setNotifs, { tipo, titulo, msg, para, de, link }) {
   const n = { id: "nt" + Date.now() + Math.random().toString(36).slice(2, 5), tipo, titulo, msg, dt: new Date().toISOString().replace("T", " ").slice(0, 16), lido: false, para, de, link: link || "notifs" };
   setNotifs(prev => [n, ...prev]);
+  // Also send via API
+  if (para && para !== "*") {
+    notificationsApi.send({ user_id: para, title: titulo, message: msg, type: tipo === "liberacao" ? "success" : tipo === "financeiro" ? "warning" : "info", link }).catch(() => {});
+  }
 }
 // Notify multiple targets
 function addNotifMulti(setNotifs, targets, data) {
@@ -222,14 +254,6 @@ function Login({ onLogin }) {
         <Inp label="Senha" value={pw} onChange={v => { setPw(v); setErr(""); }} type="password" placeholder="••••••••" />
         {err && <p style={{ color: T.er, fontSize: 13, textAlign: "center", margin: "8px 0" }}>{err}</p>}
         <Btn v="primary" full onClick={go} disabled={loading} style={{ marginTop: 12, padding: 14 }}>{loading ? "Entrando..." : "Entrar"}</Btn>
-        <div style={{ marginTop: 20, padding: 14, background: T.inp, borderRadius: 6, fontSize: 11, color: T.tm, lineHeight: 1.9 }}>
-          <strong style={{ color: T.t2 }}>Usuários Demo:</strong><br />
-          🔑 admin@somapay.com.br / admin123<br />
-          🏛️ executivo@somapay.com.br / exe123<br />
-          📊 diretoria@somapay.com.br / dir123<br />
-          👤 gerente1@somapay.com.br / ger123<br />
-          🤝 parceiro1@email.com / par123
-        </div>
       </div>
     </div>
   );
@@ -253,8 +277,9 @@ function comLabel(tipo, val) {
 }
 
 // ===== DASHBOARD =====
-function Dash({ inds, users, comms, nfes }) {
+function Dash({ inds, users, comms, nfes, activity = [] }) {
   const { user } = useAuth();
+  const { breakpoint } = useBreakpoint();
   const isParceiro = user.role === "parceiro";
   const isExec = user.role === "executivo";
   const isDiretor = user.role === "diretor" || user.role === "super_admin" || isExec;
@@ -348,8 +373,9 @@ function Dash({ inds, users, comms, nfes }) {
   // Travas vencidas list
   const travasVencidasList = baseInds.filter(i => i.lib === "liberado" && i.libExp && i.libExp < today).sort((a, b) => a.libExp.localeCompare(b.libExp));
 
-  // Últimas interações (all hist entries from all inds)
-  const allHist = baseInds.flatMap(i => (i.hist || []).map(h => ({ ...h, emp: i.emp, indId: i.id }))).sort((a, b) => b.dt.localeCompare(a.dt)).slice(0, 10);
+  // Últimas interações (from API activity feed)
+  const baseIndIds = new Set(baseInds.map(i => i.id));
+  const allHist = activity.filter(a => baseIndIds.has(a.indId)).slice(0, 10);
 
   const sorted = [...filtered].sort((a, b) => b.dt.localeCompare(a.dt));
 
@@ -399,14 +425,24 @@ function Dash({ inds, users, comms, nfes }) {
     const lastComm = myComms.length > 0 ? [...myComms].sort((a, b) => b.dt.localeCompare(a.dt))[0] : null;
     const nfesPendentes = myNfes.filter(n => n.st === "pendente").length;
 
-    // Recent history
-    const pHist = all.flatMap(i => (i.hist || []).map(h => ({ ...h, emp: i.emp }))).sort((a, b) => b.dt.localeCompare(a.dt)).slice(0, 8);
+    // Recent history (from API activity feed)
+    const allIds = new Set(all.map(i => i.id));
+    const pHist = activity.filter(a => allIds.has(a.indId)).slice(0, 8);
 
     // Sorted for table
     const pSorted = [...my].sort((a, b) => b.dt.localeCompare(a.dt));
 
     // View state for detail
     const [pSel, setPSel] = useState(null);
+    const selectPInd = async (ind) => {
+      setPSel(ind);
+      try {
+        const res = await indicationsApi.getById(ind.id);
+        if (res.data?.hist) {
+          setPSel(prev => prev && prev.id === ind.id ? { ...prev, hist: res.data.hist } : prev);
+        }
+      } catch (e) { console.error("Erro ao carregar histórico:", e); }
+    };
 
     return (
       <div>
@@ -436,7 +472,7 @@ function Dash({ inds, users, comms, nfes }) {
         </div>
 
         {/* KPIs Row */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "repeat(2, 1fr)", lg: "repeat(4, 1fr)" }), gap: 12, marginBottom: 12 }}>
           {[
             { l: "Total", v: pTotal, co: T.ac, ic: "📋" },
             { l: "Pipeline", v: pPipeline, co: T.inf, ic: "🔄" },
@@ -454,7 +490,7 @@ function Dash({ inds, users, comms, nfes }) {
             </div>
           ))}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 20 }}>
+        <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "repeat(2, 1fr)", lg: "repeat(4, 1fr)" }), gap: 12, marginBottom: 20 }}>
           {[
             { l: "Recusadas", v: pRecusadas, co: T.er, ic: "❌" },
             { l: "Liberadas", v: pLiberadas, co: T.ok, ic: "🔓" },
@@ -474,7 +510,7 @@ function Dash({ inds, users, comms, nfes }) {
         </div>
 
         {/* Funnel + Financial Side by Side */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr 1fr", lg: "1fr 1fr" }), gap: 16, marginBottom: 16 }}>
           {/* Mini Funnel */}
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 16 }}>
             <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>📊 Meu Funil</h3>
@@ -530,7 +566,7 @@ function Dash({ inds, users, comms, nfes }) {
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {all.filter(i => i.lib === "liberado" && i.libExp && i.libExp < today).map(ind => (
-                <div key={ind.id} onClick={() => setPSel(ind)} style={{ background: T.card, border: `1px solid ${T.er}33`, borderRadius: 8, padding: "8px 14px", cursor: "pointer", flex: "1 1 200px" }}>
+                <div key={ind.id} onClick={() => selectPInd(ind)} style={{ background: T.card, border: `1px solid ${T.er}33`, borderRadius: 8, padding: "8px 14px", cursor: "pointer", flex: "1 1 200px" }}>
                   <div style={{ fontSize: 12, fontWeight: 700 }}>{ind.emp}</div>
                   <div style={{ fontSize: 10, color: T.er, fontWeight: 600 }}>Vencida em {ind.libExp}</div>
                 </div>
@@ -559,15 +595,15 @@ function Dash({ inds, users, comms, nfes }) {
         </div>
 
         {/* Table + Activity */}
-        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr", lg: "2fr 1fr" }), gap: 16 }}>
           {/* Indicações */}
           <div>
             <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>📋 Minhas Indicações{pHasFilters ? " (Filtradas)" : ""}</h3>
             <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
                 <thead><tr>{["Empresa", "Status", "Liberação", "Limite", "Data"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
                 <tbody>{pSorted.map(ind => (
-                  <tr key={ind.id} onClick={() => setPSel(ind)} style={{ cursor: "pointer" }}>
+                  <tr key={ind.id} onClick={() => selectPInd(ind)} style={{ cursor: "pointer" }}>
                     <td style={{ ...tdS, fontSize: 13, fontWeight: 600 }}>{ind.emp}<div style={{ fontSize: 10, color: T.tm }}>{ind.cnpj}</div></td>
                     <td style={tdS}><Badge type={ind.st === "ativo" ? "success" : ind.st === "recusado" ? "danger" : "info"}>{KCOLS.find(k => k.id === ind.st)?.label}</Badge></td>
                     <td style={tdS}><LibBadge lib={ind.lib} /></td>
@@ -576,7 +612,7 @@ function Dash({ inds, users, comms, nfes }) {
                   </tr>
                 ))}</tbody>
                 {my.length === 0 && <tbody><tr><td colSpan={5} style={{ padding: 30, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhuma indicação{pHasFilters ? " com esses filtros" : ""}.</td></tr></tbody>}
-              </table>
+              </table></div>
             </div>
           </div>
           {/* Activity Feed */}
@@ -650,7 +686,7 @@ function Dash({ inds, users, comms, nfes }) {
   return (
     <div>
       {/* ROW 1: KPIs */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "repeat(2, 1fr)", lg: "repeat(4, 1fr)" }), gap: 12, marginBottom: 12 }}>
         {[
           { l: "Total Indicações", v: total, co: T.ac, ic: "📋" },
           { l: "Pipeline", v: pipeline, co: T.inf, ic: "🔄" },
@@ -668,7 +704,7 @@ function Dash({ inds, users, comms, nfes }) {
           </div>
         ))}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "repeat(2, 1fr)", lg: "repeat(4, 1fr)" }), gap: 12, marginBottom: 20 }}>
         {[
           { l: "Recusadas", v: recusadas, co: T.er, ic: "❌" },
           { l: "Travas Vencidas", v: travasVencidas, co: travasVencidas > 0 ? T.er : T.ok, ic: travasVencidas > 0 ? "⚠️" : "🔒" },
@@ -763,12 +799,12 @@ function Dash({ inds, users, comms, nfes }) {
       )}
 
       {/* ROW 5: 3-column layout */}
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16, marginBottom: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr", lg: "2fr 1fr" }), gap: 16, marginBottom: 16 }}>
         {/* Indicações filtradas */}
         <div>
           <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>📋 Indicações {hasFilters ? "(Filtradas)" : "Recentes"}</h3>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
               <thead><tr>{["Empresa", "Parceiro", "Status", "Liberação", "Limite", "Data"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>{sorted.slice(0, 10).map(ind => (
                 <tr key={ind.id}>
@@ -781,7 +817,7 @@ function Dash({ inds, users, comms, nfes }) {
                 </tr>
               ))}</tbody>
               {sorted.length === 0 && <tbody><tr><td colSpan={6} style={{ padding: 30, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhuma indicação{hasFilters ? " com esses filtros" : ""}.</td></tr></tbody>}
-            </table>
+            </table></div>
             {sorted.length > 10 && <div style={{ padding: "8px 14px", textAlign: "center", fontSize: 11, color: T.tm, borderTop: `1px solid ${T.bor}` }}>Mostrando 10 de {sorted.length} — veja todas no Kanban</div>}
           </div>
         </div>
@@ -810,7 +846,7 @@ function Dash({ inds, users, comms, nfes }) {
         <div style={{ marginBottom: 16 }}>
           <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>🏛️ Performance dos Diretores</h3>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
               <thead><tr>{["Diretor", "Gerentes", "Parceiros", "Indicações", "Ativas", "Conversão"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>{dirRanking.map(d => (
                 <tr key={d.id}>
@@ -834,18 +870,18 @@ function Dash({ inds, users, comms, nfes }) {
                   </td>
                 </tr>
               ))}</tbody>
-            </table>
+            </table></div>
           </div>
         </div>
       )}
 
       {/* ROW 7: Ranking + Gerentes/Deals */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr 1fr", lg: "1fr 1fr" }), gap: 16 }}>
         {/* Ranking Parceiros */}
         <div>
           <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>🏆 Ranking de Parceiros</h3>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
               <thead><tr>{["#", "Parceiro", "Total", "Ativas", "Pipeline", "Conversão"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>{parcRanking.map((p, i) => (
                 <tr key={p.id}>
@@ -870,7 +906,7 @@ function Dash({ inds, users, comms, nfes }) {
                 </tr>
               ))}</tbody>
               {parcRanking.length === 0 && <tbody><tr><td colSpan={6} style={{ padding: 20, textAlign: "center", color: T.tm, fontSize: 12 }}>Nenhum parceiro.</td></tr></tbody>}
-            </table>
+            </table></div>
           </div>
         </div>
 
@@ -879,7 +915,7 @@ function Dash({ inds, users, comms, nfes }) {
           <div>
             <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>👔 Performance dos Gerentes</h3>
             <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
                 <thead><tr>{["Gerente", "Parceiros", "Indicações", "Ativas", "Conversão"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
                 <tbody>{gerRanking.map(g => (
                   <tr key={g.id}>
@@ -902,14 +938,14 @@ function Dash({ inds, users, comms, nfes }) {
                     </td>
                   </tr>
                 ))}</tbody>
-              </table>
+              </table></div>
             </div>
           </div>
         ) : (
           <div>
             <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>🔗 HubSpot Deals</h3>
             <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
                 <thead><tr>{["Empresa", "Deal", "Parceiro", "Status"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
                 <tbody>{baseInds.filter(i => i.hsId).slice(0, 8).map(ind => (
                   <tr key={ind.id}>
@@ -919,7 +955,7 @@ function Dash({ inds, users, comms, nfes }) {
                     <td style={tdS}><Badge type={ind.hsSt === "won" ? "success" : ind.hsSt === "lost" ? "danger" : "warning"}>{ind.hsSt === "won" ? "Ganho" : ind.hsSt === "lost" ? "Perdido" : "Aberto"}</Badge></td>
                   </tr>
                 ))}</tbody>
-              </table>
+              </table></div>
             </div>
           </div>
         )}
@@ -984,6 +1020,9 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenc
     const hEntry = { dt: td, autor: user.name, txt: next === "liberado" ? `Oportunidade liberada. Trava: ${travaDias} dias (até ${expDate}).` : next === "bloqueado" ? "Oportunidade bloqueada." : "Status de liberação resetado para pendente." };
     setInds(p => p.map(x => x.id === id ? { ...x, lib: next, libDt: next === "liberado" ? addDays(0) : x.libDt, libExp: next === "liberado" ? expDate : x.libExp, hist: [...(x.hist || []), hEntry] } : x));
     if (sel && sel.id === id) setSel(prev => ({ ...prev, lib: next, libDt: next === "liberado" ? addDays(0) : prev.libDt, libExp: next === "liberado" ? expDate : prev.libExp, hist: [...(prev.hist || []), hEntry] }));
+    // API call - persist trava state and save history
+    updateIndApi(id, { liberacao_status: next, liberacao_data: next === "liberado" ? addDays(0) : undefined, liberacao_expiry: expDate });
+    indicationsApi.addHistory(id, hEntry.txt, 'liberacao').catch(e => console.error("Erro ao salvar histórico:", e));
     // Notify parceiro about liberation/block
     const ind = inds.find(x => x.id === id);
     if (ind?.pId && (next === "liberado" || next === "bloqueado") && isCadenceActive(cadenceRules, "cad_liberacao")) {
@@ -997,12 +1036,15 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenc
     const hEntry = { dt: td, autor: user.name, txt: `Limite da trava alterado para ${newDate}.` };
     setInds(p => p.map(x => x.id === id ? { ...x, libExp: newDate, hist: [...(x.hist || []), hEntry] } : x));
     if (sel && sel.id === id) setSel(prev => ({ ...prev, libExp: newDate, hist: [...(prev.hist || []), hEntry] }));
+    updateIndApi(id, { liberacao_expiry: newDate });
+    indicationsApi.addHistory(id, hEntry.txt, 'liberacao').catch(e => console.error("Erro ao salvar histórico:", e));
   };
 
   // Edit obs
   const editObs = (id, newObs) => {
     setInds(p => p.map(x => x.id === id ? { ...x, obs: newObs } : x));
     if (sel && sel.id === id) setSel(prev => ({ ...prev, obs: newObs }));
+    updateIndApi(id, { obs: newObs });
   };
 
   // Add interaction
@@ -1013,12 +1055,27 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenc
     const hEntry = { dt: td, autor: user.name, txt: newNote.trim() };
     setInds(p => p.map(x => x.id === id ? { ...x, hist: [...(x.hist || []), hEntry] } : x));
     if (sel && sel.id === id) setSel(prev => ({ ...prev, hist: [...(prev.hist || []), hEntry] }));
-    // Notify parceiro about new interaction
+    // Save note to API via history endpoint
     const ind = inds.find(x => x.id === id);
+    indicationsApi.addHistory(id, newNote.trim(), 'obs').catch(e => console.error("Erro ao salvar nota:", e));
+    // Notify parceiro about new interaction
     if (ind?.pId && ind.pId !== user.id && isCadenceActive(cadenceRules, "cad_interacao")) {
       addNotif(setNotifs, { tipo: "sistema", titulo: "Nova interação", msg: `${user.name} adicionou uma nota em ${ind.emp}.`, para: ind.pId, de: user.id, link: "kanban" });
     }
     setNewNote("");
+  };
+
+  // Load history when selecting an indication
+  const selectInd = async (ind) => {
+    setSel(ind);
+    try {
+      const res = await indicationsApi.getById(ind.id);
+      if (res.data?.hist) {
+        const h = res.data.hist;
+        setSel(prev => prev && prev.id === ind.id ? { ...prev, hist: h } : prev);
+        setInds(p => p.map(x => x.id === ind.id ? { ...x, hist: h } : x));
+      }
+    } catch (e) { console.error("Erro ao carregar histórico:", e); }
   };
 
   // Max libExp for gerente: libDt + travaDias + 60
@@ -1101,10 +1158,10 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenc
                   </div>
                   <div style={{ background: T.bg2 + "88", border: `1px solid ${T.bor}`, borderTop: "none", borderRadius: "0 0 8px 8px", padding: 6, minHeight: 100, display: "flex", flexDirection: "column", gap: 6 }}
                     onDragOver={canMove ? e => e.preventDefault() : undefined}
-                    onDrop={canMove ? e => { const id = e.dataTransfer.getData("text/plain"); const ind = inds.find(x => x.id === id); const colLabel = KCOLS.find(c => c.id === col.id)?.label || col.id; setInds(p => p.map(x => x.id === id ? { ...x, st: col.id } : x)); if (ind && ind.pId && isCadenceActive(cadenceRules, "cad_status_kanban")) { addNotif(setNotifs, { tipo: "status", titulo: "Status alterado", msg: `Sua indicação ${ind.emp} foi movida para ${colLabel}.`, para: ind.pId, de: user.id, link: "kanban" }); } if (ind && (col.id === "ativo" || col.id === "recusado") && isCadenceActive(cadenceRules, "cad_indicacao_ativa")) { const gerente = users.find(u => u.id === ind.gId); const superiors = []; if (gerente?.dId) superiors.push(gerente.dId); const dir = users.find(u => u.id === gerente?.dId); if (dir?.eId) superiors.push(dir.eId); superiors.forEach(sId => addNotif(setNotifs, { tipo: "status", titulo: col.id === "ativo" ? "Indicação aprovada" : "Indicação recusada", msg: `Indicação ${ind.emp} foi ${col.id === "ativo" ? "aprovada" : "recusada"} por ${user.name}.`, para: sId, de: user.id, link: "kanban" })); } } : undefined}>
+                    onDrop={canMove ? e => { const id = e.dataTransfer.getData("text/plain"); const ind = inds.find(x => x.id === id); const colLabel = KCOLS.find(c => c.id === col.id)?.label || col.id; setInds(p => p.map(x => x.id === id ? { ...x, st: col.id } : x)); updateIndApi(id, { status: mapKanbanToDb(col.id), notes: JSON.stringify({ kanbSt: col.id }) }); if (ind && ind.pId && isCadenceActive(cadenceRules, "cad_status_kanban")) { addNotif(setNotifs, { tipo: "status", titulo: "Status alterado", msg: `Sua indicação ${ind.emp} foi movida para ${colLabel}.`, para: ind.pId, de: user.id, link: "kanban" }); } if (ind && (col.id === "ativo" || col.id === "recusado") && isCadenceActive(cadenceRules, "cad_indicacao_ativa")) { const gerente = users.find(u => u.id === ind.gId); const superiors = []; if (gerente?.dId) superiors.push(gerente.dId); const dir = users.find(u => u.id === gerente?.dId); if (dir?.eId) superiors.push(dir.eId); superiors.forEach(sId => addNotif(setNotifs, { tipo: "status", titulo: col.id === "ativo" ? "Indicação aprovada" : "Indicação recusada", msg: `Indicação ${ind.emp} foi ${col.id === "ativo" ? "aprovada" : "recusada"} por ${user.name}.`, para: sId, de: user.id, link: "kanban" })); } } : undefined}>
                     {cards.map(ind => (
                       <div key={ind.id} draggable={canMove} onDragStart={canMove ? e => e.dataTransfer.setData("text/plain", ind.id) : undefined}
-                        onClick={() => setSel(ind)}
+                        onClick={() => selectInd(ind)}
                         style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 6, padding: 10, cursor: "pointer" }}>
                         <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>{ind.emp}</div>
                         <div style={{ fontSize: 10, color: T.tm }}>🏢 {ind.nf} func · {ind.cont}</div>
@@ -1131,11 +1188,11 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenc
       {/* LIST VIEW */}
       {view === "list" && (
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
             <thead><tr>{["Empresa", "Contato", "Func.", "Status", "Liberação", "Limite Trava", "Parceiro", "Data"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
             <tbody>
               {[...fl].sort((a, b) => b.dt.localeCompare(a.dt)).map(ind => (
-                <tr key={ind.id} onClick={() => setSel(ind)} style={{ cursor: "pointer" }}>
+                <tr key={ind.id} onClick={() => selectInd(ind)} style={{ cursor: "pointer" }}>
                   <td style={tdS}><div style={{ fontWeight: 600 }}>{ind.emp}</div><div style={{ fontSize: 10, color: T.tm }}>{ind.cnpj}</div></td>
                   <td style={tdS}>{ind.cont}</td>
                   <td style={tdS}>{ind.nf}</td>
@@ -1152,12 +1209,12 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenc
               ))}
               {fl.length === 0 && <tr><td colSpan={8} style={{ padding: 40, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhuma indicação{hasFilters ? " com esses filtros" : ""}.</td></tr>}
             </tbody>
-          </table>
+          </table></div>
         </div>
       )}
 
       <Modal open={!!sel} onClose={() => setSel(null)} title="Detalhes da Indicação" wide footer={canMove && sel ? <>
-        <select value={sel.st} onChange={e => { const v = e.target.value; setInds(p => p.map(x => x.id === sel.id ? { ...x, st: v } : x)); setSel({ ...sel, st: v }); }}
+        <select value={sel.st} onChange={e => { const v = e.target.value; setInds(p => p.map(x => x.id === sel.id ? { ...x, st: v } : x)); setSel({ ...sel, st: v }); updateIndApi(sel.id, { status: mapKanbanToDb(v), notes: JSON.stringify({ kanbSt: v }) }); }}
           style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
           {KCOLS.map(k => <option key={k.id} value={k.id}>{k.label}</option>)}
         </select>
@@ -1267,10 +1324,58 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenc
 // ===== PARCEIROS =====
 function ParcPage({ users, setUsers, inds }) {
   const { user } = useAuth();
+  const { breakpoint } = useBreakpoint();
   const [modal, setModal] = useState(false);
   const [detail, setDetail] = useState(null);
   const [q, setQ] = useState("");
-  const [f, setF] = useState({ name: "", email: "", pw: "", empresa: "", tel: "", gId: user.role === "gerente" ? user.id : "", comTipo: "pct", comVal: "" });
+  const [f, setF] = useState({ name: "", email: "", pw: "", empresa: "", tel: "", cnpj: "", gId: user.role === "gerente" ? user.id : "", comTipo: "pct", comVal: "" });
+  const [cnpjLoading, setCnpjLoading] = useState(false);
+  const [cnpjInfo, setCnpjInfo] = useState(null);
+  const [createdCreds, setCreatedCreds] = useState(null); // { email, password } after creation
+  const [editParc, setEditParc] = useState(null); // parceiro being edited
+  const [ef, setEf] = useState({ name: "", empresa: "", tel: "", cnpj: "", comTipo: "pct", comVal: "" });
+  const [editSaving, setEditSaving] = useState(false);
+  const [resetPwResult, setResetPwResult] = useState(null);
+  const [allConvenios, setAllConvenios] = useState([]);
+  const [selConvIds, setSelConvIds] = useState([]);
+  const [editConvIds, setEditConvIds] = useState([]);
+
+  useEffect(() => {
+    conveniosApi.getAll().then(r => setAllConvenios((r.data.convenios || []).filter(c => c.is_active))).catch(() => {});
+  }, []);
+
+  const genPw = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789"; let p = ""; for (let i = 0; i < 8; i++) p += c[Math.floor(Math.random() * c.length)]; return p; };
+
+  const buscarCnpj = async (cnpjVal) => {
+    const clean = cnpjVal.replace(/\D/g, '');
+    if (clean.length !== 14) return;
+    setCnpjLoading(true); setCnpjInfo(null);
+    try {
+      const res = await cnpjAgentApi.lookup(clean);
+      const d = res.data;
+      setCnpjInfo(d);
+      setF(prev => ({
+        ...prev,
+        cnpj: clean,
+        empresa: d.razao_social || prev.empresa,
+        tel: d.telefone || prev.tel,
+        email: prev.email || d.email || "",
+        name: prev.name || (d.socios?.[0]?.nome) || "",
+      }));
+    } catch (e) {
+      setCnpjInfo({ error: e.response?.data?.error || "CNPJ não encontrado" });
+    }
+    setCnpjLoading(false);
+  };
+
+  const formatCnpj = (v) => {
+    const n = v.replace(/\D/g, '').slice(0, 14);
+    if (n.length <= 2) return n;
+    if (n.length <= 5) return n.replace(/(\d{2})(\d+)/, '$1.$2');
+    if (n.length <= 8) return n.replace(/(\d{2})(\d{3})(\d+)/, '$1.$2.$3');
+    if (n.length <= 12) return n.replace(/(\d{2})(\d{3})(\d{3})(\d+)/, '$1.$2.$3/$4');
+    return n.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d+)/, '$1.$2.$3/$4-$5');
+  };
 
   const myDirIds = user.role === "executivo" ? users.filter(u => u.role === "diretor" && u.eId === user.id).map(d => d.id) : [];
   const myGerIds = user.role === "executivo" ? users.filter(u => u.role === "gerente" && myDirIds.includes(u.dId)).map(g => g.id) : [];
@@ -1281,11 +1386,61 @@ function ParcPage({ users, setUsers, inds }) {
         : users.filter(u => u.role === "parceiro"))
     .filter(p => !q || p.name.toLowerCase().includes(q.toLowerCase()) || (p.empresa || "").toLowerCase().includes(q.toLowerCase()));
 
-  const add = () => {
-    if (!f.name || !f.email || !f.pw || !f.comVal) return;
-    setUsers(prev => [...prev, { ...f, id: "p" + Date.now(), role: "parceiro", av: f.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(), gId: f.gId || user.id, comTipo: f.comTipo, comVal: parseFloat(f.comVal) || 0 }]);
-    setModal(false);
-    setF({ name: "", email: "", pw: "", empresa: "", tel: "", gId: user.role === "gerente" ? user.id : "", comTipo: "pct", comVal: "" });
+  const [adding, setAdding] = useState(false);
+  const add = async () => {
+    const pw = f.pw || genPw();
+    if (!f.name || !f.email || !f.comVal || adding) return;
+    setAdding(true);
+    try {
+      const res = await usersApi.create({
+        email: f.email, password: pw, name: f.name, role: "parceiro",
+        manager_id: f.gId || user.id, empresa: f.empresa, tel: f.tel,
+        com_tipo: f.comTipo, com_val: parseFloat(f.comVal) || 0,
+        cnpj: f.cnpj.replace(/\D/g, '') || null,
+        convenio_ids: selConvIds
+      });
+      const u = res.data.user;
+      setUsers(prev => [...prev, transformUser(u)]);
+      setModal(false);
+      setCreatedCreds({ email: f.email, password: pw, name: f.name });
+      setF({ name: "", email: "", pw: "", empresa: "", tel: "", cnpj: "", gId: user.role === "gerente" ? user.id : "", comTipo: "pct", comVal: "" });
+      setCnpjInfo(null);
+      setSelConvIds([]);
+    } catch (e) { console.error("Erro ao cadastrar parceiro:", e); alert(e.response?.data?.error || "Erro ao cadastrar"); }
+    setAdding(false);
+  };
+
+  const saveEditParc = async () => {
+    if (!editParc || editSaving) return;
+    setEditSaving(true);
+    try {
+      await usersApi.update(editParc.id, {
+        name: ef.name, empresa: ef.empresa, tel: ef.tel, cnpj: ef.cnpj.replace(/\D/g, '') || null,
+        com_tipo: ef.comTipo, com_val: parseFloat(ef.comVal) || 0,
+        convenio_ids: editConvIds
+      });
+      setUsers(prev => prev.map(u => u.id === editParc.id ? { ...u, name: ef.name, empresa: ef.empresa, tel: ef.tel, cnpj: ef.cnpj, comTipo: ef.comTipo, comVal: parseFloat(ef.comVal) || 0 } : u));
+      setEditParc(null);
+    } catch (e) { alert(e.response?.data?.error || "Erro ao salvar"); }
+    setEditSaving(false);
+  };
+
+  const resetParcPw = async () => {
+    if (!editParc) return;
+    try {
+      const res = await usersApi.resetPassword(editParc.id);
+      setResetPwResult(res.data.password);
+    } catch (e) { alert(e.response?.data?.error || "Erro ao resetar senha"); }
+  };
+
+  const openEditParc = async (p) => {
+    setEf({ name: p.name, empresa: p.empresa || "", tel: p.tel || "", cnpj: p.cnpj || "", comTipo: p.comTipo || "pct", comVal: p.comVal != null ? String(p.comVal) : "" });
+    setEditParc(p);
+    setResetPwResult(null);
+    try {
+      const r = await conveniosApi.getParceiroConvenios(p.id);
+      setEditConvIds((r.data.convenios || []).map(c => c.id));
+    } catch { setEditConvIds([]); }
   };
 
   const thS = { textAlign: "left", padding: "12px 14px", fontSize: 10, fontWeight: 600, color: T.tm, textTransform: "uppercase", borderBottom: `1px solid ${T.bor}`, background: T.bg2 };
@@ -1302,8 +1457,8 @@ function ParcPage({ users, setUsers, inds }) {
         <Btn onClick={() => setModal(true)}>＋ Cadastrar Parceiro</Btn>
       </div>
       <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead><tr>{["Parceiro", "Empresa", "Condição Comercial", "Gerente", "Ind.", "Ativas"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
+        <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+          <thead><tr>{["Parceiro", "Empresa", "Condição Comercial", "Gerente", "Ind.", "Ativas", "Ações"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
           <tbody>{parcs.map(p => {
             const pi = inds.filter(i => i.pId === p.id);
             return (
@@ -1323,10 +1478,11 @@ function ParcPage({ users, setUsers, inds }) {
                 <td style={tdS}>{users.find(u => u.id === p.gId)?.name || "—"}</td>
                 <td style={tdS}><Badge type="info">{pi.length}</Badge></td>
                 <td style={tdS}><Badge type="success">{pi.filter(i => i.st === "ativo").length}</Badge></td>
+                <td style={tdS}><Btn sm onClick={(e) => { e.stopPropagation(); openEditParc(p); }}>Editar</Btn></td>
               </tr>
             );
           })}</tbody>
-        </table>
+        </table></div>
       </div>
 
       {/* Detail Modal */}
@@ -1339,7 +1495,7 @@ function ParcPage({ users, setUsers, inds }) {
               <div style={{ fontSize: 12, color: T.tm }}>{detail.empresa || "Sem empresa"}</div>
             </div>
           </div>
-          {[["E-mail", detail.email], ["Telefone", detail.tel], ["Gerente", users.find(u => u.id === detail.gId)?.name]].map(([l, v], i) => (
+          {[["CNPJ", detail.cnpj ? detail.cnpj.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5') : null], ["E-mail", detail.email], ["Telefone", detail.tel], ["Gerente", users.find(u => u.id === detail.gId)?.name]].map(([l, v], i) => (
             <div key={i} style={{ display: "flex", padding: "8px 0", borderBottom: `1px solid ${T.bor}33` }}>
               <div style={{ width: 130, fontSize: 11, color: T.tm, textTransform: "uppercase", flexShrink: 0 }}>{l}</div>
               <div style={{ fontSize: 13 }}>{v || "—"}</div>
@@ -1360,12 +1516,38 @@ function ParcPage({ users, setUsers, inds }) {
       </Modal>
 
       {/* Cadastro Modal */}
-      <Modal open={modal} onClose={() => setModal(false)} title="Cadastrar Parceiro" footer={<><Btn v="secondary" onClick={() => setModal(false)}>Cancelar</Btn><Btn onClick={add} disabled={!f.name || !f.email || !f.pw || !f.comVal}>Cadastrar</Btn></>}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+      <Modal open={modal} onClose={() => { setModal(false); setCnpjInfo(null); setSelConvIds([]); }} title="Cadastrar Parceiro" footer={<><Btn v="secondary" onClick={() => { setModal(false); setCnpjInfo(null); setSelConvIds([]); }}>Cancelar</Btn><Btn onClick={add} disabled={!f.name || !f.email || !f.comVal || (allConvenios.length > 0 && selConvIds.length === 0) || adding}>{adding ? "Cadastrando..." : "Cadastrar"}</Btn></>}>
+        {/* Campo CNPJ com auto-preenchimento */}
+        <div style={{ marginBottom: 14, padding: 14, background: T.bg2, border: `1px solid ${T.bor}`, borderRadius: 8 }}>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>CNPJ do Parceiro</label>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input value={f.cnpj} onChange={e => setF({ ...f, cnpj: formatCnpj(e.target.value) })} placeholder="00.000.000/0000-00" style={{ flex: 1, padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13, outline: "none" }} />
+            <Btn sm onClick={() => buscarCnpj(f.cnpj)} disabled={f.cnpj.replace(/\D/g, '').length !== 14 || cnpjLoading}>{cnpjLoading ? "Buscando..." : "Buscar"}</Btn>
+          </div>
+          {cnpjInfo && !cnpjInfo.error && (
+            <div style={{ marginTop: 10, padding: 10, background: T.ok + "12", border: `1px solid ${T.ok}33`, borderRadius: 6 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: T.ok, marginBottom: 4 }}>Dados preenchidos automaticamente</div>
+              <div style={{ fontSize: 11, color: T.t2 }}>{cnpjInfo.razao_social}</div>
+              {cnpjInfo.situacao && <div style={{ fontSize: 10, color: cnpjInfo.situacao === "ATIVA" ? T.ok : T.wn, marginTop: 2 }}>Situação: {cnpjInfo.situacao}</div>}
+              {cnpjInfo.cnae_principal && <div style={{ fontSize: 10, color: T.t2, marginTop: 2 }}>CNAE: {cnpjInfo.cnae_principal}</div>}
+              {cnpjInfo.endereco?.completo && <div style={{ fontSize: 10, color: T.t2, marginTop: 2 }}>{cnpjInfo.endereco.completo}</div>}
+            </div>
+          )}
+          {cnpjInfo?.error && (
+            <div style={{ marginTop: 8, fontSize: 11, color: T.er }}>{cnpjInfo.error}</div>
+          )}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr 1fr", lg: "1fr 1fr" }), gap: 14 }}>
           <Inp label="Nome *" value={f.name} onChange={v => setF({ ...f, name: v })} placeholder="Nome completo" />
-          <Inp label="Empresa" value={f.empresa} onChange={v => setF({ ...f, empresa: v })} placeholder="Empresa" />
+          <Inp label="Empresa" value={f.empresa} onChange={v => setF({ ...f, empresa: v })} placeholder="Razão Social" />
           <Inp label="E-mail *" value={f.email} onChange={v => setF({ ...f, email: v })} placeholder="email@ex.com" />
-          <Inp label="Senha *" value={f.pw} onChange={v => setF({ ...f, pw: v })} type="password" placeholder="Senha" />
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Senha (auto-gerada se vazio)</label>
+            <div style={{ display: "flex", gap: 6 }}>
+              <input value={f.pw} onChange={e => setF({ ...f, pw: e.target.value })} placeholder="Deixe vazio para gerar" style={{ flex: 1, padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13, outline: "none" }} />
+              <Btn sm onClick={() => setF({ ...f, pw: genPw() })}>Gerar</Btn>
+            </div>
+          </div>
           <Inp label="Telefone" value={f.tel} onChange={v => setF({ ...f, tel: v })} placeholder="(00) 00000-0000" />
           {user.role !== "gerente" && <div style={{ marginBottom: 14 }}>
             <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Gerente</label>
@@ -1384,7 +1566,233 @@ function ParcPage({ users, setUsers, inds }) {
           </div>
           <Inp label={f.comTipo === "pct" ? "Percentual (%) *" : "Valor por conta (R$) *"} value={f.comVal} onChange={v => setF({ ...f, comVal: v })} type="number" placeholder={f.comTipo === "pct" ? "Ex: 1.5" : "Ex: 3.50"} />
         </div>
+        {/* Convênios - Multi-select */}
+        {allConvenios.length > 0 && (
+          <div style={{ marginTop: 14, padding: 14, background: T.bg2, border: `1px solid ${T.bor}`, borderRadius: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: T.t2, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>🤝 Convênios *</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {allConvenios.map(c => (
+                <label key={c.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 6, border: `1px solid ${selConvIds.includes(c.id) ? T.ac : T.bor}`, background: selConvIds.includes(c.id) ? T.ac + "15" : T.inp, cursor: "pointer", fontSize: 12, color: selConvIds.includes(c.id) ? T.ac : T.txt, fontWeight: selConvIds.includes(c.id) ? 600 : 400 }}>
+                  <input type="checkbox" checked={selConvIds.includes(c.id)} onChange={() => setSelConvIds(prev => prev.includes(c.id) ? prev.filter(x => x !== c.id) : [...prev, c.id])} style={{ accentColor: T.ac }} />
+                  {c.name}
+                </label>
+              ))}
+            </div>
+            {selConvIds.length === 0 && <div style={{ fontSize: 11, color: T.wn, marginTop: 6 }}>Selecione pelo menos um convênio</div>}
+          </div>
+        )}
       </Modal>
+
+      {/* Credenciais criadas */}
+      <Modal open={!!createdCreds} onClose={() => setCreatedCreds(null)} title="Parceiro Cadastrado">
+        {createdCreds && <div>
+          <div style={{ padding: 16, background: T.ok + "12", border: `1px solid ${T.ok}33`, borderRadius: 8, marginBottom: 16 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: T.ok, marginBottom: 8 }}>Parceiro criado com sucesso!</div>
+            <div style={{ fontSize: 12, color: T.t2 }}>Envie as credenciais abaixo para <strong>{createdCreds.name}</strong>:</div>
+          </div>
+          <div style={{ padding: 16, background: T.bg2, border: `1px solid ${T.bor}`, borderRadius: 8, fontFamily: "'Space Mono',monospace" }}>
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", marginBottom: 2 }}>E-mail</div>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>{createdCreds.email}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", marginBottom: 2 }}>Senha</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: T.ac }}>{createdCreds.password}</div>
+            </div>
+          </div>
+          <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+            <Btn sm onClick={() => { navigator.clipboard.writeText(`E-mail: ${createdCreds.email}\nSenha: ${createdCreds.password}`); }}>Copiar credenciais</Btn>
+          </div>
+        </div>}
+      </Modal>
+
+      {/* Editar Parceiro */}
+      <Modal open={!!editParc} onClose={() => { setEditParc(null); setResetPwResult(null); }} title="Editar Parceiro"
+        footer={<><Btn v="secondary" onClick={() => { setEditParc(null); setResetPwResult(null); }}>Cancelar</Btn><Btn onClick={saveEditParc} disabled={editSaving}>{editSaving ? "Salvando..." : "Salvar"}</Btn></>}>
+        {editParc && <div>
+          <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr 1fr", lg: "1fr 1fr" }), gap: 14 }}>
+            <Inp label="Nome" value={ef.name} onChange={v => setEf({ ...ef, name: v })} />
+            <Inp label="Empresa" value={ef.empresa} onChange={v => setEf({ ...ef, empresa: v })} />
+            <Inp label="Telefone" value={ef.tel} onChange={v => setEf({ ...ef, tel: v })} />
+            <Inp label="CNPJ" value={ef.cnpj} onChange={v => setEf({ ...ef, cnpj: v })} />
+          </div>
+          <div style={{ marginTop: 14, padding: 14, background: T.ac + "0A", border: `1px solid ${T.ac}25`, borderRadius: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: T.ac, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 12 }}>Condição Comercial</div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <button onClick={() => setEf({ ...ef, comTipo: "pct" })} style={{ flex: 1, padding: "10px 14px", borderRadius: 6, border: `2px solid ${ef.comTipo === "pct" ? T.ac : T.bor}`, background: ef.comTipo === "pct" ? T.ac + "1A" : T.inp, color: ef.comTipo === "pct" ? T.ac : T.tm, fontFamily: "'DM Sans',sans-serif", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>% sobre Cashin</button>
+              <button onClick={() => setEf({ ...ef, comTipo: "valor" })} style={{ flex: 1, padding: "10px 14px", borderRadius: 6, border: `2px solid ${ef.comTipo === "valor" ? T.inf : T.bor}`, background: ef.comTipo === "valor" ? T.inf + "1A" : T.inp, color: ef.comTipo === "valor" ? T.inf : T.tm, fontFamily: "'DM Sans',sans-serif", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>R$ por Conta Ativa</button>
+            </div>
+            <Inp label={ef.comTipo === "pct" ? "Percentual (%)" : "Valor por conta (R$)"} value={ef.comVal} onChange={v => setEf({ ...ef, comVal: v })} type="number" />
+          </div>
+          {/* Convênios */}
+          {allConvenios.length > 0 && (
+            <div style={{ marginTop: 14, padding: 14, background: T.bg2, border: `1px solid ${T.bor}`, borderRadius: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: T.t2, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>🤝 Convênios</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {allConvenios.map(c => (
+                  <label key={c.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 6, border: `1px solid ${editConvIds.includes(c.id) ? T.ac : T.bor}`, background: editConvIds.includes(c.id) ? T.ac + "15" : T.inp, cursor: "pointer", fontSize: 12, color: editConvIds.includes(c.id) ? T.ac : T.txt, fontWeight: editConvIds.includes(c.id) ? 600 : 400 }}>
+                    <input type="checkbox" checked={editConvIds.includes(c.id)} onChange={() => setEditConvIds(prev => prev.includes(c.id) ? prev.filter(x => x !== c.id) : [...prev, c.id])} style={{ accentColor: T.ac }} />
+                    {c.name}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+          <div style={{ marginTop: 16, padding: 14, background: T.er + "0A", border: `1px solid ${T.er}25`, borderRadius: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: T.er, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>Senha</div>
+            {resetPwResult ? (
+              <div>
+                <div style={{ padding: 10, background: T.bg2, borderRadius: 6, fontFamily: "'Space Mono',monospace", fontSize: 14, fontWeight: 600, color: T.ac, marginBottom: 8 }}>{resetPwResult}</div>
+                <Btn sm onClick={() => navigator.clipboard.writeText(resetPwResult)}>Copiar senha</Btn>
+              </div>
+            ) : (
+              <Btn v="danger" sm onClick={resetParcPw}>Resetar Senha</Btn>
+            )}
+          </div>
+        </div>}
+      </Modal>
+    </div>
+  );
+}
+
+// ===== CONVÊNIO PAGE (read-only dashboard for convenio role) =====
+function ConvenioPage() {
+  const { user } = useAuth();
+  const { breakpoint } = useBreakpoint();
+  const [convs, setConvs] = useState([]);
+  const [sel, setSel] = useState(null);
+  const [stats, setStats] = useState(null);
+  const [parceiros, setParceiros] = useState([]);
+  const [indications, setIndications] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState("parceiros");
+
+  useEffect(() => {
+    conveniosApi.getAll().then(r => {
+      const list = r.data.convenios || [];
+      setConvs(list);
+      if (list.length > 0) setSel(list[0]);
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (!sel) return;
+    Promise.all([
+      conveniosApi.getStats(sel.id),
+      conveniosApi.getParceiros(sel.id),
+      conveniosApi.getIndications(sel.id)
+    ]).then(([s, p, i]) => {
+      setStats(s.data.stats);
+      setParceiros(p.data.parceiros || []);
+      setIndications(i.data.indications || []);
+    }).catch(console.error);
+  }, [sel]);
+
+  const SL = { novo: "Novo", em_contato: "Em Contato", proposta: "Proposta", negociacao: "Negociação", fechado: "Fechado", perdido: "Perdido" };
+  const SC = { novo: T.inf, em_contato: T.wn, proposta: T.ac, negociacao: "#f59e0b", fechado: T.ok, perdido: T.er };
+  const thS = { textAlign: "left", padding: "10px 14px", fontSize: 10, fontWeight: 600, color: T.tm, textTransform: "uppercase", borderBottom: `1px solid ${T.bor}`, background: T.bg2 };
+  const tdS = { padding: "12px 14px", fontSize: 13, borderBottom: `1px solid ${T.bor}08` };
+
+  if (loading) return <div style={{ textAlign: "center", padding: 60, color: T.t2 }}>Carregando...</div>;
+  if (convs.length === 0) return <div style={{ textAlign: "center", padding: 60, color: T.t2 }}>Nenhum convênio vinculado.</div>;
+
+  return (
+    <div>
+      {/* Seletor de convênio */}
+      {convs.length > 1 && (
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ fontSize: 11, fontWeight: 600, color: T.t2, textTransform: "uppercase", marginBottom: 6, display: "block" }}>Selecionar Convênio</label>
+          <select value={sel?.id || ""} onChange={e => setSel(convs.find(c => c.id === e.target.value))} style={{ padding: "10px 14px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 14, minWidth: 250 }}>
+            {convs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+      )}
+
+      {/* Stats Cards */}
+      {stats && (
+        <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr 1fr", sm: "1fr 1fr", md: "repeat(4, 1fr)", lg: "repeat(4, 1fr)" }), gap: 14, marginBottom: 24 }}>
+          {[
+            { label: "Total Parceiros", value: stats.totalParceiros, icon: "👥", color: T.ac },
+            { label: "Total Indicações", value: stats.totalIndications, icon: "📋", color: T.inf },
+            { label: "Taxa Conversão", value: `${stats.conversionRate}%`, icon: "🎯", color: T.ok },
+            { label: "Ativas", value: stats.activeIndications, icon: "🔥", color: T.wn },
+          ].map((c, i) => (
+            <div key={i} style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 18 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontSize: 11, color: T.t2, textTransform: "uppercase", fontWeight: 600, letterSpacing: 0.5 }}>{c.label}</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: c.color, marginTop: 4 }}>{c.value}</div>
+                </div>
+                <div style={{ fontSize: 28, opacity: 0.5 }}>{c.icon}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Status Distribution */}
+      {stats?.statusDistribution?.length > 0 && (
+        <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 18, marginBottom: 24 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 14 }}>Distribuição por Status</div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {stats.statusDistribution.map((s, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: (SC[s.status] || T.tm) + "15", borderRadius: 8, border: `1px solid ${(SC[s.status] || T.tm)}30` }}>
+                <div style={{ width: 10, height: 10, borderRadius: "50%", background: SC[s.status] || T.tm }} />
+                <span style={{ fontSize: 12, fontWeight: 600, color: SC[s.status] || T.tm }}>{SL[s.status] || s.status}</span>
+                <span style={{ fontSize: 14, fontWeight: 800 }}>{s.count}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Tabs: Parceiros / Indicações */}
+      <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${T.bor}`, marginBottom: 16 }}>
+        {["parceiros", "indicações"].map(t => (
+          <button key={t} onClick={() => setTab(t)} style={{ padding: "10px 16px", fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: "none", color: tab === t ? T.ac : T.tm, fontFamily: "'DM Sans',sans-serif", borderBottom: `2px solid ${tab === t ? T.ac : "transparent"}`, marginBottom: -1, textTransform: "capitalize" }}>{t}</button>
+        ))}
+      </div>
+
+      {/* Parceiros Table */}
+      {tab === "parceiros" && (
+        <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
+          <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 500 }}>
+            <thead><tr>{["Parceiro", "Empresa", "CNPJ", "Indicações", "Ativas"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
+            <tbody>
+              {parceiros.length === 0 && <tr><td colSpan={5} style={{ ...tdS, textAlign: "center", color: T.t2 }}>Nenhum parceiro vinculado</td></tr>}
+              {parceiros.map(p => (
+                <tr key={p.id}>
+                  <td style={{ ...tdS, fontWeight: 600 }}>{p.name}</td>
+                  <td style={{ ...tdS, color: T.t2 }}>{p.empresa || "—"}</td>
+                  <td style={{ ...tdS, fontFamily: "'Space Mono',monospace", fontSize: 11 }}>{p.cnpj || "—"}</td>
+                  <td style={tdS}><Badge type="accent">{p.indication_count || 0}</Badge></td>
+                  <td style={tdS}><Badge type="warning">{p.active_indications || 0}</Badge></td>
+                </tr>
+              ))}
+            </tbody>
+          </table></div>
+        </div>
+      )}
+
+      {/* Indicações Table */}
+      {tab === "indicações" && (
+        <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
+          <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+            <thead><tr>{["Empresa", "Status", "Parceiro", "Data"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
+            <tbody>
+              {indications.length === 0 && <tr><td colSpan={4} style={{ ...tdS, textAlign: "center", color: T.t2 }}>Nenhuma indicação</td></tr>}
+              {indications.map(ind => (
+                <tr key={ind.id}>
+                  <td style={{ ...tdS, fontWeight: 600 }}>{ind.nome_fantasia || ind.razao_social}</td>
+                  <td style={tdS}><Badge type={ind.status === "fechado" ? "success" : ind.status === "perdido" ? "danger" : "info"}>{SL[ind.status] || ind.status}</Badge></td>
+                  <td style={{ ...tdS, color: T.t2 }}>{ind.owner_name}</td>
+                  <td style={{ ...tdS, fontSize: 11, color: T.tm }}>{new Date(ind.created_at).toLocaleDateString("pt-BR")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table></div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1393,6 +1801,7 @@ function ParcPage({ users, setUsers, inds }) {
 
 function MinhasInd({ inds, setInds, notifs, setNotifs, users, cadenceRules }) {
   const { user } = useAuth();
+  const { breakpoint } = useBreakpoint();
   const [modal, setModal] = useState(false);
   const [sel, setSel] = useState(null);
   const [view, setView] = useState("list");
@@ -1402,6 +1811,16 @@ function MinhasInd({ inds, setInds, notifs, setNotifs, users, cadenceRules }) {
   const [f, setF] = useState({ emp: "", cnpj: "", cont: "", tel: "", em: "", nf: "", obs: "" });
   const my = inds.filter(i => i.pId === user.id);
   const today = new Date().toISOString().split("T")[0];
+
+  const selectInd = async (ind) => {
+    setSel(ind);
+    try {
+      const res = await indicationsApi.getById(ind.id);
+      if (res.data?.hist) {
+        setSel(prev => prev && prev.id === ind.id ? { ...prev, hist: res.data.hist } : prev);
+      }
+    } catch (e) { console.error("Erro ao carregar histórico:", e); }
+  };
 
   const checkHS = async () => {
     if (!f.cnpj || f.cnpj.replace(/\D/g, '').length < 14) {
@@ -1415,7 +1834,7 @@ function MinhasInd({ inds, setInds, notifs, setNotifs, users, cadenceRules }) {
       // 1. Consulta CNPJ na Receita Federal via BrasilAPI
       let cnpjResult = null;
       try {
-        const cnpjRes = await cnpjApi.lookup(f.cnpj);
+        const cnpjRes = await cnpjAgentApi.lookup(f.cnpj);
         cnpjResult = cnpjRes.data;
 
         // Formata dados da Receita
@@ -1501,21 +1920,35 @@ function MinhasInd({ inds, setInds, notifs, setNotifs, users, cadenceRules }) {
     }
   };
 
-  const submit = () => {
-    const dt = new Date().toISOString().split("T")[0];
-    const tm = new Date().toISOString().split("T")[0] + " " + new Date().toTimeString().slice(0, 5);
-    setInds(p => [...p, {
-      ...f, id: "i" + Date.now(), nf: parseInt(f.nf) || 0, st: "nova", pId: user.id, gId: user.gId,
-      hsId: null, hsSt: null, lib: null, libDt: null, libExp: null, dt,
-      razao: cnpjData?.razao || null, fantasia: cnpjData?.fantasia || null, capital: cnpjData?.capital || null,
-      abertura: cnpjData?.abertura || null, cnae: cnpjData?.cnae || null, endereco: cnpjData?.endereco || null,
-      hist: [{ dt: tm, autor: user.name, txt: "Indicação criada" }],
-    }]);
-    setModal(false); setF({ emp: "", cnpj: "", cont: "", tel: "", em: "", nf: "", obs: "" }); setHr(null); setCnpjData(null);
-    // Notify gerente about new indication
-    if (user.gId && isCadenceActive(cadenceRules, "cad_nova_indicacao")) {
-      addNotif(setNotifs, { tipo: "sistema", titulo: "Nova indicação", msg: `Parceiro ${user.name} criou nova indicação: ${f.emp}.`, para: user.gId, de: user.id, link: "kanban" });
-    }
+  const [submitting, setSubmitting] = useState(false);
+  const submit = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      const res = await indicationsApi.create({
+        cnpj: f.cnpj,
+        razao_social: cnpjData?.razao || f.emp,
+        nome_fantasia: cnpjData?.fantasia || f.emp,
+        contato_nome: f.cont,
+        contato_telefone: f.tel,
+        contato_email: f.em,
+        num_funcionarios: parseInt(f.nf) || 0,
+        manager_id: user.gId,
+        capital: cnpjData?.capital || null,
+        abertura: cnpjData?.abertura || null,
+        cnae: cnpjData?.cnae || null,
+        endereco: cnpjData?.endereco || null,
+        notes: f.obs || null,
+      });
+      const newInd = transformIndication(res.data.indication);
+      setInds(p => [...p, newInd]);
+      setModal(false); setF({ emp: "", cnpj: "", cont: "", tel: "", em: "", nf: "", obs: "" }); setHr(null); setCnpjData(null);
+      // Notify gerente about new indication
+      if (user.gId && isCadenceActive(cadenceRules, "cad_nova_indicacao")) {
+        addNotif(setNotifs, { tipo: "sistema", titulo: "Nova indicação", msg: `Parceiro ${user.name} criou nova indicação: ${f.emp}.`, para: user.gId, de: user.id, link: "kanban" });
+      }
+    } catch (e) { console.error("Erro ao criar indicação:", e); alert(e.response?.data?.error || "Erro ao criar indicação"); }
+    setSubmitting(false);
   };
 
   const thS = { textAlign: "left", padding: "12px 14px", fontSize: 10, fontWeight: 600, color: T.tm, textTransform: "uppercase", borderBottom: `1px solid ${T.bor}`, background: T.bg2 };
@@ -1534,11 +1967,11 @@ function MinhasInd({ inds, setInds, notifs, setNotifs, users, cadenceRules }) {
       {/* LIST VIEW */}
       {view === "list" && (
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
             <thead><tr>{["Empresa", "Contato", "Func.", "Status", "HubSpot", "Liberação", "Data"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
             <tbody>
               {my.map(ind => (
-                <tr key={ind.id} onClick={() => setSel(ind)} style={{ cursor: "pointer" }}>
+                <tr key={ind.id} onClick={() => selectInd(ind)} style={{ cursor: "pointer" }}>
                   <td style={tdS}><div style={{ fontSize: 13, fontWeight: 600 }}>{ind.emp}</div><div style={{ fontSize: 10, color: T.tm }}>{ind.cnpj}</div></td>
                   <td style={tdS}>{ind.cont}</td>
                   <td style={tdS}>{ind.nf}</td>
@@ -1550,7 +1983,7 @@ function MinhasInd({ inds, setInds, notifs, setNotifs, users, cadenceRules }) {
               ))}
               {my.length === 0 && <tr><td colSpan={7} style={{ padding: 40, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhuma indicação. Clique em "Nova Indicação".</td></tr>}
             </tbody>
-          </table>
+          </table></div>
         </div>
       )}
 
@@ -1568,7 +2001,7 @@ function MinhasInd({ inds, setInds, notifs, setNotifs, users, cadenceRules }) {
                 </div>
                 <div style={{ background: T.bg2 + "88", border: `1px solid ${T.bor}`, borderTop: "none", borderRadius: "0 0 8px 8px", padding: 8, minHeight: 90, display: "flex", flexDirection: "column", gap: 6 }}>
                   {cards.map(ind => (
-                    <div key={ind.id} onClick={() => setSel(ind)} style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 6, padding: 12, cursor: "pointer" }}>
+                    <div key={ind.id} onClick={() => selectInd(ind)} style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 6, padding: 12, cursor: "pointer" }}>
                       <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{ind.emp}</div>
                       <div style={{ fontSize: 10, color: T.tm }}>🏢 {ind.nf} func · {ind.cont}</div>
                       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, paddingTop: 6, borderTop: `1px solid ${T.bor}` }}>
@@ -1638,7 +2071,7 @@ function MinhasInd({ inds, setInds, notifs, setNotifs, users, cadenceRules }) {
       {/* MODAL: Nova Indicação with CNPJ enrichment */}
       <Modal open={modal} onClose={() => { setModal(false); setHr(null); setCnpjData(null); }} title="Nova Indicação" wide footer={<><Btn v="secondary" onClick={() => { setModal(false); setHr(null); setCnpjData(null); }}>Cancelar</Btn><Btn onClick={submit} disabled={!f.emp || !f.cnpj || !f.cont || hr?.found}>Enviar</Btn></>}>
         <div style={{ marginBottom: 16, padding: 12, background: T.inp, borderRadius: 6, fontSize: 12, color: T.t2 }}>⚠️ Consulte o CNPJ para verificar no HubSpot e preencher dados automaticamente da Receita Federal.</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr 1fr", lg: "1fr 1fr" }), gap: 14 }}>
           <div style={{ gridColumn: "1/-1", marginBottom: 14 }}>
             <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>CNPJ *</label>
             <div style={{ display: "flex", gap: 6 }}>
@@ -1737,7 +2170,7 @@ function MatsPage({ mats }) {
             <div style={{ width: 40, height: 40, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, fontFamily: "'Space Mono',monospace", textTransform: "uppercase", background: (tc[m.tipo] || T.tm) + "22", color: tc[m.tipo] || T.tm, marginBottom: 12 }}>{m.tipo}</div>
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6, lineHeight: 1.4 }}>{m.t}</div>
             <div style={{ fontSize: 11, color: T.tm }}>{m.sz} · {m.dt}</div>
-            <div style={{ marginTop: 12 }}><Btn v="secondary" sm>⬇ Download</Btn></div>
+            <div style={{ marginTop: 12 }}><Btn v="secondary" sm onClick={async () => { try { const res = await materialsApi.download(m.id); const url = window.URL.createObjectURL(new Blob([res.data])); const a = document.createElement('a'); a.href = url; a.download = `${m.t}.${m.tipo || 'bin'}`; document.body.appendChild(a); a.click(); a.remove(); window.URL.revokeObjectURL(url); } catch (e) { console.error("Erro no download:", e); alert("Erro ao baixar arquivo"); } }}>⬇ Download</Btn></div>
           </div>
         ))}
       </div>
@@ -1745,19 +2178,190 @@ function MatsPage({ mats }) {
   );
 }
 
+// ===== CONVÊNIOS TAB (inside CfgPage) =====
+function ConveniosTab() {
+  const [convs, setConvs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(false);
+  const [editModal, setEditModal] = useState(null);
+  const [form, setForm] = useState({ name: "", description: "" });
+  const [saving, setSaving] = useState(false);
+  const [delConf, setDelConf] = useState(null);
+
+  const load = async () => {
+    try {
+      const r = await conveniosApi.getAll();
+      setConvs(r.data.convenios || []);
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const save = async () => {
+    if (!form.name.trim() || saving) return;
+    setSaving(true);
+    try {
+      if (editModal) {
+        const r = await conveniosApi.update(editModal.id, form);
+        setConvs(prev => prev.map(c => c.id === editModal.id ? r.data.convenio : c));
+        setEditModal(null);
+      } else {
+        const r = await conveniosApi.create(form);
+        setConvs(prev => [...prev, r.data.convenio]);
+        setModal(false);
+      }
+      setForm({ name: "", description: "" });
+    } catch (e) { alert(e.response?.data?.error || "Erro ao salvar"); }
+    setSaving(false);
+  };
+
+  const del = async (id) => {
+    try {
+      await conveniosApi.delete(id);
+      setConvs(prev => prev.map(c => c.id === id ? { ...c, is_active: 0 } : c));
+      setDelConf(null);
+    } catch (e) { alert(e.response?.data?.error || "Erro ao desativar"); }
+  };
+
+  const thS = { padding: "10px 14px", textAlign: "left", fontSize: 11, fontWeight: 600, color: T.t2, textTransform: "uppercase", letterSpacing: 0.5, borderBottom: `1px solid ${T.bor}` };
+  const tdS = { padding: "12px 14px", fontSize: 13, borderBottom: `1px solid ${T.bor}08`, verticalAlign: "middle" };
+
+  if (loading) return <div style={{ textAlign: "center", padding: 40, color: T.t2 }}>Carregando...</div>;
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <p style={{ fontSize: 13, color: T.t2 }}>{convs.length} convênio(s) cadastrado(s)</p>
+        <Btn onClick={() => { setForm({ name: "", description: "" }); setModal(true); }}>+ Novo Convênio</Btn>
+      </div>
+
+      <div style={{ overflowX: "auto", border: `1px solid ${T.bor}`, borderRadius: 8 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr style={{ background: T.bg }}>
+            <th style={thS}>Nome</th>
+            <th style={thS}>Descrição</th>
+            <th style={thS}>Parceiros</th>
+            <th style={thS}>Status</th>
+            <th style={thS}>Ações</th>
+          </tr></thead>
+          <tbody>
+            {convs.length === 0 && <tr><td colSpan={5} style={{ ...tdS, textAlign: "center", color: T.t2 }}>Nenhum convênio cadastrado</td></tr>}
+            {convs.map(c => (
+              <tr key={c.id} style={{ background: T.card }}>
+                <td style={{ ...tdS, fontWeight: 600 }}>{c.name}</td>
+                <td style={{ ...tdS, color: T.t2 }}>{c.description || "—"}</td>
+                <td style={tdS}><Badge type="accent">{c.parceiro_count || 0}</Badge></td>
+                <td style={tdS}><Badge type={c.is_active ? "success" : "muted"}>{c.is_active ? "Ativo" : "Inativo"}</Badge></td>
+                <td style={tdS}>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button onClick={() => { setForm({ name: c.name, description: c.description || "" }); setEditModal(c); }} style={{ background: "none", border: `1px solid ${T.bor}`, borderRadius: 6, cursor: "pointer", padding: "4px 8px", color: T.t2, fontSize: 13 }} title="Editar">✏️</button>
+                    {c.is_active ? (
+                      <button onClick={() => setDelConf(c)} style={{ background: "none", border: `1px solid ${T.er}44`, borderRadius: 6, cursor: "pointer", padding: "4px 8px", color: T.er, fontSize: 13 }} title="Desativar">🗑️</button>
+                    ) : (
+                      <button onClick={async () => { await conveniosApi.update(c.id, { is_active: true }); load(); }} style={{ background: "none", border: `1px solid ${T.ok}44`, borderRadius: 6, cursor: "pointer", padding: "4px 8px", color: T.ok, fontSize: 13 }} title="Reativar">♻️</button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Create/Edit Modal */}
+      <Modal open={modal || !!editModal} onClose={() => { setModal(false); setEditModal(null); }} title={editModal ? "Editar Convênio" : "Novo Convênio"} footer={<>
+        <Btn v="secondary" onClick={() => { setModal(false); setEditModal(null); }}>Cancelar</Btn>
+        <Btn onClick={save} disabled={!form.name.trim() || saving}>{saving ? "Salvando..." : "Salvar"}</Btn>
+      </>}>
+        <Inp label="Nome" value={form.name} onChange={v => setForm(p => ({ ...p, name: v }))} placeholder="Nome do convênio" />
+        <Inp label="Descrição" value={form.description} onChange={v => setForm(p => ({ ...p, description: v }))} placeholder="Descrição (opcional)" />
+      </Modal>
+
+      {/* Delete Confirmation */}
+      <Modal open={!!delConf} onClose={() => setDelConf(null)} title="Desativar Convênio" footer={<>
+        <Btn v="secondary" onClick={() => setDelConf(null)}>Cancelar</Btn>
+        <Btn v="danger" onClick={() => del(delConf.id)}>Desativar</Btn>
+      </>}>
+        <p style={{ fontSize: 14, color: T.txt }}>Tem certeza que deseja desativar o convênio <strong>{delConf?.name}</strong>?</p>
+        <p style={{ fontSize: 12, color: T.t2, marginTop: 8 }}>Os parceiros vinculados não serão afetados.</p>
+      </Modal>
+    </div>
+  );
+}
+
 // ===== CONFIG =====
 function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, notifs, setNotifs, cadenceRules, setCadenceRules }) {
   const { user } = useAuth();
+  const { breakpoint } = useBreakpoint();
   const isSA = user.role === "super_admin";
-  const [cfg, setCfg] = useState({ prazo: 5, minF: 20, hsKey: "pat-na1-xxxx", hsPipe: "default", emOn: true, waOn: false });
+  const [cfg, setCfg] = useState({ prazo: 5, minF: 20, hsKey: "", hsPipe: "", emOn: true, waOn: false });
   const [saved, setSaved] = useState(false);
   const [tab, setTab] = useState("geral");
+  const [hsStatus, setHsStatus] = useState({ connected: null, message: "" });
+  const [hsPipelines, setHsPipelines] = useState([]);
+  const [hsLoading, setHsLoading] = useState(false);
+  const [hsSaving, setHsSaving] = useState(false);
+  const [hsKeyPreview, setHsKeyPreview] = useState(null);
+
+  // Load HubSpot config on mount
+  useEffect(() => {
+    if (isSA || user.role === "executivo") {
+      hubspotApi.getConfig().then(r => {
+        const d = r.data;
+        setHsKeyPreview(d.apiKeyPreview);
+        setCfg(prev => ({ ...prev, hsPipe: d.pipelineId || "", hsKey: "" }));
+        if (d.hasApiKey) {
+          hubspotApi.test().then(t => setHsStatus(t.data)).catch(() => setHsStatus({ connected: false, message: "Erro ao testar" }));
+        }
+      }).catch(() => {});
+    }
+    conveniosApi.getAll().then(r => setCfgConvenios((r.data.convenios || []).filter(c => c.is_active))).catch(() => {});
+  }, []);
   const [matModal, setMatModal] = useState(false);
-  const [mf, setMf] = useState({ t: "", tipo: "pdf", cat: "comercial", sz: "" });
+  const [mf, setMf] = useState({ t: "", tipo: "pdf", cat: "comercial", sz: "", file: null, fileName: "" });
+  const [matSaving, setMatSaving] = useState(false);
   const [delConf, setDelConf] = useState(null);
   const [userModal, setUserModal] = useState(false);
   const [uf, setUf] = useState({ name: "", email: "", pw: "", role: "gerente", dId: "", eId: "" });
+  const [ufConvIds, setUfConvIds] = useState([]);
+  const [cfgConvenios, setCfgConvenios] = useState([]);
   const [delUserConf, setDelUserConf] = useState(null);
+  const [uSearch, setUSearch] = useState("");
+  const [uRoleFilter, setURoleFilter] = useState("");
+  const [editUser, setEditUser] = useState(null);
+  const [euF, setEuF] = useState({ name: "", role: "", managerId: "", isActive: true });
+  const [euSaving, setEuSaving] = useState(false);
+  const [euResetPw, setEuResetPw] = useState(null);
+
+  const openEditUser = (u) => {
+    setEuF({ name: u.name, role: u.role, managerId: u.dId || u.eId || "", isActive: true });
+    setEditUser(u);
+    setEuResetPw(null);
+  };
+
+  const saveEditUser = async () => {
+    if (!editUser || euSaving) return;
+    setEuSaving(true);
+    try {
+      const managerId = euF.role === "gerente" ? euF.managerId : euF.role === "diretor" ? euF.managerId : undefined;
+      await usersApi.update(editUser.id, {
+        name: euF.name, role: euF.role, manager_id: managerId,
+        is_active: euF.isActive
+      });
+      setUsers(prev => prev.map(u => u.id === editUser.id ? { ...u, name: euF.name, role: euF.role, eId: euF.role === "diretor" ? euF.managerId : u.eId, dId: euF.role === "gerente" ? euF.managerId : u.dId } : u));
+      setEditUser(null);
+    } catch (e) { alert(e.response?.data?.error || "Erro ao salvar"); }
+    setEuSaving(false);
+  };
+
+  const resetUserPw = async () => {
+    if (!editUser) return;
+    try {
+      const res = await usersApi.resetPassword(editUser.id);
+      setEuResetPw(res.data.password);
+    } catch (e) { alert(e.response?.data?.error || "Erro ao resetar senha"); }
+  };
   // Segmented communication state
   const [commForm, setCommForm] = useState({ titulo: "", msg: "", perfis: [], individuais: [], prioridade: "info" });
   const [commHist, setCommHist] = useState([
@@ -1767,30 +2371,68 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
   const [commSent, setCommSent] = useState(false);
   const [cadEditModal, setCadEditModal] = useState(null);
 
-  const addMat = () => {
+  const addMat = async () => {
     if (!mf.t) return;
-    setMats(prev => [...prev, { id: "m" + Date.now(), t: mf.t, tipo: mf.tipo, cat: mf.cat, sz: mf.sz || "—", dt: new Date().toISOString().split("T")[0] }]);
-    setMatModal(false);
-    setMf({ t: "", tipo: "pdf", cat: "comercial", sz: "" });
+    setMatSaving(true);
+    try {
+      const fd = new FormData();
+      fd.append("title", mf.t);
+      fd.append("category", mf.cat);
+      fd.append("file_type", mf.tipo);
+      fd.append("roles_allowed", "all");
+      if (mf.file) fd.append("file", mf.file);
+
+      const r = await materialsApi.create(fd);
+      const m = r.data.material;
+      setMats(prev => [...prev, {
+        id: m.id, t: m.title, tipo: m.file_type || mf.tipo, cat: m.category,
+        sz: mf.file ? (mf.file.size / (1024 * 1024)).toFixed(1) + " MB" : "—",
+        dt: new Date().toISOString().split("T")[0], arq: m.file_path
+      }]);
+      setMatModal(false);
+      setMf({ t: "", tipo: "pdf", cat: "comercial", sz: "", file: null, fileName: "" });
+    } catch (e) { console.error("Erro ao adicionar material:", e); }
+    setMatSaving(false);
   };
 
-  const delMat = (id) => { setMats(prev => prev.filter(m => m.id !== id)); setDelConf(null); };
+  const delMat = async (id) => {
+    try {
+      await materialsApi.delete(id);
+      setMats(prev => prev.filter(m => m.id !== id));
+      setDelConf(null);
+    } catch (e) { console.error("Erro ao excluir material:", e); alert(e.response?.data?.error || "Erro ao excluir"); }
+  };
 
-  const addUser = () => {
-    if (!uf.name || !uf.email || !uf.pw) return;
+  const [addingUser, setAddingUser] = useState(false);
+  const addUser = async () => {
+    if (!uf.name || !uf.email || !uf.pw || addingUser) return;
     if (uf.role === "gerente" && !uf.dId) return;
     if (uf.role === "diretor" && !uf.eId) return;
-    setUsers(prev => [...prev, {
-      id: "u" + Date.now(), name: uf.name, email: uf.email, pw: uf.pw, role: uf.role,
-      av: uf.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase(),
-      ...(uf.role === "gerente" ? { dId: uf.dId } : {}),
-      ...(uf.role === "diretor" ? { eId: uf.eId } : {})
-    }]);
-    setUserModal(false);
-    setUf({ name: "", email: "", pw: "", role: "gerente", dId: "", eId: "" });
+    if (uf.role === "convenio" && ufConvIds.length === 0) return;
+    setAddingUser(true);
+    try {
+      const managerId = uf.role === "gerente" ? uf.dId : uf.role === "diretor" ? uf.eId : undefined;
+      const res = await usersApi.create({
+        email: uf.email, password: uf.pw, name: uf.name, role: uf.role,
+        manager_id: managerId,
+        convenio_ids: uf.role === "convenio" ? ufConvIds : undefined
+      });
+      const u = res.data.user;
+      setUsers(prev => [...prev, transformUser(u)]);
+      setUserModal(false);
+      setUf({ name: "", email: "", pw: "", role: "gerente", dId: "", eId: "" });
+      setUfConvIds([]);
+    } catch (e) { console.error("Erro ao criar usuário:", e); alert(e.response?.data?.error || "Erro ao criar usuário"); }
+    setAddingUser(false);
   };
 
-  const delUser = (id) => { setUsers(prev => prev.filter(u => u.id !== id)); setDelUserConf(null); };
+  const delUser = async (id) => {
+    try {
+      await usersApi.delete(id);
+      setUsers(prev => prev.filter(u => u.id !== id));
+      setDelUserConf(null);
+    } catch (e) { console.error("Erro ao excluir usuário:", e); alert(e.response?.data?.error || "Erro ao excluir"); }
+  };
 
   const tc = { pdf: T.er, xlsx: T.ok, docx: T.inf, mp4: "#8b5cf6" };
   const thS = { textAlign: "left", padding: "12px 14px", fontSize: 10, fontWeight: 600, color: T.tm, textTransform: "uppercase", borderBottom: `1px solid ${T.bor}`, background: T.bg2 };
@@ -1799,7 +2441,7 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
   return (
     <div>
       <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${T.bor}`, marginBottom: 20 }}>
-        {["geral", "hubspot", "notificações", "usuários", "materiais"].map(t => <button key={t} onClick={() => setTab(t)} style={{ padding: "10px 16px", fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: "none", color: tab === t ? T.ac : T.tm, fontFamily: "'DM Sans',sans-serif", borderBottom: `2px solid ${tab === t ? T.ac : "transparent"}`, marginBottom: -1, textTransform: "capitalize" }}>{t}</button>)}
+        {["geral", "hubspot", "notificações", "usuários", "convênios", "materiais"].map(t => <button key={t} onClick={() => setTab(t)} style={{ padding: "10px 16px", fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: "none", color: tab === t ? T.ac : T.tm, fontFamily: "'DM Sans',sans-serif", borderBottom: `2px solid ${tab === t ? T.ac : "transparent"}`, marginBottom: -1, textTransform: "capitalize" }}>{t}</button>)}
       </div>
       {tab === "geral" && <div>
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20, marginBottom: 16 }}>
@@ -1823,7 +2465,7 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20, marginBottom: 16 }}>
           <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>💰 Modelo de Comissionamento</h3>
           <p style={{ fontSize: 12, color: T.tm, marginBottom: 16 }}>Cada parceiro recebe uma condição comercial individual — escolha entre percentual ou valor fixo:</p>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr 1fr", lg: "1fr 1fr" }), gap: 14, marginBottom: 16 }}>
             <div style={{ background: T.inp, borderRadius: 8, padding: 16, border: `1px solid ${T.ac}25` }}>
               <div style={{ fontSize: 10, color: T.ac, textTransform: "uppercase", fontWeight: 600, letterSpacing: 0.5, marginBottom: 8 }}>Opção A</div>
               <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>% sobre Cashin</div>
@@ -1839,14 +2481,14 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
           {/* Parceiro Commission Overview */}
           <div style={{ fontSize: 11, fontWeight: 600, color: T.t2, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>Condições por Parceiro</div>
           <div style={{ background: T.bg2, borderRadius: 8, border: `1px solid ${T.bor}`, overflow: "hidden" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
               <thead><tr>{["Parceiro", "Empresa", "Tipo", "Valor", "Gerente"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>{users.filter(u => u.role === "parceiro").map(p => (
                 <tr key={p.id}>
                   <td style={{ ...tdS, fontWeight: 600 }}>{p.name}</td>
                   <td style={{ ...tdS, fontSize: 12, color: T.t2 }}>{p.empresa || "—"}</td>
                   <td style={tdS}>
-                    <select value={p.comTipo || "pct"} onChange={e => setUsers(prev => prev.map(u => u.id === p.id ? { ...u, comTipo: e.target.value } : u))}
+                    <select value={p.comTipo || "pct"} onChange={e => { const v = e.target.value; setUsers(prev => prev.map(u => u.id === p.id ? { ...u, comTipo: v } : u)); usersApi.update(p.id, { com_tipo: v }).catch(err => console.error("Erro ao atualizar comTipo:", err)); }}
                       style={{ padding: "5px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 4, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 11, outline: "none" }}>
                       <option value="pct">% Cashin</option>
                       <option value="valor">R$/Conta</option>
@@ -1855,7 +2497,7 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
                   <td style={tdS}>
                     <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                       {p.comTipo === "valor" && <span style={{ fontSize: 11, color: T.tm }}>R$</span>}
-                      <input type="number" step={p.comTipo === "pct" ? "0.1" : "0.5"} value={p.comVal ?? ""} onChange={e => setUsers(prev => prev.map(u => u.id === p.id ? { ...u, comVal: parseFloat(e.target.value) || 0 } : u))}
+                      <input type="number" step={p.comTipo === "pct" ? "0.1" : "0.5"} value={p.comVal ?? ""} onChange={e => { const v = parseFloat(e.target.value) || 0; setUsers(prev => prev.map(u => u.id === p.id ? { ...u, comVal: v } : u)); }} onBlur={e => { usersApi.update(p.id, { com_val: parseFloat(e.target.value) || 0 }).catch(err => console.error("Erro ao atualizar comVal:", err)); }}
                         style={{ width: 80, textAlign: "right", padding: "5px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 4, color: p.comTipo === "pct" ? T.ac : T.inf, fontFamily: "'Space Mono',monospace", fontSize: 12, fontWeight: 700, outline: "none" }} />
                       {p.comTipo === "pct" && <span style={{ fontSize: 11, color: T.tm }}>%</span>}
                     </div>
@@ -1863,15 +2505,99 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
                   <td style={{ ...tdS, fontSize: 12, color: T.tm }}>{users.find(u => u.id === p.gId)?.name || "—"}</td>
                 </tr>
               ))}</tbody>
-            </table>
+            </table></div>
           </div>
         </div>
       </div>}
       {tab === "hubspot" && <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20 }}>
         <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 16 }}>Integração HubSpot</h3>
-        <Inp label="API Key" value={cfg.hsKey} onChange={v => setCfg({ ...cfg, hsKey: v })} type="password" />
-        <Inp label="Pipeline ID" value={cfg.hsPipe} onChange={v => setCfg({ ...cfg, hsPipe: v })} />
-        <div style={{ padding: 14, background: T.ok + "0D", border: `1px solid ${T.ok}25`, borderRadius: 6, fontSize: 13, color: T.ok, fontWeight: 600 }}>✓ Conexão ativa · Última sync: 3 min</div>
+
+        {/* Status de conexão */}
+        {hsStatus.connected !== null && (
+          <div style={{ padding: 14, background: hsStatus.connected ? T.ok + "0D" : T.er + "0D", border: `1px solid ${hsStatus.connected ? T.ok : T.er}25`, borderRadius: 6, fontSize: 13, color: hsStatus.connected ? T.ok : T.er, fontWeight: 600, marginBottom: 16 }}>
+            {hsStatus.connected ? "✓ Conexão ativa" : "✗ " + hsStatus.message}
+          </div>
+        )}
+
+        {/* API Key */}
+        <div style={{ marginBottom: 12 }}>
+          <Inp label={`API Key${hsKeyPreview ? ` (atual: ${hsKeyPreview})` : ""}`} value={cfg.hsKey} onChange={v => setCfg({ ...cfg, hsKey: v })} type="password" placeholder="pat-na1-..." />
+          <p style={{ fontSize: 11, color: T.tm, marginTop: 2 }}>Deixe em branco para manter a chave atual</p>
+        </div>
+
+        {/* Botão salvar API Key e testar */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+          <Btn v="primary" onClick={async () => {
+            if (!cfg.hsKey && !hsKeyPreview) return;
+            setHsSaving(true);
+            try {
+              if (cfg.hsKey) await hubspotApi.saveConfig({ apiKey: cfg.hsKey });
+              const t = await hubspotApi.test();
+              setHsStatus(t.data);
+              if (t.data.connected) {
+                setCfg(prev => ({ ...prev, hsKey: "" }));
+                const r = await hubspotApi.getConfig();
+                setHsKeyPreview(r.data.apiKeyPreview);
+              }
+            } catch { setHsStatus({ connected: false, message: "Erro ao salvar" }); }
+            setHsSaving(false);
+          }} disabled={hsSaving}>{hsSaving ? "Salvando..." : cfg.hsKey ? "Salvar e Testar" : "Testar Conexão"}</Btn>
+        </div>
+
+        {/* Pipeline */}
+        {hsStatus.connected && <>
+          <div style={{ borderTop: `1px solid ${T.bor}`, paddingTop: 16, marginBottom: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <h4 style={{ fontSize: 14, fontWeight: 600 }}>Pipeline de Deals</h4>
+              <Btn v="ghost" onClick={async () => {
+                setHsLoading(true);
+                try {
+                  const r = await hubspotApi.getPipelines();
+                  setHsPipelines(r.data.pipelines || []);
+                } catch { setHsPipelines([]); }
+                setHsLoading(false);
+              }} disabled={hsLoading}>{hsLoading ? "Carregando..." : "Buscar Pipelines"}</Btn>
+            </div>
+
+            {hsPipelines.length > 0 && (
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: T.t2, marginBottom: 4, display: "block" }}>Selecione o Pipeline</label>
+                <select value={cfg.hsPipe} onChange={e => setCfg({ ...cfg, hsPipe: e.target.value })} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 13, fontFamily: "'DM Sans',sans-serif" }}>
+                  <option value="">Todos os pipelines</option>
+                  {hsPipelines.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                </select>
+              </div>
+            )}
+
+            {/* Mostrar stages do pipeline selecionado */}
+            {cfg.hsPipe && hsPipelines.length > 0 && (() => {
+              const sel = hsPipelines.find(p => p.id === cfg.hsPipe);
+              if (!sel) return null;
+              return (
+                <div style={{ background: T.bg2, borderRadius: 6, padding: 12, marginBottom: 12 }}>
+                  <p style={{ fontSize: 12, fontWeight: 600, color: T.t2, marginBottom: 8 }}>Stages do pipeline "{sel.label}":</p>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {sel.stages.map(s => <Badge key={s.id} type="info">{s.label}</Badge>)}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {!cfg.hsPipe && <p style={{ fontSize: 12, color: T.tm }}>Nenhum pipeline selecionado — todos os deals serão considerados na verificação.</p>}
+          </div>
+
+          {/* Botão salvar Pipeline */}
+          <Btn v="primary" onClick={async () => {
+            setHsSaving(true);
+            try {
+              await hubspotApi.saveConfig({ pipelineId: cfg.hsPipe || null });
+              setSaved(true);
+              setTimeout(() => setSaved(false), 2000);
+            } catch {}
+            setHsSaving(false);
+          }} disabled={hsSaving}>{hsSaving ? "Salvando..." : "Salvar Pipeline"}</Btn>
+          {saved && <span style={{ marginLeft: 10, fontSize: 13, color: T.ok, fontWeight: 600 }}>Salvo!</span>}
+        </>}
       </div>}
       {tab === "notificações" && <div>
         {/* Canal Preferences */}
@@ -1898,7 +2624,7 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
           <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>⚡ Cadência Automática</h3>
           <p style={{ fontSize: 12, color: T.tm, marginBottom: 16 }}>Notificações disparadas automaticamente a cada ação no sistema.{isSA && " Clique no toggle para ativar/desativar ou no lápis para editar."}</p>
           <div style={{ background: T.bg2, borderRadius: 8, border: `1px solid ${T.bor}`, overflow: "hidden" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
               <thead><tr>{["Evento", "Notifica", "Tipo", "Status", ...(isSA ? ["Ações"] : [])].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>
                 {cadenceRules.map((r) => {
@@ -1926,7 +2652,7 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
                   );
                 })}
               </tbody>
-            </table>
+            </table></div>
           </div>
         </div>
 
@@ -1971,7 +2697,7 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
           <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>📢 Comunicação Segmentada</h3>
           <p style={{ fontSize: 12, color: T.tm, marginBottom: 16 }}>Envie comunicados direcionados para perfis ou usuários específicos.</p>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr 1fr", lg: "1fr 1fr" }), gap: 14, marginBottom: 16 }}>
             <Inp label="Título do comunicado *" value={commForm.titulo} onChange={v => setCommForm({ ...commForm, titulo: v })} placeholder="Ex: Atualização de política" />
             <div style={{ marginBottom: 14 }}>
               <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Prioridade</label>
@@ -2025,13 +2751,16 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
           )}
 
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <Btn onClick={() => {
+            <Btn onClick={async () => {
               if (!commForm.titulo || !commForm.msg || commForm.perfis.length === 0) return;
               const targets = commForm.individuais.length > 0 ? commForm.individuais : users.filter(u => commForm.perfis.includes(u.role)).map(u => u.id);
-              targets.forEach(para => addNotif(setNotifs, { tipo: "comunicado", titulo: commForm.titulo, msg: commForm.msg, para, de: user.id, link: "notifs" }));
-              setCommHist(prev => [{ id: "ch" + Date.now(), titulo: commForm.titulo, msg: commForm.msg, perfis: [...commForm.perfis], dt: new Date().toISOString().replace("T", " ").slice(0, 16), por: user.name, total: targets.length }, ...prev]);
-              setCommForm({ titulo: "", msg: "", perfis: [], individuais: [], prioridade: "info" });
-              setCommSent(true); setTimeout(() => setCommSent(false), 3000);
+              try {
+                await notificationsApi.broadcast({ title: commForm.titulo, message: commForm.msg, type: 'info', roles: commForm.perfis, user_ids: commForm.individuais.length > 0 ? commForm.individuais : undefined });
+                targets.forEach(para => addNotif(setNotifs, { tipo: "comunicado", titulo: commForm.titulo, msg: commForm.msg, para, de: user.id, link: "notifs" }));
+                setCommHist(prev => [{ id: "ch" + Date.now(), titulo: commForm.titulo, msg: commForm.msg, perfis: [...commForm.perfis], dt: new Date().toISOString().replace("T", " ").slice(0, 16), por: user.name, total: targets.length }, ...prev]);
+                setCommForm({ titulo: "", msg: "", perfis: [], individuais: [], prioridade: "info" });
+                setCommSent(true); setTimeout(() => setCommSent(false), 3000);
+              } catch (e) { console.error("Erro ao enviar comunicado:", e); alert(e.response?.data?.error || "Erro ao enviar"); }
             }} disabled={!commForm.titulo || !commForm.msg || commForm.perfis.length === 0}>📤 Enviar Comunicado</Btn>
             {commSent && <span style={{ fontSize: 13, color: T.ok, fontWeight: 600 }}>✓ Comunicado enviado com sucesso!</span>}
           </div>
@@ -2041,7 +2770,7 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20 }}>
           <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 16 }}>📜 Histórico de Comunicados</h3>
           <div style={{ background: T.bg2, borderRadius: 8, border: `1px solid ${T.bor}`, overflow: "hidden" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
               <thead><tr>{["Título", "Perfis", "Alcançados", "Enviado por", "Data"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>
                 {commHist.map(c => (
@@ -2055,20 +2784,31 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
                 ))}
                 {commHist.length === 0 && <tr><td colSpan={5} style={{ padding: 40, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhum comunicado enviado.</td></tr>}
               </tbody>
-            </table>
+            </table></div>
           </div>
         </div>
       </div>}
       {tab === "usuários" && (
         <div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <div style={{ fontSize: 13, color: T.t2 }}>{users.filter(u => u.role !== "parceiro").length} usuário(s) interno(s)</div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <div style={{ fontSize: 13, color: T.t2 }}>{(() => { const filtered = users.filter(u => u.role !== "parceiro").filter(u => { if (uRoleFilter && u.role !== uRoleFilter) return false; if (uSearch) { const s = uSearch.toLowerCase(); return u.name.toLowerCase().includes(s) || u.email.toLowerCase().includes(s); } return true; }); return `${filtered.length} usuário(s) interno(s)`; })()}</div>
             <Btn onClick={() => setUserModal(true)}>＋ Adicionar Usuário</Btn>
           </div>
+          <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+            <input value={uSearch} onChange={e => setUSearch(e.target.value)} placeholder="Buscar por nome ou e-mail..." style={{ flex: 1, minWidth: 180, padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }} />
+            <select value={uRoleFilter} onChange={e => setURoleFilter(e.target.value)} style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13, minWidth: 140 }}>
+              <option value="">Todos os perfis</option>
+              <option value="super_admin">Super Admin</option>
+              <option value="executivo">Executivo</option>
+              <option value="diretor">Diretoria</option>
+              <option value="gerente">Gerente</option>
+            </select>
+            {(uSearch || uRoleFilter) && <Btn v="secondary" sm onClick={() => { setUSearch(""); setURoleFilter(""); }}>Limpar</Btn>}
+          </div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
               <thead><tr>{["Usuário", "E-mail", "Perfil", "Vínculo", "Status", "Ações"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
-              <tbody>{users.filter(u => u.role !== "parceiro").map(u => (
+              <tbody>{users.filter(u => u.role !== "parceiro").filter(u => { if (uRoleFilter && u.role !== uRoleFilter) return false; if (uSearch) { const s = uSearch.toLowerCase(); return u.name.toLowerCase().includes(s) || u.email.toLowerCase().includes(s); } return true; }).map(u => (
                 <tr key={u.id}>
                   <td style={tdS}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -2089,26 +2829,30 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
                           <Btn v="secondary" sm onClick={() => setDelUserConf(null)}>Não</Btn>
                         </div>
                       ) : (
-                        <Btn v="danger" sm onClick={() => setDelUserConf(u.id)}>🗑 Excluir</Btn>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <Btn sm onClick={() => openEditUser(u)}>Editar</Btn>
+                          <Btn v="danger" sm onClick={() => setDelUserConf(u.id)}>Excluir</Btn>
+                        </div>
                       )
                     }
                   </td>
                 </tr>
               ))}</tbody>
-            </table>
+            </table></div>
           </div>
           <Modal open={userModal} onClose={() => setUserModal(false)} title="Adicionar Usuário Interno"
-            footer={<><Btn v="secondary" onClick={() => setUserModal(false)}>Cancelar</Btn><Btn onClick={addUser} disabled={!uf.name || !uf.email || !uf.pw || (uf.role === "gerente" && !uf.dId) || (uf.role === "diretor" && !uf.eId)}>Adicionar</Btn></>}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            footer={<><Btn v="secondary" onClick={() => setUserModal(false)}>Cancelar</Btn><Btn onClick={addUser} disabled={!uf.name || !uf.email || !uf.pw || (uf.role === "gerente" && !uf.dId) || (uf.role === "diretor" && !uf.eId) || (uf.role === "convenio" && ufConvIds.length === 0)}>Adicionar</Btn></>}>
+            <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr 1fr", lg: "1fr 1fr" }), gap: 14 }}>
               <Inp label="Nome completo *" value={uf.name} onChange={v => setUf({ ...uf, name: v })} placeholder="Nome" />
               <Inp label="E-mail *" value={uf.email} onChange={v => setUf({ ...uf, email: v })} placeholder="email@somapay.com.br" />
               <Inp label="Senha *" value={uf.pw} onChange={v => setUf({ ...uf, pw: v })} type="password" placeholder="Senha" />
               <div style={{ marginBottom: 14 }}>
                 <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Perfil *</label>
-                <select value={uf.role} onChange={e => setUf({ ...uf, role: e.target.value, dId: "", eId: "" })} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+                <select value={uf.role} onChange={e => { setUf({ ...uf, role: e.target.value, dId: "", eId: "" }); setUfConvIds([]); }} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
                   <option value="gerente">Gerente</option>
                   <option value="diretor">Diretoria</option>
                   <option value="executivo">Executivo</option>
+                  <option value="convenio">Convênio</option>
                   <option value="super_admin">Super Admin</option>
                 </select>
               </div>
@@ -2132,10 +2876,86 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
                   <div style={{ fontSize: 11, color: T.tm, marginTop: 6 }}>ℹ️ Todo diretor deve estar vinculado a um executivo.</div>
                 </div>
               )}
+              {uf.role === "convenio" && cfgConvenios.length > 0 && (
+                <div style={{ gridColumn: "1/-1", padding: 14, background: T.bg2, border: `1px solid ${T.bor}`, borderRadius: 8 }}>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>🤝 Convênios Vinculados *</label>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    {cfgConvenios.map(c => (
+                      <label key={c.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 6, border: `1px solid ${ufConvIds.includes(c.id) ? T.ac : T.bor}`, background: ufConvIds.includes(c.id) ? T.ac + "15" : T.inp, cursor: "pointer", fontSize: 12, color: ufConvIds.includes(c.id) ? T.ac : T.txt, fontWeight: ufConvIds.includes(c.id) ? 600 : 400 }}>
+                        <input type="checkbox" checked={ufConvIds.includes(c.id)} onChange={() => setUfConvIds(prev => prev.includes(c.id) ? prev.filter(x => x !== c.id) : [...prev, c.id])} style={{ accentColor: T.ac }} />
+                        {c.name}
+                      </label>
+                    ))}
+                  </div>
+                  {ufConvIds.length === 0 && <div style={{ fontSize: 11, color: T.wn, marginTop: 6 }}>Selecione ao menos um convênio</div>}
+                </div>
+              )}
             </div>
+          </Modal>
+
+          {/* Edit User Modal */}
+          <Modal open={!!editUser} onClose={() => { setEditUser(null); setEuResetPw(null); }} title="Editar Usuário"
+            footer={<><Btn v="secondary" onClick={() => { setEditUser(null); setEuResetPw(null); }}>Cancelar</Btn><Btn onClick={saveEditUser} disabled={euSaving}>{euSaving ? "Salvando..." : "Salvar"}</Btn></>}>
+            {editUser && <div>
+              <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr 1fr", lg: "1fr 1fr" }), gap: 14 }}>
+                <Inp label="Nome" value={euF.name} onChange={v => setEuF({ ...euF, name: v })} />
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>E-mail</label>
+                  <input value={editUser.email} disabled style={{ width: "100%", padding: "10px 12px", background: T.bg2, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.tm, fontFamily: "'DM Sans',sans-serif", fontSize: 13, boxSizing: "border-box" }} />
+                </div>
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Perfil</label>
+                  <select value={euF.role} onChange={e => setEuF({ ...euF, role: e.target.value, managerId: "" })} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+                    <option value="gerente">Gerente</option>
+                    <option value="diretor">Diretoria</option>
+                    <option value="executivo">Executivo</option>
+                    <option value="super_admin">Super Admin</option>
+                  </select>
+                </div>
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Status</label>
+                  <select value={euF.isActive ? "1" : "0"} onChange={e => setEuF({ ...euF, isActive: e.target.value === "1" })} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+                    <option value="1">Ativo</option>
+                    <option value="0">Inativo</option>
+                  </select>
+                </div>
+              </div>
+              {euF.role === "gerente" && (
+                <div style={{ padding: 14, background: T.wn + "0A", border: `1px solid ${T.wn}25`, borderRadius: 8, marginBottom: 14 }}>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.wn, marginBottom: 8, textTransform: "uppercase" }}>Diretor Responsável</label>
+                  <select value={euF.managerId} onChange={e => setEuF({ ...euF, managerId: e.target.value })} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+                    <option value="">Selecione...</option>
+                    {users.filter(u => u.role === "diretor").map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  </select>
+                </div>
+              )}
+              {euF.role === "diretor" && (
+                <div style={{ padding: 14, background: T.ac + "0A", border: `1px solid ${T.ac}25`, borderRadius: 8, marginBottom: 14 }}>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.ac, marginBottom: 8, textTransform: "uppercase" }}>Executivo Responsável</label>
+                  <select value={euF.managerId} onChange={e => setEuF({ ...euF, managerId: e.target.value })} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+                    <option value="">Selecione...</option>
+                    {users.filter(u => u.role === "executivo").map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                  </select>
+                </div>
+              )}
+              <div style={{ padding: 14, background: T.er + "0A", border: `1px solid ${T.er}25`, borderRadius: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: T.er, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>Senha</div>
+                {euResetPw ? (
+                  <div>
+                    <div style={{ padding: 10, background: T.bg2, borderRadius: 6, fontFamily: "'Space Mono',monospace", fontSize: 14, fontWeight: 600, color: T.ac, marginBottom: 8 }}>{euResetPw}</div>
+                    <Btn sm onClick={() => navigator.clipboard.writeText(euResetPw)}>Copiar senha</Btn>
+                  </div>
+                ) : (
+                  <Btn v="danger" sm onClick={resetUserPw}>Resetar Senha</Btn>
+                )}
+              </div>
+            </div>}
           </Modal>
         </div>
       )}
+
+      {/* CONVÊNIOS TAB */}
+      {tab === "convênios" && <ConveniosTab />}
 
       {/* MATERIAIS TAB */}
       {tab === "materiais" && (
@@ -2145,7 +2965,7 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
             <Btn onClick={() => setMatModal(true)}>＋ Adicionar Material</Btn>
           </div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
               <thead><tr>{["Tipo", "Título", "Categoria", "Tamanho", "Data", "Ações"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>
                 {mats.map(m => (
@@ -2172,20 +2992,14 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
                 ))}
                 {mats.length === 0 && <tr><td colSpan={6} style={{ padding: 40, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhum material cadastrado.</td></tr>}
               </tbody>
-            </table>
+            </table></div>
           </div>
 
           <Modal open={matModal} onClose={() => setMatModal(false)} title="Adicionar Material de Apoio"
-            footer={<><Btn v="secondary" onClick={() => setMatModal(false)}>Cancelar</Btn><Btn onClick={addMat} disabled={!mf.t}>Adicionar</Btn></>}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            footer={<><Btn v="secondary" onClick={() => setMatModal(false)}>Cancelar</Btn><Btn onClick={addMat} disabled={!mf.t || matSaving}>{matSaving ? "Enviando..." : "Adicionar"}</Btn></>}>
+            <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr 1fr", lg: "1fr 1fr" }), gap: 14 }}>
               <div style={{ gridColumn: "1/-1" }}>
                 <Inp label="Título *" value={mf.t} onChange={v => setMf({ ...mf, t: v })} placeholder="Ex: Manual do Parceiro 2025" />
-              </div>
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Tipo de Arquivo</label>
-                <select value={mf.tipo} onChange={e => setMf({ ...mf, tipo: e.target.value })} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
-                  {["pdf", "xlsx", "docx", "mp4"].map(t => <option key={t} value={t}>{t.toUpperCase()}</option>)}
-                </select>
               </div>
               <div style={{ marginBottom: 14 }}>
                 <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Categoria</label>
@@ -2193,12 +3007,18 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
                   {["comercial", "financeiro", "treinamento", "suporte", "legal"].map(c => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}
                 </select>
               </div>
-              <Inp label="Tamanho" value={mf.sz} onChange={v => setMf({ ...mf, sz: v })} placeholder="Ex: 2.4 MB" />
               <div style={{ marginBottom: 14 }}>
                 <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Arquivo</label>
-                <div style={{ padding: "20px 14px", background: T.inp, border: `2px dashed ${T.bor}`, borderRadius: 6, textAlign: "center", fontSize: 12, color: T.tm, cursor: "pointer" }}>
-                  📎 Clique para anexar arquivo
-                </div>
+                <label style={{ display: "block", padding: "20px 14px", background: mf.fileName ? T.ok + "0D" : T.inp, border: `2px dashed ${mf.fileName ? T.ok : T.bor}`, borderRadius: 6, textAlign: "center", fontSize: 12, color: mf.fileName ? T.ok : T.tm, cursor: "pointer", transition: "all 0.2s" }}>
+                  <input type="file" accept=".pdf,.xlsx,.xls,.docx,.doc,.mp4,.pptx,.ppt,.png,.jpg,.jpeg,.zip" style={{ display: "none" }} onChange={e => {
+                    const file = e.target.files[0];
+                    if (file) {
+                      const ext = file.name.split('.').pop().toLowerCase();
+                      setMf({ ...mf, file, fileName: file.name, tipo: ext, sz: (file.size / (1024 * 1024)).toFixed(1) + " MB" });
+                    }
+                  }} />
+                  {mf.fileName ? `✓ ${mf.fileName} (${mf.sz})` : "📎 Clique para anexar arquivo"}
+                </label>
               </div>
             </div>
           </Modal>
@@ -2218,6 +3038,7 @@ function fmtBRL(v) { return v.toLocaleString("pt-BR", { style: "currency", curre
 
 function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cadenceRules }) {
   const { user } = useAuth();
+  const { breakpoint } = useBreakpoint();
   const isParceiro = user.role === "parceiro";
   const isAdmin = user.role === "super_admin" || user.role === "diretor" || user.role === "executivo";
   const isGerente = user.role === "gerente";
@@ -2235,40 +3056,73 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
 
   const parceiros = isGerente ? users.filter(u => u.role === "parceiro" && u.gId === user.id) : users.filter(u => u.role === "parceiro");
 
-  const addComm = () => {
-    if (!cf.pId || !cf.titulo || !cf.periodo || !cf.valor) return;
-    const p = users.find(u => u.id === cf.pId);
-    setComms(prev => [...prev, {
-      id: "c" + Date.now(), pId: cf.pId, titulo: cf.titulo, periodo: cf.periodo,
-      valor: parseFloat(cf.valor) || 0, arq: `comissao_${cf.periodo.replace("/", "_")}_${(p?.name || "").split(" ")[0].toLowerCase()}.pdf`,
-      dt: new Date().toISOString().split("T")[0], by: user.id
-    }]);
-    setCommModal(false);
-    setCf({ pId: "", titulo: "", periodo: "", valor: "" });
-    // Notify parceiro about commission report
-    if (isCadenceActive(cadenceRules, "cad_comissao")) {
-      addNotif(setNotifs, { tipo: "financeiro", titulo: "Relatório de comissão", msg: `Novo relatório de comissão: ${cf.titulo} — R$ ${parseFloat(cf.valor).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}.`, para: cf.pId, de: user.id, link: "fin" });
+  const [commSaving, setCommSaving] = useState(false);
+  const addComm = async () => {
+    if (!cf.pId || !cf.titulo || !cf.periodo || !cf.valor || commSaving) return;
+    setCommSaving(true);
+    try {
+      // Find an indication for this user to link to (use most recent ativo indication)
+      const parcInds = inds.filter(i => i.pId === cf.pId && i.st === "ativo");
+      const indId = parcInds.length > 0 ? parcInds[0].id : inds.find(i => i.pId === cf.pId)?.id;
+      const res = await commissionsApi.create({
+        indication_id: indId || null,
+        user_id: cf.pId,
+        amount: parseFloat(cf.valor) || 0,
+        percentage: 0,
+      });
+      const c = res.data.commission;
+      setComms(prev => [...prev, {
+        id: c.id, pId: c.user_id, titulo: cf.titulo, periodo: cf.periodo,
+        valor: c.amount, arq: null,
+        dt: c.created_at?.split('T')[0] || new Date().toISOString().split("T")[0], by: user.id
+      }]);
+      setCommModal(false);
+      setCf({ pId: "", titulo: "", periodo: "", valor: "" });
+      if (isCadenceActive(cadenceRules, "cad_comissao")) {
+        addNotif(setNotifs, { tipo: "financeiro", titulo: "Relatório de comissão", msg: `Novo relatório de comissão: ${cf.titulo} — R$ ${parseFloat(cf.valor).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}.`, para: cf.pId, de: user.id, link: "fin" });
+      }
+    } catch (e) {
+      console.error("Erro ao criar comissão:", e);
+      alert(e.response?.data?.error || "Erro ao criar comissão");
     }
+    setCommSaving(false);
   };
 
-  const addNfe = () => {
-    if (!nf.num || !nf.valor) return;
-    setNfes(prev => [...prev, {
-      id: "nf" + Date.now(), pId: user.id, num: nf.num,
-      valor: parseFloat(nf.valor) || 0, arq: `${nf.num.replace(/\s/g, "_").toLowerCase()}.pdf`,
-      dt: new Date().toISOString().split("T")[0], st: "pendente", pgDt: null
-    }]);
-    setNfeModal(false);
-    setNf({ num: "", valor: "", arq: "" });
-    // Notify gerente about NFe
-    if (user.gId && isCadenceActive(cadenceRules, "cad_nfe_enviada")) {
-      addNotif(setNotifs, { tipo: "financeiro", titulo: "NFe recebida", msg: `Parceiro ${user.name} enviou ${nf.num} — R$ ${parseFloat(nf.valor).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}.`, para: user.gId, de: user.id, link: "fin" });
+  const [nfeSaving, setNfeSaving] = useState(false);
+  const addNfe = async () => {
+    if (!nf.num || !nf.valor || nfeSaving) return;
+    setNfeSaving(true);
+    try {
+      const res = await nfesApi.create({
+        number: nf.num,
+        value: parseFloat(nf.valor) || 0,
+        notes: nf.arq || null,
+      });
+      const n = res.data.nfe;
+      setNfes(prev => [...prev, {
+        id: n.id, pId: n.user_id, num: n.number,
+        valor: n.value, arq: n.file_path,
+        dt: n.created_at?.split('T')[0] || new Date().toISOString().split("T")[0], st: "pendente", pgDt: null
+      }]);
+      setNfeModal(false);
+      setNf({ num: "", valor: "", arq: "" });
+      if (user.gId && isCadenceActive(cadenceRules, "cad_nfe_enviada")) {
+        addNotif(setNotifs, { tipo: "financeiro", titulo: "NFe recebida", msg: `Parceiro ${user.name} enviou ${nf.num} — R$ ${parseFloat(nf.valor).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}.`, para: user.gId, de: user.id, link: "fin" });
+      }
+    } catch (e) {
+      console.error("Erro ao enviar NFe:", e);
+      alert(e.response?.data?.error || "Erro ao enviar NFe");
     }
+    setNfeSaving(false);
   };
 
-  const markPago = (nfeId) => {
+  const markPago = async (nfeId) => {
     const nfe = nfes.find(n => n.id === nfeId);
-    setNfes(prev => prev.map(n => n.id === nfeId ? { ...n, st: "pago", pgDt: new Date().toISOString().split("T")[0] } : n));
+    const pgDt = new Date().toISOString().split("T")[0];
+    setNfes(prev => prev.map(n => n.id === nfeId ? { ...n, st: "pago", pgDt } : n));
+    try {
+      await nfesApi.updateStatus(nfeId, "paid", null);
+    } catch (e) { console.error("Erro ao marcar NFe como paga:", e); }
     // Notify parceiro about payment
     if (nfe?.pId && isCadenceActive(cadenceRules, "cad_nfe_paga")) {
       addNotif(setNotifs, { tipo: "financeiro", titulo: "NFe paga", msg: `Sua ${nfe.num} foi marcada como paga.`, para: nfe.pId, de: user.id, link: "fin" });
@@ -2291,7 +3145,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
   return (
     <div>
       {/* Stats cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 24 }}>
+      <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "repeat(2, 1fr)", lg: "repeat(3, 1fr)" }), gap: 14, marginBottom: 24 }}>
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 18, borderLeft: `3px solid ${T.ac}` }}>
           <div style={{ fontSize: 11, color: T.tm, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>{isParceiro ? "Total Comissões" : "Comissões Enviadas"}</div>
           <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "'Space Mono',monospace" }}>{fmtBRL(totalComm)}</div>
@@ -2321,7 +3175,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
             <Btn onClick={() => setCommModal(true)}>📤 Enviar Relatório</Btn>
           </div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
               <thead><tr>{["Parceiro", "Título", "Período", "Valor", "Arquivo", "Data", "Ações"].map(h => <th key={h} style={thStyle}>{h}</th>)}</tr></thead>
               <tbody>
                 {myComms.map(r => {
@@ -2339,13 +3193,13 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
                       <td style={{ ...tdStyle, fontFamily: "'Space Mono',monospace", fontWeight: 600 }}>{fmtBRL(r.valor)}</td>
                       <td style={{ ...tdStyle, fontSize: 11, color: T.t2 }}>📄 {r.arq}</td>
                       <td style={{ ...tdStyle, fontSize: 11, color: T.tm }}>{r.dt}</td>
-                      <td style={tdStyle}><Btn v="secondary" sm>⬇ Download</Btn></td>
+                      <td style={tdStyle}><Btn v="secondary" sm onClick={() => alert("Arquivo de comissão não disponível para download")}>⬇ Download</Btn></td>
                     </tr>
                   );
                 })}
                 {myComms.length === 0 && <tr><td colSpan={7} style={{ padding: 40, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhum relatório enviado.</td></tr>}
               </tbody>
-            </table>
+            </table></div>
           </div>
         </div>
       )}
@@ -2354,7 +3208,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
       {(tab === "nfes") && (
         <div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
               <thead><tr>{["Parceiro", "Nº NFe", "Valor", "Arquivo", "Data Envio", "Status", "Dt Pagamento", "Ações"].map(h => <th key={h} style={thStyle}>{h}</th>)}</tr></thead>
               <tbody>
                 {myNfes.map(n => {
@@ -2384,7 +3238,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
                 })}
                 {myNfes.length === 0 && <tr><td colSpan={8} style={{ padding: 40, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhuma NFe recebida.</td></tr>}
               </tbody>
-            </table>
+            </table></div>
           </div>
         </div>
       )}
@@ -2393,7 +3247,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
       {(tab === "meusRel") && (
         <div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
               <thead><tr>{["Título", "Período", "Valor", "Arquivo", "Data", "Ações"].map(h => <th key={h} style={thStyle}>{h}</th>)}</tr></thead>
               <tbody>
                 {myComms.map(r => (
@@ -2403,12 +3257,12 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
                     <td style={{ ...tdStyle, fontFamily: "'Space Mono',monospace", fontWeight: 600, color: T.ok }}>{fmtBRL(r.valor)}</td>
                     <td style={{ ...tdStyle, fontSize: 11, color: T.t2 }}>📄 {r.arq}</td>
                     <td style={{ ...tdStyle, fontSize: 11, color: T.tm }}>{r.dt}</td>
-                    <td style={tdStyle}><Btn v="secondary" sm>⬇ Download</Btn></td>
+                    <td style={tdStyle}><Btn v="secondary" sm onClick={() => alert("Arquivo de comissão não disponível para download")}>⬇ Download</Btn></td>
                   </tr>
                 ))}
                 {myComms.length === 0 && <tr><td colSpan={6} style={{ padding: 40, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhum relatório disponível.</td></tr>}
               </tbody>
-            </table>
+            </table></div>
           </div>
         </div>
       )}
@@ -2420,7 +3274,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
             <Btn onClick={() => setNfeModal(true)}>📤 Enviar NFe</Btn>
           </div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
               <thead><tr>{["Nº NFe", "Valor", "Arquivo", "Data Envio", "Status", "Dt Pagamento"].map(h => <th key={h} style={thStyle}>{h}</th>)}</tr></thead>
               <tbody>
                 {myNfes.map(n => (
@@ -2435,7 +3289,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
                 ))}
                 {myNfes.length === 0 && <tr><td colSpan={6} style={{ padding: 40, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhuma NFe enviada. Clique em "Enviar NFe".</td></tr>}
               </tbody>
-            </table>
+            </table></div>
           </div>
         </div>
       )}
@@ -2443,7 +3297,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
       {/* Modal: Enviar Relatório de Comissão */}
       <Modal open={commModal} onClose={() => setCommModal(false)} title="Enviar Relatório de Comissão"
         footer={<><Btn v="secondary" onClick={() => setCommModal(false)}>Cancelar</Btn><Btn onClick={addComm} disabled={!cf.pId || !cf.titulo || !cf.periodo || !cf.valor}>Enviar</Btn></>}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr 1fr", lg: "1fr 1fr" }), gap: 14 }}>
           <div style={{ gridColumn: "1/-1", marginBottom: 14 }}>
             <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Parceiro *</label>
             <select value={cf.pId} onChange={e => setCf({ ...cf, pId: e.target.value })} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
@@ -2469,7 +3323,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
         <div style={{ marginBottom: 16, padding: 12, background: T.inp, borderRadius: 6, fontSize: 12, color: T.t2 }}>
           📋 Envie a nota fiscal referente à comissão do período. O pagamento será processado após validação.
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr 1fr", lg: "1fr 1fr" }), gap: 14 }}>
           <Inp label="Número da NFe *" value={nf.num} onChange={v => setNf({ ...nf, num: v })} placeholder="Ex: NFe 001234" />
           <Inp label="Valor (R$) *" value={nf.valor} onChange={v => setNf({ ...nf, valor: v })} type="number" placeholder="0.00" />
           <div style={{ gridColumn: "1/-1", marginBottom: 14 }}>
@@ -2490,8 +3344,8 @@ function NotifBell({ notifs, setNotifs, userId, setPg }) {
   const mine = notifs.filter(n => n.para === userId || n.para === "*");
   const unread = mine.filter(n => !n.lido).length;
   const latest = mine.slice(0, 8);
-  const markRead = (id) => setNotifs(prev => prev.map(n => n.id === id ? { ...n, lido: true } : n));
-  const markAllRead = () => setNotifs(prev => prev.map(n => (n.para === userId || n.para === "*") ? { ...n, lido: true } : n));
+  const markRead = (id) => { setNotifs(prev => prev.map(n => n.id === id ? { ...n, lido: true } : n)); notificationsApi.markAsRead(id).catch(e => console.error("Erro markRead:", e)); };
+  const markAllRead = () => { setNotifs(prev => prev.map(n => (n.para === userId || n.para === "*") ? { ...n, lido: true } : n)); notificationsApi.markAllAsRead().catch(e => console.error("Erro markAllRead:", e)); };
 
   return (
     <div style={{ position: "relative" }}>
@@ -2544,6 +3398,7 @@ function NotifBell({ notifs, setNotifs, userId, setPg }) {
 // ===== CENTRAL DE NOTIFICAÇÕES =====
 function NotifsPage({ notifs, setNotifs, users, userId }) {
   const [filtro, setFiltro] = useState("todas");
+  const { breakpoint } = useBreakpoint();
   const [tipoFiltro, setTipoFiltro] = useState("todos");
   const mine = notifs.filter(n => n.para === userId || n.para === "*");
   const filtered = mine.filter(n => {
@@ -2553,9 +3408,9 @@ function NotifsPage({ notifs, setNotifs, users, userId }) {
     return true;
   });
   const unread = mine.filter(n => !n.lido).length;
-  const markRead = (id) => setNotifs(prev => prev.map(n => n.id === id ? { ...n, lido: true } : n));
-  const markAllRead = () => setNotifs(prev => prev.map(n => (n.para === userId || n.para === "*") ? { ...n, lido: true } : n));
-  const delNotif = (id) => setNotifs(prev => prev.filter(n => n.id !== id));
+  const markRead = (id) => { setNotifs(prev => prev.map(n => n.id === id ? { ...n, lido: true } : n)); notificationsApi.markAsRead(id).catch(e => console.error("Erro markRead:", e)); };
+  const markAllRead = () => { setNotifs(prev => prev.map(n => (n.para === userId || n.para === "*") ? { ...n, lido: true } : n)); notificationsApi.markAllAsRead().catch(e => console.error("Erro markAllRead:", e)); };
+  const delNotif = (id) => { setNotifs(prev => prev.filter(n => n.id !== id)); notificationsApi.delete(id).catch(e => console.error("Erro delNotif:", e)); };
 
   // Group by date
   const today = new Date().toISOString().split("T")[0];
@@ -2571,7 +3426,7 @@ function NotifsPage({ notifs, setNotifs, users, userId }) {
   return (
     <div>
       {/* Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 24 }}>
+      <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "repeat(2, 1fr)", lg: "repeat(4, 1fr)" }), gap: 14, marginBottom: 24 }}>
         {[
           { l: "Total", v: mine.length, c: T.inf, ico: "📬" },
           { l: "Não Lidas", v: unread, c: T.ac, ico: "🔴" },
@@ -2699,9 +3554,11 @@ function GroupsPage({ users, inds }) {
   // QR polling: every 3s when modal is open
   useEffect(() => {
     if (!showQrModal) return;
-    const iv = setInterval(async () => {
+    let active = true;
+    const poll = async () => {
       try {
         const statusRes = await whatsappApi.getStatus();
+        if (!active) return;
         const st = statusRes.data.status || "disconnected";
         setWaStatus(st);
         if (st === "connected") {
@@ -2709,11 +3566,22 @@ function GroupsPage({ users, inds }) {
           setQrCode(null);
           return;
         }
+        // getQr now fetches fresh QR from Evolution API if expired
         const qrRes = await whatsappApi.getQr();
-        if (qrRes.data.qr_code) setQrCode(qrRes.data.qr_code);
-      } catch {}
-    }, 3000);
-    return () => clearInterval(iv);
+        if (!active) return;
+        if (qrRes.data.qr_code) {
+          setQrCode(qrRes.data.qr_code);
+        } else if (qrRes.data.expired || !qrRes.data.qr_code) {
+          // If QR still null after backend tried, re-trigger connect
+          const reconn = await whatsappApi.connectInstance();
+          if (!active) return;
+          if (reconn.data.qr_code) setQrCode(reconn.data.qr_code);
+        }
+      } catch (e) { console.warn("QR poll error:", e); }
+    };
+    poll(); // Immediate first poll
+    const iv = setInterval(poll, 3000);
+    return () => { active = false; clearInterval(iv); };
   }, [showQrModal]);
 
   // Polling 15s
@@ -2740,9 +3608,15 @@ function GroupsPage({ users, inds }) {
 
   const handleWaConnect = async () => {
     setWaLoading(true);
+    setQrCode(null);
     try {
       const res = await whatsappApi.connectInstance();
-      setWaStatus(res.data.status || "connecting");
+      const st = res.data.status || "connecting";
+      setWaStatus(st);
+      if (st === "connected") {
+        setShowQrModal(false);
+        return;
+      }
       if (res.data.qr_code) setQrCode(res.data.qr_code);
       setShowQrModal(true);
     } catch (e) { console.error("WA connect error:", e); }
@@ -3077,7 +3951,7 @@ function DiretoriaPage() {
             {item.parceiros.length === 0 ? (
               <div style={{ fontSize: 12, color: T.tm, textAlign: "center", padding: 12 }}>Nenhum parceiro</div>
             ) : (
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 600 }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${T.bor}` }}>
                     <th style={{ textAlign: "left", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Parceiro</th>
@@ -3107,7 +3981,7 @@ function DiretoriaPage() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </table></div>
             )}
           </div>
         )}
@@ -3144,21 +4018,22 @@ function DiretoriaPage() {
 }
 
 // ===== APP =====
-const RL = { super_admin: "Super Admin", executivo: "Executivo", diretor: "Diretoria", gerente: "Gerente", parceiro: "Parceiro" };
+const RL = { super_admin: "Super Admin", executivo: "Executivo", diretor: "Diretoria", gerente: "Gerente", convenio: "Convênio", parceiro: "Parceiro" };
 const NAV = [
-  { id: "dash", l: "Dashboard", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro"] },
+  { id: "dash", l: "Dashboard", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro", "convenio"] },
   { id: "kanban", l: "Kanban", r: ["super_admin", "executivo", "diretor", "gerente"] },
   { id: "inds", l: "Minhas Indicações", r: ["parceiro"] },
+  { id: "convenio", l: "Meu Convênio", r: ["convenio"] },
   { id: "parcs", l: "Parceiros", r: ["super_admin", "executivo", "diretor", "gerente"] },
   { id: "groups", l: "WhatsApp", r: ["super_admin", "executivo", "diretor", "gerente"] },
   { id: "diretoria", l: "Visão Diretoria", r: ["super_admin", "executivo", "diretor"] },
   { id: "fin", l: "Financeiro", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro"] },
-  { id: "mats", l: "Material de Apoio", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro"] },
-  { id: "notifs", l: "Notificações", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro"] },
+  { id: "mats", l: "Material de Apoio", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro", "convenio"] },
+  { id: "notifs", l: "Notificações", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro", "convenio"] },
   { id: "cfg", l: "Configurações", r: ["super_admin"] },
 ];
-const TIT = { dash: "Dashboard", kanban: "Pipeline de Indicações", inds: "Minhas Indicações", parcs: "Parceiros Indicadores", groups: "WhatsApp - Conversas", diretoria: "Visão Diretoria", fin: "Financeiro", mats: "Material de Apoio", notifs: "Central de Notificações", cfg: "Configurações" };
-const EMO = { dash: "📊", kanban: "📋", inds: "🏢", parcs: "👥", groups: "📱", diretoria: "📈", fin: "💰", mats: "📁", notifs: "🔔", cfg: "⚙️" };
+const TIT = { dash: "Dashboard", kanban: "Pipeline de Indicações", inds: "Minhas Indicações", convenio: "Meu Convênio", parcs: "Parceiros Indicadores", groups: "WhatsApp - Conversas", diretoria: "Visão Diretoria", fin: "Financeiro", mats: "Material de Apoio", notifs: "Central de Notificações", cfg: "Configurações" };
+const EMO = { dash: "📊", kanban: "📋", inds: "🏢", convenio: "🤝", parcs: "👥", groups: "📱", diretoria: "📈", fin: "💰", mats: "📁", notifs: "🔔", cfg: "⚙️" };
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -3169,15 +4044,22 @@ export default function App() {
   const [nfes, setNfes] = useState([]);
   const [mats, setMats] = useState([]);
   const [notifs, setNotifs] = useState([]);
-  const [travaDias, setTravaDias] = useState(90);
+  const [activity, setActivity] = useState([]);
+  const [travaDias, setTravaDias] = useState(() => parseInt(localStorage.getItem("crmTravaDias")) || 90);
   const [cadenceRules, setCadenceRules] = useState(() => {
     const saved = localStorage.getItem("cadenceRules");
     return saved ? JSON.parse(saved) : DEFAULT_CADENCE;
   });
-  const [theme, setThemeState] = useState(null);
+  const [theme, setThemeState] = useState(() => {
+    const saved = localStorage.getItem("crmTheme");
+    if (saved && THEMES[saved]) { setTheme(saved); return saved; }
+    return null;
+  });
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [dataLoading, setDataLoading] = useState(false);
   const [, forceUpdate] = useState(0);
+  const { isMobile, isTablet, isDesktop, breakpoint } = useBreakpoint();
 
   // Check for existing session on mount
   useEffect(() => {
@@ -3202,11 +4084,12 @@ export default function App() {
 
     try {
       // Fetch all data in parallel
-      const [usersRes, indsRes, matsRes, notifsRes] = await Promise.all([
+      const [usersRes, indsRes, matsRes, notifsRes, activityRes] = await Promise.all([
         usersApi.getAll(),
         indicationsApi.getAll(),
         materialsApi.getAll(),
         notificationsApi.getAll(),
+        indicationsApi.getActivity(20).catch(() => ({ data: { activity: [] } })),
       ]);
 
       // Transform and set users
@@ -3216,6 +4099,9 @@ export default function App() {
       // Transform and set indications
       const transformedInds = (indsRes.data.indications || indsRes.data || []).map(transformIndication);
       setInds(transformedInds);
+
+      // Set activity feed
+      setActivity(activityRes.data?.activity || []);
 
       // Set materials
       const materials = (matsRes.data.materials || matsRes.data || []).map(m => ({
@@ -3281,10 +4167,13 @@ export default function App() {
     }
   }, [user]);
 
-  // Persist cadence rules
+  // Persist cadence rules and travaDias
   useEffect(() => {
     localStorage.setItem("cadenceRules", JSON.stringify(cadenceRules));
   }, [cadenceRules]);
+  useEffect(() => {
+    localStorage.setItem("crmTravaDias", String(travaDias));
+  }, [travaDias]);
 
   // Load data when user changes
   useEffect(() => {
@@ -3296,6 +4185,7 @@ export default function App() {
   const applyTheme = (mode) => {
     setTheme(mode);
     setThemeState(mode);
+    localStorage.setItem("crmTheme", mode);
     forceUpdate(n => n + 1);
   };
 
@@ -3314,6 +4204,7 @@ export default function App() {
       setNfes([]);
       setMats([]);
       setNotifs([]);
+      setActivity([]);
     }
   };
 
@@ -3382,69 +4273,89 @@ export default function App() {
   if (!user) return <Login onLogin={u => { setUser(u); setPg("dash"); }} />;
 
   const nav = NAV.filter(n => n.r.includes(user.role));
-  const sW = collapsed ? 64 : 240;
+  const useDrawer = isMobile || isTablet;
+  const sW = useDrawer ? 280 : (collapsed ? 64 : 240);
+  const showSidebar = useDrawer ? mobileMenuOpen : true;
+
+  const handleNavClick = (id) => {
+    setPg(id);
+    if (useDrawer) setMobileMenuOpen(false);
+  };
 
   return (
     <AuthCtx.Provider value={{ user }}>
       <style>{fonts}</style>
       <div style={{ display: "flex", minHeight: "100vh", fontFamily: "'DM Sans',sans-serif", background: T.bg, color: T.txt }}>
-        <aside style={{ width: sW, background: T.bg2, borderRight: `1px solid ${T.bor}`, display: "flex", flexDirection: "column", position: "fixed", top: 0, left: 0, bottom: 0, zIndex: 100, transition: "width 0.2s ease", overflow: "hidden" }}>
-          {/* Logo + collapse toggle */}
-          <div style={{ padding: collapsed ? "20px 0" : "20px 18px", borderBottom: `1px solid ${T.bor}`, display: "flex", alignItems: "center", justifyContent: collapsed ? "center" : "space-between" }}>
-            {collapsed
-              ? <button onClick={() => setCollapsed(false)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, color: T.ac, fontFamily: "'Space Mono',monospace", fontWeight: 700 }}>S</button>
-              : <>
-                <div>
-                  <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 18, fontWeight: 700, color: T.ac }}>SOMAPAY</div>
-                  <div style={{ fontSize: 9, color: T.tm, letterSpacing: 2, textTransform: "uppercase", marginTop: 2 }}>Portal Parceiros</div>
+        {/* Mobile overlay */}
+        {useDrawer && mobileMenuOpen && (
+          <div onClick={() => setMobileMenuOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 99 }} />
+        )}
+        {/* Sidebar / Drawer */}
+        {showSidebar && (
+          <aside style={{ width: sW, background: T.bg2, borderRight: `1px solid ${T.bor}`, display: "flex", flexDirection: "column", position: "fixed", top: 0, left: 0, bottom: 0, zIndex: 100, transition: useDrawer ? "transform 0.2s ease" : "width 0.2s ease", overflow: "hidden" }}>
+            {/* Logo + collapse toggle */}
+            <div style={{ padding: (!useDrawer && collapsed) ? "20px 0" : "20px 18px", borderBottom: `1px solid ${T.bor}`, display: "flex", alignItems: "center", justifyContent: (!useDrawer && collapsed) ? "center" : "space-between" }}>
+              {(!useDrawer && collapsed)
+                ? <button onClick={() => setCollapsed(false)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, color: T.ac, fontFamily: "'Space Mono',monospace", fontWeight: 700 }}>S</button>
+                : <>
+                  <div>
+                    <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 18, fontWeight: 700, color: T.ac }}>SOMAPAY</div>
+                    <div style={{ fontSize: 9, color: T.tm, letterSpacing: 2, textTransform: "uppercase", marginTop: 2 }}>Portal Parceiros</div>
+                  </div>
+                  {useDrawer
+                    ? <button onClick={() => setMobileMenuOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, color: T.tm, padding: 4 }}>✕</button>
+                    : <button onClick={() => setCollapsed(true)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, color: T.tm, padding: 4 }}>◀</button>
+                  }
+                </>
+              }
+            </div>
+            {/* Nav */}
+            <nav style={{ flex: 1, padding: (!useDrawer && collapsed) ? "12px 6px" : "12px 10px", display: "flex", flexDirection: "column", gap: 2 }}>
+              {nav.map(n => (
+                <button key={n.id} onClick={() => handleNavClick(n.id)} title={(!useDrawer && collapsed) ? n.l : undefined}
+                  style={{ display: "flex", alignItems: "center", justifyContent: (!useDrawer && collapsed) ? "center" : "flex-start", gap: (!useDrawer && collapsed) ? 0 : 10, padding: (!useDrawer && collapsed) ? "10px 0" : "10px 12px", borderRadius: 6, color: pg === n.id ? T.ac : T.t2, fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: pg === n.id ? T.ac + "1A" : "transparent", width: "100%", textAlign: "left", fontFamily: "'DM Sans',sans-serif" }}>
+                  <span style={{ fontSize: (!useDrawer && collapsed) ? 18 : 13 }}>{EMO[n.id]}</span>{(!useDrawer && collapsed) ? null : <span>{n.l}</span>}
+                </button>
+              ))}
+            </nav>
+            {/* User + theme toggle + logout */}
+            <div style={{ padding: (!useDrawer && collapsed) ? "10px 6px" : "14px 10px", borderTop: `1px solid ${T.bor}` }}>
+              {(useDrawer || !collapsed) && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px" }}>
+                  <div style={{ width: 32, height: 32, borderRadius: "50%", background: T.ac + "22", color: T.ac, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700 }}>{user.av || user.name[0]}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{user.name}</div>
+                    <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>{RL[user.role]}</div>
+                  </div>
                 </div>
-                <button onClick={() => setCollapsed(true)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, color: T.tm, padding: 4 }}>◀</button>
-              </>
-            }
-          </div>
-          {/* Nav */}
-          <nav style={{ flex: 1, padding: collapsed ? "12px 6px" : "12px 10px", display: "flex", flexDirection: "column", gap: 2 }}>
-            {nav.map(n => (
-              <button key={n.id} onClick={() => setPg(n.id)} title={collapsed ? n.l : undefined}
-                style={{ display: "flex", alignItems: "center", justifyContent: collapsed ? "center" : "flex-start", gap: collapsed ? 0 : 10, padding: collapsed ? "10px 0" : "10px 12px", borderRadius: 6, color: pg === n.id ? T.ac : T.t2, fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: pg === n.id ? T.ac + "1A" : "transparent", width: "100%", textAlign: "left", fontFamily: "'DM Sans',sans-serif" }}>
-                <span style={{ fontSize: collapsed ? 18 : 13 }}>{EMO[n.id]}</span>{!collapsed && <span>{n.l}</span>}
+              )}
+              <button onClick={() => applyTheme(theme === "dark" ? "light" : "dark")} title="Alternar tema"
+                style={{ display: "flex", alignItems: "center", justifyContent: (!useDrawer && collapsed) ? "center" : "flex-start", gap: 10, padding: (!useDrawer && collapsed) ? "10px 0" : "10px 12px", borderRadius: 6, color: T.t2, fontSize: 13, cursor: "pointer", border: "none", background: "transparent", width: "100%", textAlign: "left", fontFamily: "'DM Sans',sans-serif", marginTop: 4 }}>
+                <span>{theme === "dark" ? "☀️" : "🌙"}</span>{(!useDrawer && collapsed) ? null : <span>{theme === "dark" ? "Modo Claro" : "Modo Escuro"}</span>}
               </button>
-            ))}
-          </nav>
-          {/* User + theme toggle + logout */}
-          <div style={{ padding: collapsed ? "10px 6px" : "14px 10px", borderTop: `1px solid ${T.bor}` }}>
-            {!collapsed && (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px" }}>
-                <div style={{ width: 32, height: 32, borderRadius: "50%", background: T.ac + "22", color: T.ac, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700 }}>{user.av || user.name[0]}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{user.name}</div>
-                  <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>{RL[user.role]}</div>
-                </div>
-              </div>
+              <button onClick={handleLogout} title="Sair"
+                style={{ display: "flex", alignItems: "center", justifyContent: (!useDrawer && collapsed) ? "center" : "flex-start", gap: 10, padding: (!useDrawer && collapsed) ? "10px 0" : "10px 12px", borderRadius: 6, color: T.t2, fontSize: 13, cursor: "pointer", border: "none", background: "transparent", width: "100%", textAlign: "left", fontFamily: "'DM Sans',sans-serif", marginTop: 2 }}>
+                🚪 {(!useDrawer && collapsed) ? null : "Sair"}
+              </button>
+            </div>
+          </aside>
+        )}
+        <main style={{ flex: 1, marginLeft: useDrawer ? 0 : sW, minHeight: "100vh", transition: "margin-left 0.2s ease", paddingTop: useDrawer ? 0 : 0 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: isMobile ? "14px 16px 14px 60px" : "14px 28px", borderBottom: `1px solid ${T.bor}`, background: T.bg2, position: "sticky", top: 0, zIndex: 50 }}>
+            {useDrawer && (
+              <button onClick={() => setMobileMenuOpen(true)} style={{ position: "fixed", left: 12, top: 10, zIndex: 51, background: T.bg2, border: `1px solid ${T.bor}`, borderRadius: 8, width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: 20, color: T.txt }}>☰</button>
             )}
-            {/* Theme toggle */}
-            <button onClick={() => applyTheme(theme === "dark" ? "light" : "dark")} title="Alternar tema"
-              style={{ display: "flex", alignItems: "center", justifyContent: collapsed ? "center" : "flex-start", gap: 10, padding: collapsed ? "10px 0" : "10px 12px", borderRadius: 6, color: T.t2, fontSize: 13, cursor: "pointer", border: "none", background: "transparent", width: "100%", textAlign: "left", fontFamily: "'DM Sans',sans-serif", marginTop: 4 }}>
-              <span>{theme === "dark" ? "☀️" : "🌙"}</span>{!collapsed && <span>{theme === "dark" ? "Modo Claro" : "Modo Escuro"}</span>}
-            </button>
-            <button onClick={handleLogout} title="Sair"
-              style={{ display: "flex", alignItems: "center", justifyContent: collapsed ? "center" : "flex-start", gap: 10, padding: collapsed ? "10px 0" : "10px 12px", borderRadius: 6, color: T.t2, fontSize: 13, cursor: "pointer", border: "none", background: "transparent", width: "100%", textAlign: "left", fontFamily: "'DM Sans',sans-serif", marginTop: 2 }}>
-              🚪 {!collapsed && "Sair"}
-            </button>
-          </div>
-        </aside>
-        <main style={{ flex: 1, marginLeft: sW, minHeight: "100vh", transition: "margin-left 0.2s ease" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 28px", borderBottom: `1px solid ${T.bor}`, background: T.bg2, position: "sticky", top: 0, zIndex: 50 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.5 }}>{TIT[pg]}</h2>
+            <h2 style={{ fontSize: isMobile ? 16 : 18, fontWeight: 700, letterSpacing: -0.5 }}>{TIT[pg]}</h2>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <NotifBell notifs={notifs} setNotifs={setNotifs} userId={user.id} setPg={setPg} />
-              <Badge type="success">● HubSpot</Badge>
+              {!isMobile && <Badge type="success">● HubSpot</Badge>}
             </div>
           </div>
-          <div style={{ padding: "24px 28px" }}>
-            {pg === "dash" && <Dash inds={inds} users={users} comms={comms} nfes={nfes} />}
+          <div style={{ padding: isMobile ? "16px 12px" : "24px 28px" }}>
+            {pg === "dash" && <Dash inds={inds} users={users} comms={comms} nfes={nfes} activity={activity} />}
             {pg === "kanban" && <KanbanPage inds={inds} setInds={setInds} users={users} travaDias={travaDias} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} />}
             {pg === "inds" && <MinhasInd inds={inds} setInds={setInds} notifs={notifs} setNotifs={setNotifs} users={users} cadenceRules={cadenceRules} />}
+            {pg === "convenio" && <ConvenioPage />}
             {pg === "parcs" && <ParcPage users={users} setUsers={setUsers} inds={inds} />}
             {pg === "groups" && <GroupsPage users={users} inds={inds} />}
             {pg === "diretoria" && <DiretoriaPage />}
