@@ -70,9 +70,8 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-// Initialize database and seed if empty
+// Initialize database
 initializeDatabase();
-await seedIfEmpty(getDatabase());
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -123,6 +122,7 @@ app.use((req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  seedIfEmpty(getDatabase()).catch(e => console.error('Seed error:', e.message));
 });
 
 export default app;
