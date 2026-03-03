@@ -10,7 +10,7 @@ import { createNotification } from '../utils/notificationHelper.js';
 const router = express.Router();
 
 // Get commissions
-router.get('/', authenticate, (req, res) => {
+router.get('/', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
     const { user_id, status, from_date, to_date, limit = 100, offset = 0 } = req.query;
@@ -26,7 +26,6 @@ router.get('/', authenticate, (req, res) => {
     `;
     const params = [];
 
-    // Filter by access
     if (!hasPermission(req.user.role, 'executivo')) {
       query += ` AND c.user_id = ?`;
       params.push(req.user.id);
@@ -35,27 +34,15 @@ router.get('/', authenticate, (req, res) => {
       params.push(user_id);
     }
 
-    if (status) {
-      query += ` AND c.status = ?`;
-      params.push(status);
-    }
-
-    if (from_date) {
-      query += ` AND c.created_at >= ?`;
-      params.push(from_date);
-    }
-
-    if (to_date) {
-      query += ` AND c.created_at <= ?`;
-      params.push(to_date);
-    }
+    if (status) { query += ` AND c.status = ?`; params.push(status); }
+    if (from_date) { query += ` AND c.created_at >= ?`; params.push(from_date); }
+    if (to_date) { query += ` AND c.created_at <= ?`; params.push(to_date); }
 
     query += ` ORDER BY c.created_at DESC LIMIT ? OFFSET ?`;
     params.push(parseInt(limit), parseInt(offset));
 
-    const commissions = db.prepare(query).all(...params);
+    const commissions = await db.prepare(query).all(...params);
 
-    // Calculate totals
     let totalsQuery = `
       SELECT
         SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END) as pending_total,
@@ -66,14 +53,12 @@ router.get('/', authenticate, (req, res) => {
     const totalsParams = [];
 
     if (!hasPermission(req.user.role, 'executivo')) {
-      totalsQuery += ` AND user_id = ?`;
-      totalsParams.push(req.user.id);
+      totalsQuery += ` AND user_id = ?`; totalsParams.push(req.user.id);
     } else if (user_id) {
-      totalsQuery += ` AND user_id = ?`;
-      totalsParams.push(user_id);
+      totalsQuery += ` AND user_id = ?`; totalsParams.push(user_id);
     }
 
-    const totals = db.prepare(totalsQuery).get(...totalsParams);
+    const totals = await db.prepare(totalsQuery).get(...totalsParams);
 
     res.json({ commissions, totals });
   } catch (error) {
@@ -82,8 +67,8 @@ router.get('/', authenticate, (req, res) => {
   }
 });
 
-// Create commission (when indication is closed)
-router.post('/', authenticate, requireMinRole('diretor'), (req, res) => {
+// Create commission
+router.post('/', authenticate, requireMinRole('diretor'), async (req, res) => {
   try {
     const { indication_id, user_id, amount, percentage } = req.body;
 
@@ -93,30 +78,21 @@ router.post('/', authenticate, requireMinRole('diretor'), (req, res) => {
 
     const db = getDatabase();
 
-    // Verify indication exists and is closed
-    const indication = db.prepare('SELECT * FROM indications WHERE id = ?').get(indication_id);
-    if (!indication) {
-      return res.status(404).json({ error: 'Indication not found' });
-    }
+    const indication = await db.prepare('SELECT * FROM indications WHERE id = ?').get(indication_id);
+    if (!indication) return res.status(404).json({ error: 'Indication not found' });
+    if (indication.status !== 'fechado') return res.status(400).json({ error: 'Indication must be closed to create commission' });
 
-    if (indication.status !== 'fechado') {
-      return res.status(400).json({ error: 'Indication must be closed to create commission' });
-    }
-
-    // Verify user exists
-    const user = db.prepare('SELECT id FROM users WHERE id = ?').get(user_id);
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
+    const user = await db.prepare('SELECT id FROM users WHERE id = ?').get(user_id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
 
     const id = uuidv4();
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO commissions (id, indication_id, user_id, amount, percentage)
       VALUES (?, ?, ?, ?, ?)
     `).run(id, indication_id, user_id, amount, percentage);
 
-    const commission = db.prepare(`
+    const commission = await db.prepare(`
       SELECT c.*, i.razao_social, u.name as user_name
       FROM commissions c
       LEFT JOIN indications i ON c.indication_id = i.id
@@ -124,7 +100,7 @@ router.post('/', authenticate, requireMinRole('diretor'), (req, res) => {
       WHERE c.id = ?
     `).get(id);
 
-    createNotification({
+    await createNotification({
       userId: user_id,
       title: 'Nova comissao',
       message: `Voce tem uma nova comissao de R$ ${amount.toFixed(2)} pendente`,
@@ -140,24 +116,20 @@ router.post('/', authenticate, requireMinRole('diretor'), (req, res) => {
 });
 
 // Update commission status
-router.patch('/:id/status', authenticate, requireMinRole('diretor'), (req, res) => {
+router.patch('/:id/status', authenticate, requireMinRole('diretor'), async (req, res) => {
   try {
     const { status, payment_date } = req.body;
     const { valid, error: statusError } = validateStatus(status, COMMISSION_STATUSES);
     if (!valid) return res.status(400).json({ error: statusError });
 
     const db = getDatabase();
-    const commission = db.prepare('SELECT * FROM commissions WHERE id = ?').get(req.params.id);
+    const commission = await db.prepare('SELECT * FROM commissions WHERE id = ?').get(req.params.id);
+    if (!commission) return res.status(404).json({ error: 'Commission not found' });
 
-    if (!commission) {
-      return res.status(404).json({ error: 'Commission not found' });
-    }
-
-    db.prepare(`
+    await db.prepare(`
       UPDATE commissions SET status = ?, payment_date = ? WHERE id = ?
     `).run(status, status === 'paid' ? (payment_date || new Date().toISOString()) : null, req.params.id);
 
-    // Notify user
     const statusMessages = {
       approved: 'Sua comissao foi aprovada',
       paid: 'Sua comissao foi paga',
@@ -165,7 +137,7 @@ router.patch('/:id/status', authenticate, requireMinRole('diretor'), (req, res) 
     };
 
     if (statusMessages[status]) {
-      createNotification({
+      await createNotification({
         userId: commission.user_id,
         title: 'Atualizacao de comissao',
         message: statusMessages[status],
@@ -174,7 +146,7 @@ router.patch('/:id/status', authenticate, requireMinRole('diretor'), (req, res) 
       });
     }
 
-    const updated = db.prepare(`
+    const updated = await db.prepare(`
       SELECT c.*, i.razao_social, u.name as user_name
       FROM commissions c
       LEFT JOIN indications i ON c.indication_id = i.id
@@ -190,7 +162,7 @@ router.patch('/:id/status', authenticate, requireMinRole('diretor'), (req, res) 
 });
 
 // Get commission summary by user
-router.get('/summary', authenticate, requireMinRole('diretor'), (req, res) => {
+router.get('/summary', authenticate, requireMinRole('diretor'), async (req, res) => {
   try {
     const db = getDatabase();
     const { from_date, to_date } = req.query;
@@ -209,20 +181,12 @@ router.get('/summary', authenticate, requireMinRole('diretor'), (req, res) => {
     `;
     const params = [];
 
-    if (from_date) {
-      query += ` AND c.created_at >= ?`;
-      params.push(from_date);
-    }
-
-    if (to_date) {
-      query += ` AND c.created_at <= ?`;
-      params.push(to_date);
-    }
+    if (from_date) { query += ` AND c.created_at >= ?`; params.push(from_date); }
+    if (to_date) { query += ` AND c.created_at <= ?`; params.push(to_date); }
 
     query += ` GROUP BY u.id ORDER BY total_amount DESC`;
 
-    const summary = db.prepare(query).all(...params);
-
+    const summary = await db.prepare(query).all(...params);
     res.json({ summary });
   } catch (error) {
     console.error('Get commission summary error:', error);

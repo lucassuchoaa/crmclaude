@@ -70,8 +70,8 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-// Initialize database
-initializeDatabase();
+// Initialize database (async — must complete before first request)
+await initializeDatabase();
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -91,7 +91,8 @@ app.use('/api/convenios', conveniosRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  const db = getDatabase();
+  res.json({ status: 'ok', database: db.type, timestamp: new Date().toISOString() });
 });
 
 // Serve frontend static files in production/staging

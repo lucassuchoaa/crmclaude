@@ -6,7 +6,7 @@ import { authenticate } from '../middleware/auth.js';
 const router = express.Router();
 
 // Get dashboard stats
-router.get('/stats', authenticate, (req, res) => {
+router.get('/stats', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
     const isAdmin = hasPermission(req.user.role, 'executivo');
@@ -38,9 +38,8 @@ router.get('/stats', authenticate, (req, res) => {
       indicationParams.push(req.user.id, req.user.id);
     }
 
-    const indications = db.prepare(indicationsQuery).get(...indicationParams);
+    const indications = await db.prepare(indicationsQuery).get(...indicationParams);
 
-    // Commissions stats
     let commissionsQuery = `
       SELECT
         SUM(amount) as total,
@@ -63,19 +62,11 @@ router.get('/stats', authenticate, (req, res) => {
       commissionParams.push(req.user.id);
     }
 
-    const commissions = db.prepare(commissionsQuery).get(...commissionParams);
+    const commissions = await db.prepare(commissionsQuery).get(...commissionParams);
 
-    // Recent activity
     let activityQuery = `
-      SELECT
-        'indication' as type,
-        i.id,
-        i.razao_social as title,
-        i.status,
-        i.updated_at,
-        u.name as user_name
-      FROM indications i
-      LEFT JOIN users u ON i.owner_id = u.id
+      SELECT 'indication' as type, i.id, i.razao_social as title, i.status, i.updated_at, u.name as user_name
+      FROM indications i LEFT JOIN users u ON i.owner_id = u.id
     `;
 
     if (req.user.role === 'convenio') {
@@ -92,28 +83,21 @@ router.get('/stats', authenticate, (req, res) => {
 
     let recentActivity;
     if (req.user.role === 'convenio') {
-      recentActivity = db.prepare(activityQuery).all(req.user.id);
+      recentActivity = await db.prepare(activityQuery).all(req.user.id);
     } else if (isAdmin) {
-      recentActivity = db.prepare(activityQuery).all();
+      recentActivity = await db.prepare(activityQuery).all();
     } else {
-      recentActivity = db.prepare(activityQuery).all(req.user.id, req.user.id);
+      recentActivity = await db.prepare(activityQuery).all(req.user.id, req.user.id);
     }
 
-    // Conversion rate
     const conversionRate = indications.total > 0
-      ? ((indications.fechado / indications.total) * 100).toFixed(1)
-      : 0;
+      ? ((indications.fechado / indications.total) * 100).toFixed(1) : 0;
 
-    // This month stats
     const thisMonth = new Date();
     thisMonth.setDate(1);
     thisMonth.setHours(0, 0, 0, 0);
 
-    let monthlyQuery = `
-      SELECT COUNT(*) as new_indications
-      FROM indications
-      WHERE created_at >= ?
-    `;
+    let monthlyQuery = `SELECT COUNT(*) as new_indications FROM indications WHERE created_at >= ?`;
     const monthlyParams = [thisMonth.toISOString()];
 
     if (req.user.role === 'convenio') {
@@ -128,32 +112,25 @@ router.get('/stats', authenticate, (req, res) => {
       monthlyParams.push(req.user.id, req.user.id);
     }
 
-    const monthly = db.prepare(monthlyQuery).get(...monthlyParams);
+    const monthly = await db.prepare(monthlyQuery).get(...monthlyParams);
 
     res.json({
       indications: {
         total: indications.total || 0,
         byStatus: {
-          novo: indications.novo || 0,
-          em_contato: indications.em_contato || 0,
-          proposta: indications.proposta || 0,
-          negociacao: indications.negociacao || 0,
-          fechado: indications.fechado || 0,
-          perdido: indications.perdido || 0
+          novo: indications.novo || 0, em_contato: indications.em_contato || 0,
+          proposta: indications.proposta || 0, negociacao: indications.negociacao || 0,
+          fechado: indications.fechado || 0, perdido: indications.perdido || 0
         },
         totalValue: indications.total_value || 0,
         closedValue: indications.closed_value || 0,
         conversionRate: parseFloat(conversionRate)
       },
       commissions: {
-        total: commissions.total || 0,
-        pending: commissions.pending || 0,
-        approved: commissions.approved || 0,
-        paid: commissions.paid || 0
+        total: commissions.total || 0, pending: commissions.pending || 0,
+        approved: commissions.approved || 0, paid: commissions.paid || 0
       },
-      monthly: {
-        newIndications: monthly.new_indications || 0
-      },
+      monthly: { newIndications: monthly.new_indications || 0 },
       recentActivity
     });
   } catch (error) {
@@ -162,22 +139,16 @@ router.get('/stats', authenticate, (req, res) => {
   }
 });
 
-// Get team performance (for managers)
-router.get('/team-performance', authenticate, (req, res) => {
+// Get team performance
+router.get('/team-performance', authenticate, async (req, res) => {
   try {
-    if (!hasPermission(req.user.role, 'gerente')) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
+    if (!hasPermission(req.user.role, 'gerente')) return res.status(403).json({ error: 'Access denied' });
 
     const db = getDatabase();
     const isAdmin = hasPermission(req.user.role, 'executivo');
 
     let query = `
-      SELECT
-        u.id,
-        u.name,
-        u.avatar,
-        u.role,
+      SELECT u.id, u.name, u.avatar, u.role,
         COUNT(DISTINCT i.id) as total_indications,
         SUM(CASE WHEN i.status = 'fechado' THEN 1 ELSE 0 END) as closed_indications,
         SUM(CASE WHEN i.status = 'fechado' THEN i.value ELSE 0 END) as closed_value,
@@ -188,15 +159,12 @@ router.get('/team-performance', authenticate, (req, res) => {
       WHERE u.is_active = 1
     `;
 
-    if (!isAdmin) {
-      query += ` AND (u.id = ? OR u.manager_id = ?)`;
-    }
-
+    if (!isAdmin) query += ` AND (u.id = ? OR u.manager_id = ?)`;
     query += ` GROUP BY u.id ORDER BY closed_value DESC`;
 
     const team = isAdmin
-      ? db.prepare(query).all()
-      : db.prepare(query).all(req.user.id, req.user.id);
+      ? await db.prepare(query).all()
+      : await db.prepare(query).all(req.user.id, req.user.id);
 
     res.json({ team });
   } catch (error) {
@@ -206,7 +174,7 @@ router.get('/team-performance', authenticate, (req, res) => {
 });
 
 // Get charts data
-router.get('/charts', authenticate, (req, res) => {
+router.get('/charts', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
     const { period = '30' } = req.query;
@@ -215,14 +183,10 @@ router.get('/charts', authenticate, (req, res) => {
     const daysAgo = new Date();
     daysAgo.setDate(daysAgo.getDate() - parseInt(period));
 
-    // Indications over time
     let timelineQuery = `
-      SELECT
-        DATE(created_at) as date,
-        COUNT(*) as count,
+      SELECT DATE(created_at) as date, COUNT(*) as count,
         SUM(CASE WHEN status = 'fechado' THEN 1 ELSE 0 END) as closed
-      FROM indications
-      WHERE created_at >= ?
+      FROM indications WHERE created_at >= ?
     `;
     const timelineParams = [daysAgo.toISOString()];
 
@@ -239,15 +203,9 @@ router.get('/charts', authenticate, (req, res) => {
     }
 
     timelineQuery += ` GROUP BY DATE(created_at) ORDER BY date`;
+    const timeline = await db.prepare(timelineQuery).all(...timelineParams);
 
-    const timeline = db.prepare(timelineQuery).all(...timelineParams);
-
-    // Status distribution
-    let statusQuery = `
-      SELECT status, COUNT(*) as count
-      FROM indications
-      WHERE status != 'perdido'
-    `;
+    let statusQuery = `SELECT status, COUNT(*) as count FROM indications WHERE status != 'perdido'`;
     const statusParams = [];
 
     if (req.user.role === 'convenio') {
@@ -263,14 +221,9 @@ router.get('/charts', authenticate, (req, res) => {
     }
 
     statusQuery += ` GROUP BY status`;
+    const statusDistribution = await db.prepare(statusQuery).all(...statusParams);
 
-    const statusDistribution = db.prepare(statusQuery).all(...statusParams);
-
-    // Value by status
-    let valueQuery = `
-      SELECT status, SUM(value) as total_value
-      FROM indications
-    `;
+    let valueQuery = `SELECT status, SUM(value) as total_value FROM indications`;
     const valueParams = [];
 
     if (req.user.role === 'convenio') {
@@ -286,14 +239,9 @@ router.get('/charts', authenticate, (req, res) => {
     }
 
     valueQuery += ` GROUP BY status`;
+    const valueByStatus = await db.prepare(valueQuery).all(...valueParams);
 
-    const valueByStatus = db.prepare(valueQuery).all(...valueParams);
-
-    res.json({
-      timeline,
-      statusDistribution,
-      valueByStatus
-    });
+    res.json({ timeline, statusDistribution, valueByStatus });
   } catch (error) {
     console.error('Get charts error:', error);
     res.status(500).json({ error: 'Failed to get charts data' });

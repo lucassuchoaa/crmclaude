@@ -21,7 +21,7 @@ router.post('/login', async (req, res) => {
     }
 
     const db = getDatabase();
-    const user = db.prepare('SELECT * FROM users WHERE email = ? AND is_active = 1').get(email.toLowerCase());
+    const user = await db.prepare('SELECT * FROM users WHERE email = ? AND is_active = 1').get(email.toLowerCase());
 
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
@@ -37,11 +37,11 @@ router.post('/login', async (req, res) => {
 
     // Store refresh token
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-    db.prepare('INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?, ?, ?)')
+    await db.prepare('INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?, ?, ?)')
       .run(user.id, refreshToken, expiresAt);
 
     // Clean up old refresh tokens for this user
-    db.prepare('DELETE FROM refresh_tokens WHERE user_id = ? AND expires_at < ?')
+    await db.prepare('DELETE FROM refresh_tokens WHERE user_id = ? AND expires_at < ?')
       .run(user.id, new Date().toISOString());
 
     res.json({
@@ -79,7 +79,7 @@ router.post('/refresh', async (req, res) => {
     const db = getDatabase();
 
     // Verify token exists in database
-    const storedToken = db.prepare('SELECT * FROM refresh_tokens WHERE token = ? AND expires_at > ?')
+    const storedToken = await db.prepare('SELECT * FROM refresh_tokens WHERE token = ? AND expires_at > ?')
       .get(refreshToken, new Date().toISOString());
 
     if (!storedToken) {
@@ -87,7 +87,7 @@ router.post('/refresh', async (req, res) => {
     }
 
     // Get user
-    const user = db.prepare('SELECT * FROM users WHERE id = ? AND is_active = 1').get(decoded.id);
+    const user = await db.prepare('SELECT * FROM users WHERE id = ? AND is_active = 1').get(decoded.id);
     if (!user) {
       return res.status(401).json({ error: 'User not found' });
     }
@@ -97,11 +97,11 @@ router.post('/refresh', async (req, res) => {
     const newRefreshToken = generateRefreshToken(user);
 
     // Delete old refresh token
-    db.prepare('DELETE FROM refresh_tokens WHERE token = ?').run(refreshToken);
+    await db.prepare('DELETE FROM refresh_tokens WHERE token = ?').run(refreshToken);
 
     // Store new refresh token
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-    db.prepare('INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?, ?, ?)')
+    await db.prepare('INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?, ?, ?)')
       .run(user.id, newRefreshToken, expiresAt);
 
     res.json({
@@ -115,13 +115,13 @@ router.post('/refresh', async (req, res) => {
 });
 
 // Logout
-router.post('/logout', authenticate, (req, res) => {
+router.post('/logout', authenticate, async (req, res) => {
   try {
     const { refreshToken } = req.body;
     const db = getDatabase();
 
     // Delete ALL refresh tokens for this user (full logout from all devices)
-    db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(req.user.id);
+    await db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(req.user.id);
 
     res.json({ message: 'Logged out successfully' });
   } catch (error) {
@@ -131,9 +131,9 @@ router.post('/logout', authenticate, (req, res) => {
 });
 
 // Get current user
-router.get('/me', authenticate, (req, res) => {
+router.get('/me', authenticate, async (req, res) => {
   const db = getDatabase();
-  const user = db.prepare(`
+  const user = await db.prepare(`
     SELECT id, email, name, role, avatar, manager_id, must_change_password, created_at
     FROM users WHERE id = ?
   `).get(req.user.id);
@@ -159,7 +159,7 @@ router.post('/change-password', authenticate, async (req, res) => {
     }
 
     const db = getDatabase();
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
 
     const isValid = await comparePassword(currentPassword, user.password);
     if (!isValid) {
@@ -167,11 +167,11 @@ router.post('/change-password', authenticate, async (req, res) => {
     }
 
     const hashedPassword = await hashPassword(newPassword);
-    db.prepare('UPDATE users SET password = ?, must_change_password = 0, updated_at = ? WHERE id = ?')
+    await db.prepare('UPDATE users SET password = ?, must_change_password = 0, updated_at = ? WHERE id = ?')
       .run(hashedPassword, new Date().toISOString(), req.user.id);
 
     // Invalidate all refresh tokens for this user
-    db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(req.user.id);
+    await db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(req.user.id);
 
     res.json({ message: 'Password changed successfully' });
   } catch (error) {

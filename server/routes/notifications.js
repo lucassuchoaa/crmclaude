@@ -8,28 +8,22 @@ import { sendNotificationEmail } from '../services/emailService.js';
 const router = express.Router();
 
 // Get notifications for current user
-router.get('/', authenticate, (req, res) => {
+router.get('/', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
     const { unread_only, limit = 50, offset = 0 } = req.query;
 
-    let query = `
-      SELECT * FROM notifications
-      WHERE user_id = ?
-    `;
+    let query = `SELECT * FROM notifications WHERE user_id = ?`;
     const params = [req.user.id];
 
-    if (unread_only === 'true') {
-      query += ` AND is_read = 0`;
-    }
+    if (unread_only === 'true') query += ` AND is_read = 0`;
 
     query += ` ORDER BY created_at DESC LIMIT ? OFFSET ?`;
     params.push(parseInt(limit), parseInt(offset));
 
-    const notifications = db.prepare(query).all(...params);
+    const notifications = await db.prepare(query).all(...params);
 
-    // Get unread count
-    const { unread_count } = db.prepare(`
+    const { unread_count } = await db.prepare(`
       SELECT COUNT(*) as unread_count FROM notifications WHERE user_id = ? AND is_read = 0
     `).get(req.user.id);
 
@@ -41,21 +35,14 @@ router.get('/', authenticate, (req, res) => {
 });
 
 // Mark notification as read
-router.patch('/:id/read', authenticate, (req, res) => {
+router.patch('/:id/read', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
-    const notification = db.prepare('SELECT * FROM notifications WHERE id = ?').get(req.params.id);
+    const notification = await db.prepare('SELECT * FROM notifications WHERE id = ?').get(req.params.id);
+    if (!notification) return res.status(404).json({ error: 'Notification not found' });
+    if (notification.user_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
 
-    if (!notification) {
-      return res.status(404).json({ error: 'Notification not found' });
-    }
-
-    if (notification.user_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-
-    db.prepare('UPDATE notifications SET is_read = 1 WHERE id = ?').run(req.params.id);
-
+    await db.prepare('UPDATE notifications SET is_read = 1 WHERE id = ?').run(req.params.id);
     res.json({ message: 'Notification marked as read' });
   } catch (error) {
     console.error('Mark notification read error:', error);
@@ -64,12 +51,10 @@ router.patch('/:id/read', authenticate, (req, res) => {
 });
 
 // Mark all notifications as read
-router.post('/read-all', authenticate, (req, res) => {
+router.post('/read-all', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
-
-    db.prepare('UPDATE notifications SET is_read = 1 WHERE user_id = ?').run(req.user.id);
-
+    await db.prepare('UPDATE notifications SET is_read = 1 WHERE user_id = ?').run(req.user.id);
     res.json({ message: 'All notifications marked as read' });
   } catch (error) {
     console.error('Mark all read error:', error);
@@ -78,21 +63,14 @@ router.post('/read-all', authenticate, (req, res) => {
 });
 
 // Delete notification
-router.delete('/:id', authenticate, (req, res) => {
+router.delete('/:id', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
-    const notification = db.prepare('SELECT * FROM notifications WHERE id = ?').get(req.params.id);
+    const notification = await db.prepare('SELECT * FROM notifications WHERE id = ?').get(req.params.id);
+    if (!notification) return res.status(404).json({ error: 'Notification not found' });
+    if (notification.user_id !== req.user.id) return res.status(403).json({ error: 'Access denied' });
 
-    if (!notification) {
-      return res.status(404).json({ error: 'Notification not found' });
-    }
-
-    if (notification.user_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-
-    db.prepare('DELETE FROM notifications WHERE id = ?').run(req.params.id);
-
+    await db.prepare('DELETE FROM notifications WHERE id = ?').run(req.params.id);
     res.json({ message: 'Notification deleted' });
   } catch (error) {
     console.error('Delete notification error:', error);
@@ -101,12 +79,10 @@ router.delete('/:id', authenticate, (req, res) => {
 });
 
 // Delete all read notifications
-router.delete('/', authenticate, (req, res) => {
+router.delete('/', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
-
-    db.prepare('DELETE FROM notifications WHERE user_id = ? AND is_read = 1').run(req.user.id);
-
+    await db.prepare('DELETE FROM notifications WHERE user_id = ? AND is_read = 1').run(req.user.id);
     res.json({ message: 'Read notifications deleted' });
   } catch (error) {
     console.error('Delete notifications error:', error);
@@ -115,17 +91,11 @@ router.delete('/', authenticate, (req, res) => {
 });
 
 // Send notification (admin only)
-router.post('/send', authenticate, requireMinRole('diretor'), (req, res) => {
+router.post('/send', authenticate, requireMinRole('diretor'), async (req, res) => {
   try {
     const { user_id, user_ids, title, message, type = 'info', link } = req.body;
-
-    if (!title || !message) {
-      return res.status(400).json({ error: 'Title and message required' });
-    }
-
-    if (!user_id && !user_ids) {
-      return res.status(400).json({ error: 'User ID or user IDs required' });
-    }
+    if (!title || !message) return res.status(400).json({ error: 'Title and message required' });
+    if (!user_id && !user_ids) return res.status(400).json({ error: 'User ID or user IDs required' });
 
     const db = getDatabase();
     const targetUsers = user_ids || [user_id];
@@ -133,20 +103,19 @@ router.post('/send', authenticate, requireMinRole('diretor'), (req, res) => {
 
     for (const uid of targetUsers) {
       const id = uuidv4();
-      db.prepare(`
-        INSERT INTO notifications (id, user_id, title, message, type, link)
-        VALUES (?, ?, ?, ?, ?, ?)
+      await db.prepare(`
+        INSERT INTO notifications (id, user_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?)
       `).run(id, uid, title, message, type, link || null);
 
       notifications.push({ id, user_id: uid, title, message, type, link });
 
       // Fire-and-forget email
-      const user = db.prepare('SELECT email FROM users WHERE id = ?').get(uid);
+      const user = await db.prepare('SELECT email FROM users WHERE id = ?').get(uid);
       if (user?.email) {
         sendNotificationEmail({ to: user.email, title, message })
-          .then(sent => {
+          .then(async (sent) => {
             if (sent) {
-              db.prepare('UPDATE notifications SET email_sent = 1 WHERE id = ?').run(id);
+              await db.prepare('UPDATE notifications SET email_sent = 1 WHERE id = ?').run(id);
             }
           })
           .catch(err => console.error('[Email] Error:', err.message));
@@ -161,19 +130,15 @@ router.post('/send', authenticate, requireMinRole('diretor'), (req, res) => {
 });
 
 // Broadcast notification to role
-router.post('/broadcast', authenticate, requireMinRole('executivo'), (req, res) => {
+router.post('/broadcast', authenticate, requireMinRole('executivo'), async (req, res) => {
   try {
     const { roles, title, message, type = 'info', link } = req.body;
-
-    if (!title || !message || !roles) {
-      return res.status(400).json({ error: 'Title, message and roles required' });
-    }
+    if (!title || !message || !roles) return res.status(400).json({ error: 'Title, message and roles required' });
 
     const db = getDatabase();
 
-    // Get users by roles
     const placeholders = roles.map(() => '?').join(',');
-    const users = db.prepare(`
+    const users = await db.prepare(`
       SELECT id FROM users WHERE role IN (${placeholders}) AND is_active = 1
     `).all(...roles);
 
@@ -181,20 +146,18 @@ router.post('/broadcast', authenticate, requireMinRole('executivo'), (req, res) 
 
     for (const user of users) {
       const id = uuidv4();
-      db.prepare(`
-        INSERT INTO notifications (id, user_id, title, message, type, link)
-        VALUES (?, ?, ?, ?, ?, ?)
+      await db.prepare(`
+        INSERT INTO notifications (id, user_id, title, message, type, link) VALUES (?, ?, ?, ?, ?, ?)
       `).run(id, user.id, title, message, type, link || null);
 
       notifications.push({ id, user_id: user.id });
 
-      // Fire-and-forget email
-      const fullUser = db.prepare('SELECT email FROM users WHERE id = ?').get(user.id);
+      const fullUser = await db.prepare('SELECT email FROM users WHERE id = ?').get(user.id);
       if (fullUser?.email) {
         sendNotificationEmail({ to: fullUser.email, title, message })
-          .then(sent => {
+          .then(async (sent) => {
             if (sent) {
-              db.prepare('UPDATE notifications SET email_sent = 1 WHERE id = ?').run(id);
+              await db.prepare('UPDATE notifications SET email_sent = 1 WHERE id = ?').run(id);
             }
           })
           .catch(err => console.error('[Email] Error:', err.message));

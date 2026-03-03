@@ -14,7 +14,7 @@ function generatePassword(len = 8) {
 const router = express.Router();
 
 // Get all users (with filtering based on role)
-router.get('/', authenticate, (req, res) => {
+router.get('/', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
     const { role, manager_id, is_active } = req.query;
@@ -71,7 +71,7 @@ router.get('/', authenticate, (req, res) => {
 
     query += ` ORDER BY u.created_at DESC`;
 
-    const users = db.prepare(query).all(...params);
+    const users = await db.prepare(query).all(...params);
     res.json({ users });
   } catch (error) {
     console.error('Get users error:', error);
@@ -80,10 +80,10 @@ router.get('/', authenticate, (req, res) => {
 });
 
 // Get user by ID
-router.get('/:id', authenticate, (req, res) => {
+router.get('/:id', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
-    const user = db.prepare(`
+    const user = await db.prepare(`
       SELECT u.id, u.email, u.name, u.role, u.avatar, u.manager_id, u.is_active,
              u.empresa, u.tel, u.com_tipo, u.com_val, u.cnpj, u.created_at,
              m.name as manager_name
@@ -133,7 +133,7 @@ router.post('/', authenticate, requireMinRole('gerente'), async (req, res) => {
     const db = getDatabase();
 
     // Check if email exists
-    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase());
+    const existing = await db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase());
     if (existing) {
       return res.status(409).json({ error: 'Email already in use' });
     }
@@ -142,7 +142,7 @@ router.post('/', authenticate, requireMinRole('gerente'), async (req, res) => {
     const id = uuidv4();
     const avatar = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO users (id, email, password, name, role, avatar, manager_id, empresa, tel, com_tipo, com_val, cnpj, must_change_password)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
     `).run(
@@ -157,21 +157,19 @@ router.post('/', authenticate, requireMinRole('gerente'), async (req, res) => {
 
     // Link parceiro to convenios if provided
     if (convenio_ids && Array.isArray(convenio_ids) && convenio_ids.length > 0 && role === 'parceiro') {
-      const insertConvenio = db.prepare('INSERT OR IGNORE INTO parceiro_convenios (parceiro_id, convenio_id) VALUES (?, ?)');
       for (const cid of convenio_ids) {
-        insertConvenio.run(id, cid);
+        await db.prepare('INSERT OR IGNORE INTO parceiro_convenios (parceiro_id, convenio_id) VALUES (?, ?)').run(id, cid);
       }
     }
 
     // Link convenio-role user to convenios if provided
     if (convenio_ids && Array.isArray(convenio_ids) && convenio_ids.length > 0 && role === 'convenio') {
-      const insertUserConvenio = db.prepare('INSERT OR IGNORE INTO user_convenios (user_id, convenio_id) VALUES (?, ?)');
       for (const cid of convenio_ids) {
-        insertUserConvenio.run(id, cid);
+        await db.prepare('INSERT OR IGNORE INTO user_convenios (user_id, convenio_id) VALUES (?, ?)').run(id, cid);
       }
     }
 
-    const user = db.prepare(`
+    const user = await db.prepare(`
       SELECT id, email, name, role, avatar, manager_id, empresa, tel, com_tipo, com_val, cnpj, is_active, created_at
       FROM users WHERE id = ?
     `).get(id);
@@ -195,7 +193,7 @@ router.put('/:id', authenticate, async (req, res) => {
     }
 
     const db = getDatabase();
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -211,7 +209,7 @@ router.put('/:id', authenticate, async (req, res) => {
 
     // Users can only update their own name and basic profile fields (NOT commission values)
     if (isSelf && !hasPermission(req.user.role, 'gerente')) {
-      db.prepare(`
+      await db.prepare(`
         UPDATE users SET name = ?, empresa = ?, tel = ?, cnpj = ?, updated_at = ?
         WHERE id = ?
       `).run(
@@ -226,7 +224,7 @@ router.put('/:id', authenticate, async (req, res) => {
       // Managers can update more fields
       const newRole = role && canManageUser(req.user.role, role) ? role : user.role;
 
-      db.prepare(`
+      await db.prepare(`
         UPDATE users SET name = ?, role = ?, manager_id = ?, is_active = ?,
           empresa = ?, tel = ?, com_tipo = ?, com_val = ?, cnpj = ?, updated_at = ?
         WHERE id = ?
@@ -249,17 +247,19 @@ router.put('/:id', authenticate, async (req, res) => {
     if (convenio_ids && Array.isArray(convenio_ids)) {
       const effectiveRole = role || user.role;
       if (effectiveRole === 'parceiro') {
-        db.prepare('DELETE FROM parceiro_convenios WHERE parceiro_id = ?').run(userId);
-        const ins = db.prepare('INSERT OR IGNORE INTO parceiro_convenios (parceiro_id, convenio_id) VALUES (?, ?)');
-        for (const cid of convenio_ids) { ins.run(userId, cid); }
+        await db.prepare('DELETE FROM parceiro_convenios WHERE parceiro_id = ?').run(userId);
+        for (const cid of convenio_ids) {
+          await db.prepare('INSERT OR IGNORE INTO parceiro_convenios (parceiro_id, convenio_id) VALUES (?, ?)').run(userId, cid);
+        }
       } else if (effectiveRole === 'convenio') {
-        db.prepare('DELETE FROM user_convenios WHERE user_id = ?').run(userId);
-        const ins = db.prepare('INSERT OR IGNORE INTO user_convenios (user_id, convenio_id) VALUES (?, ?)');
-        for (const cid of convenio_ids) { ins.run(userId, cid); }
+        await db.prepare('DELETE FROM user_convenios WHERE user_id = ?').run(userId);
+        for (const cid of convenio_ids) {
+          await db.prepare('INSERT OR IGNORE INTO user_convenios (user_id, convenio_id) VALUES (?, ?)').run(userId, cid);
+        }
       }
     }
 
-    const updatedUser = db.prepare(`
+    const updatedUser = await db.prepare(`
       SELECT id, email, name, role, avatar, manager_id, empresa, tel, com_tipo, com_val, is_active, created_at
       FROM users WHERE id = ?
     `).get(userId);
@@ -272,10 +272,10 @@ router.put('/:id', authenticate, async (req, res) => {
 });
 
 // Delete user (soft delete)
-router.delete('/:id', authenticate, requireMinRole('diretor'), (req, res) => {
+router.delete('/:id', authenticate, requireMinRole('diretor'), async (req, res) => {
   try {
     const db = getDatabase();
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -286,11 +286,11 @@ router.delete('/:id', authenticate, requireMinRole('diretor'), (req, res) => {
     }
 
     // Soft delete
-    db.prepare('UPDATE users SET is_active = 0, updated_at = ? WHERE id = ?')
+    await db.prepare('UPDATE users SET is_active = 0, updated_at = ? WHERE id = ?')
       .run(new Date().toISOString(), req.params.id);
 
     // Invalidate refresh tokens
-    db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(req.params.id);
+    await db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(req.params.id);
 
     res.json({ message: 'User deactivated successfully' });
   } catch (error) {
@@ -303,7 +303,7 @@ router.delete('/:id', authenticate, requireMinRole('diretor'), (req, res) => {
 router.post('/:id/reset-password', authenticate, requireMinRole('gerente'), async (req, res) => {
   try {
     const db = getDatabase();
-    const targetUser = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+    const targetUser = await db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
 
     if (!targetUser) {
       return res.status(404).json({ error: 'User not found' });
@@ -316,11 +316,11 @@ router.post('/:id/reset-password', authenticate, requireMinRole('gerente'), asyn
     const newPassword = generatePassword(8);
     const hashed = await hashPassword(newPassword);
 
-    db.prepare('UPDATE users SET password = ?, must_change_password = 1, updated_at = ? WHERE id = ?')
+    await db.prepare('UPDATE users SET password = ?, must_change_password = 1, updated_at = ? WHERE id = ?')
       .run(hashed, new Date().toISOString(), req.params.id);
 
     // Invalidate all refresh tokens
-    db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(req.params.id);
+    await db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(req.params.id);
 
     res.json({ password: newPassword });
   } catch (error) {
@@ -330,7 +330,7 @@ router.post('/:id/reset-password', authenticate, requireMinRole('gerente'), asyn
 });
 
 // Get team for a manager
-router.get('/:id/team', authenticate, (req, res) => {
+router.get('/:id/team', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
 
@@ -339,7 +339,7 @@ router.get('/:id/team', authenticate, (req, res) => {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    const team = db.prepare(`
+    const team = await db.prepare(`
       SELECT id, email, name, role, avatar, is_active, empresa, tel, com_tipo, com_val, created_at
       FROM users
       WHERE manager_id = ?

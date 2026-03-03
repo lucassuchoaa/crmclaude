@@ -78,13 +78,13 @@ export function checkResourceOwnership(getResourceOwner) {
       if (req.user.role === 'diretor' || req.user.role === 'gerente') {
         const { getDatabase } = await import('../config/database.js');
         const db = getDatabase();
-        const owner = db.prepare('SELECT manager_id FROM users WHERE id = ?').get(ownerId);
+        const owner = await db.prepare('SELECT manager_id FROM users WHERE id = ?').get(ownerId);
         if (owner && owner.manager_id === req.user.id) {
           return next();
         }
         // For directors, also check 2 levels deep (gerente's parceiros)
         if (req.user.role === 'diretor') {
-          const indirectReport = db.prepare(`
+          const indirectReport = await db.prepare(`
             SELECT id FROM users WHERE id = ? AND manager_id IN (
               SELECT id FROM users WHERE manager_id = ?
             )

@@ -33,7 +33,7 @@ const ALL_USERS = [
 // ─── Seed function ───────────────────────────────────────────────────────────
 
 export async function seedIfEmpty(db) {
-  const existingUsers = db.prepare('SELECT COUNT(*) as count FROM users').get();
+  const existingUsers = await db.prepare('SELECT COUNT(*) as count FROM users').get();
   if (existingUsers.count > 0) {
     return;
   }
@@ -43,7 +43,7 @@ export async function seedIfEmpty(db) {
   for (const u of ALL_USERS) {
     const hashedPassword = await hashPassword(u.pw);
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO users (id, email, password, name, role, avatar, manager_id, empresa, tel, com_tipo, com_val)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
@@ -69,7 +69,7 @@ export async function seedIfEmpty(db) {
 // Run standalone if called directly
 async function seed() {
   console.log('Initializing database...');
-  initializeDatabase();
+  await initializeDatabase();
   const db = getDatabase();
   await seedIfEmpty(db);
 }

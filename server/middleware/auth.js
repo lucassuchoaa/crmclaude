@@ -1,7 +1,7 @@
 import { verifyAccessToken } from '../config/auth.js';
 import { getDatabase } from '../config/database.js';
 
-export function authenticate(req, res, next) {
+export async function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -17,7 +17,7 @@ export function authenticate(req, res, next) {
 
   // Verify user still exists and is active
   const db = getDatabase();
-  const user = db.prepare('SELECT id, email, name, role, is_active FROM users WHERE id = ?').get(decoded.id);
+  const user = await db.prepare('SELECT id, email, name, role, is_active FROM users WHERE id = ?').get(decoded.id);
 
   if (!user || !user.is_active) {
     return res.status(401).json({ error: 'User not found or inactive' });
@@ -27,7 +27,7 @@ export function authenticate(req, res, next) {
   next();
 }
 
-export function optionalAuth(req, res, next) {
+export async function optionalAuth(req, res, next) {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -39,7 +39,7 @@ export function optionalAuth(req, res, next) {
 
   if (decoded) {
     const db = getDatabase();
-    const user = db.prepare('SELECT id, email, name, role, is_active FROM users WHERE id = ?').get(decoded.id);
+    const user = await db.prepare('SELECT id, email, name, role, is_active FROM users WHERE id = ?').get(decoded.id);
     if (user && user.is_active) {
       req.user = user;
     }

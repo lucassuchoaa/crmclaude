@@ -9,7 +9,7 @@ import { createNotification } from '../utils/notificationHelper.js';
 const router = express.Router();
 
 // Get all indications
-router.get('/', authenticate, (req, res) => {
+router.get('/', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
     const { status, owner_id, search, limit = 100, offset = 0 } = req.query;
@@ -27,7 +27,6 @@ router.get('/', authenticate, (req, res) => {
 
     // Filter by access
     if (req.user.role === 'convenio') {
-      // Convenio role: only indications from parceiros linked to their convenios
       query += ` AND i.owner_id IN (
         SELECT pc.parceiro_id FROM parceiro_convenios pc
         INNER JOIN user_convenios uc ON uc.convenio_id = pc.convenio_id
@@ -36,7 +35,6 @@ router.get('/', authenticate, (req, res) => {
       params.push(req.user.id);
     } else if (!hasPermission(req.user.role, 'executivo')) {
       if (req.user.role === 'diretor') {
-        // Directors see indications from their gerentes' parceiros (2 levels deep)
         query += ` AND (i.owner_id = ? OR i.owner_id IN (
           SELECT id FROM users WHERE manager_id = ?
           UNION
@@ -46,11 +44,9 @@ router.get('/', authenticate, (req, res) => {
         ))`;
         params.push(req.user.id, req.user.id, req.user.id);
       } else if (req.user.role === 'gerente') {
-        // Gerentes see their own and their parceiros' indications
         query += ` AND (i.owner_id = ? OR i.owner_id IN (SELECT id FROM users WHERE manager_id = ?))`;
         params.push(req.user.id, req.user.id);
       } else {
-        // Parceiros see only their own
         query += ` AND i.owner_id = ?`;
         params.push(req.user.id);
       }
@@ -75,12 +71,12 @@ router.get('/', authenticate, (req, res) => {
     query += ` ORDER BY i.created_at DESC LIMIT ? OFFSET ?`;
     params.push(parseInt(limit), parseInt(offset));
 
-    const indications = db.prepare(query).all(...params);
+    const indications = await db.prepare(query).all(...params);
 
     // Get total count
     let countQuery = query.replace(/SELECT[\s\S]*?FROM/, 'SELECT COUNT(*) as total FROM').replace(/ORDER BY[\s\S]*$/, '');
     const countParams = params.slice(0, -2);
-    const result = db.prepare(countQuery).get(...countParams);
+    const result = await db.prepare(countQuery).get(...countParams);
     const total = result?.total || 0;
 
     res.json({ indications, total, limit: parseInt(limit), offset: parseInt(offset) });
@@ -91,7 +87,7 @@ router.get('/', authenticate, (req, res) => {
 });
 
 // Get recent activity across all accessible indications
-router.get('/activity/recent', authenticate, (req, res) => {
+router.get('/activity/recent', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
     const limit = parseInt(req.query.limit) || 20;
@@ -127,7 +123,7 @@ router.get('/activity/recent', authenticate, (req, res) => {
     query += ` ORDER BY h.created_at DESC LIMIT ?`;
     params.push(limit);
 
-    const history = db.prepare(query).all(...params);
+    const history = await db.prepare(query).all(...params);
 
     const activity = history.map(h => ({
       id: h.id,
@@ -147,7 +143,7 @@ router.get('/activity/recent', authenticate, (req, res) => {
 });
 
 // Get Kanban board data
-router.get('/board/kanban', authenticate, (req, res) => {
+router.get('/board/kanban', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
 
@@ -178,7 +174,7 @@ router.get('/board/kanban', authenticate, (req, res) => {
 
     query += ` ORDER BY i.updated_at DESC`;
 
-    const indications = db.prepare(query).all(...params);
+    const indications = await db.prepare(query).all(...params);
 
     const columns = {
       novo: [],
@@ -202,10 +198,10 @@ router.get('/board/kanban', authenticate, (req, res) => {
 });
 
 // Get indication by ID
-router.get('/:id', authenticate, (req, res) => {
+router.get('/:id', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
-    const indication = db.prepare(`
+    const indication = await db.prepare(`
       SELECT i.*,
              u.name as owner_name, u.avatar as owner_avatar,
              m.name as manager_name
@@ -221,7 +217,7 @@ router.get('/:id', authenticate, (req, res) => {
 
     // Check access
     if (!hasPermission(req.user.role, 'executivo') && indication.owner_id !== req.user.id) {
-      const team = db.prepare('SELECT id FROM users WHERE manager_id = ?').all(req.user.id);
+      const team = await db.prepare('SELECT id FROM users WHERE manager_id = ?').all(req.user.id);
       const teamIds = team.map(t => t.id);
       if (!teamIds.includes(indication.owner_id)) {
         return res.status(403).json({ error: 'Access denied' });
@@ -229,7 +225,7 @@ router.get('/:id', authenticate, (req, res) => {
     }
 
     // Get history
-    const historyRaw = db.prepare(`
+    const historyRaw = await db.prepare(`
       SELECT h.id, h.action, h.old_value, h.new_value, h.txt, h.created_at,
              u.name as user_name, u.id as user_id
       FROM indication_history h
@@ -238,7 +234,7 @@ router.get('/:id', authenticate, (req, res) => {
       ORDER BY h.created_at DESC
     `).all(req.params.id);
 
-    // Map to frontend-friendly format: hist array with dt, autor, txt
+    // Map to frontend-friendly format
     const hist = historyRaw.map(h => ({
       id: h.id,
       dt: h.created_at,
@@ -258,28 +254,12 @@ router.get('/:id', authenticate, (req, res) => {
 });
 
 // Create indication
-router.post('/', authenticate, (req, res) => {
+router.post('/', authenticate, async (req, res) => {
   try {
     const {
-      cnpj,
-      razao_social,
-      nome_fantasia,
-      contato_nome,
-      contato_telefone,
-      contato_email,
-      num_funcionarios,
-      hubspot_id,
-      hubspot_status,
-      liberacao_status,
-      liberacao_data,
-      liberacao_expiry,
-      capital,
-      abertura,
-      cnae,
-      endereco,
-      value,
-      notes,
-      manager_id,
+      cnpj, razao_social, nome_fantasia, contato_nome, contato_telefone, contato_email,
+      num_funcionarios, hubspot_id, hubspot_status, liberacao_status, liberacao_data,
+      liberacao_expiry, capital, abertura, cnae, endereco, value, notes, manager_id,
     } = req.body;
 
     if (!cnpj || !razao_social) {
@@ -289,7 +269,7 @@ router.post('/', authenticate, (req, res) => {
     const db = getDatabase();
 
     // Check for duplicate CNPJ
-    const existing = db.prepare('SELECT id FROM indications WHERE cnpj = ?').get(cnpj.replace(/\D/g, ''));
+    const existing = await db.prepare('SELECT id FROM indications WHERE cnpj = ?').get(cnpj.replace(/\D/g, ''));
     if (existing) {
       return res.status(409).json({ error: 'CNPJ already registered', existingId: existing.id });
     }
@@ -298,9 +278,10 @@ router.post('/', authenticate, (req, res) => {
     const cleanCnpj = cnpj.replace(/\D/g, '');
 
     // Fallback: if no manager_id provided, use the parceiro's own manager
-    const effectiveManagerId = manager_id || db.prepare('SELECT manager_id FROM users WHERE id = ?').get(req.user.id)?.manager_id || null;
+    const ownerRow = await db.prepare('SELECT manager_id FROM users WHERE id = ?').get(req.user.id);
+    const effectiveManagerId = manager_id || ownerRow?.manager_id || null;
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO indications (
         id, cnpj, razao_social, nome_fantasia,
         contato_nome, contato_telefone, contato_email,
@@ -332,15 +313,15 @@ router.post('/', authenticate, (req, res) => {
     );
 
     // Log history
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO indication_history (indication_id, user_id, action, new_value)
       VALUES (?, ?, 'created', 'novo')
     `).run(id, req.user.id);
 
     // Notify gerente (parceiro's manager)
-    const owner = db.prepare('SELECT manager_id FROM users WHERE id = ?').get(req.user.id);
+    const owner = await db.prepare('SELECT manager_id FROM users WHERE id = ?').get(req.user.id);
     if (owner && owner.manager_id) {
-      createNotification({
+      await createNotification({
         userId: owner.manager_id,
         title: 'Nova indicação recebida',
         message: `${req.user.name} cadastrou: ${razao_social}`,
@@ -349,7 +330,7 @@ router.post('/', authenticate, (req, res) => {
       });
     }
 
-    const indication = db.prepare('SELECT * FROM indications WHERE id = ?').get(id);
+    const indication = await db.prepare('SELECT * FROM indications WHERE id = ?').get(id);
 
     res.status(201).json({ indication });
   } catch (error) {
@@ -359,31 +340,16 @@ router.post('/', authenticate, (req, res) => {
 });
 
 // Update indication
-router.put('/:id', authenticate, (req, res) => {
+router.put('/:id', authenticate, async (req, res) => {
   try {
     const {
-      status,
-      contato_nome,
-      contato_telefone,
-      contato_email,
-      num_funcionarios,
-      hubspot_id,
-      hubspot_status,
-      liberacao_status,
-      liberacao_data,
-      liberacao_expiry,
-      capital,
-      abertura,
-      cnae,
-      endereco,
-      value,
-      notes,
-      manager_id,
-      obs,
+      status, contato_nome, contato_telefone, contato_email, num_funcionarios,
+      hubspot_id, hubspot_status, liberacao_status, liberacao_data, liberacao_expiry,
+      capital, abertura, cnae, endereco, value, notes, manager_id, obs,
     } = req.body;
 
     const db = getDatabase();
-    const indication = db.prepare('SELECT * FROM indications WHERE id = ?').get(req.params.id);
+    const indication = await db.prepare('SELECT * FROM indications WHERE id = ?').get(req.params.id);
 
     if (!indication) {
       return res.status(404).json({ error: 'Indication not found' });
@@ -391,7 +357,7 @@ router.put('/:id', authenticate, (req, res) => {
 
     // Check access
     if (!hasPermission(req.user.role, 'executivo') && indication.owner_id !== req.user.id) {
-      const team = db.prepare('SELECT id FROM users WHERE manager_id = ?').all(req.user.id);
+      const team = await db.prepare('SELECT id FROM users WHERE manager_id = ?').all(req.user.id);
       const teamIds = team.map(t => t.id);
       if (!teamIds.includes(indication.owner_id)) {
         return res.status(403).json({ error: 'Access denied' });
@@ -405,7 +371,7 @@ router.put('/:id', authenticate, (req, res) => {
 
     // Log status change
     if (status && status !== indication.status) {
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO indication_history (indication_id, user_id, action, old_value, new_value)
         VALUES (?, ?, 'status_change', ?, ?)
       `).run(req.params.id, req.user.id, indication.status, status);
@@ -414,26 +380,13 @@ router.put('/:id', authenticate, (req, res) => {
     // Support 'obs' as alias for 'notes'
     const resolvedNotes = obs !== undefined ? obs : (notes !== undefined ? notes : indication.notes);
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE indications SET
-        status = ?,
-        contato_nome = ?,
-        contato_telefone = ?,
-        contato_email = ?,
-        num_funcionarios = ?,
-        hubspot_id = ?,
-        hubspot_status = ?,
-        liberacao_status = ?,
-        liberacao_data = ?,
-        liberacao_expiry = ?,
-        capital = ?,
-        abertura = ?,
-        cnae = ?,
-        endereco = ?,
-        value = ?,
-        notes = ?,
-        manager_id = ?,
-        updated_at = ?
+        status = ?, contato_nome = ?, contato_telefone = ?, contato_email = ?,
+        num_funcionarios = ?, hubspot_id = ?, hubspot_status = ?,
+        liberacao_status = ?, liberacao_data = ?, liberacao_expiry = ?,
+        capital = ?, abertura = ?, cnae = ?, endereco = ?,
+        value = ?, notes = ?, manager_id = ?, updated_at = ?
       WHERE id = ?
     `).run(
       status || indication.status,
@@ -457,7 +410,7 @@ router.put('/:id', authenticate, (req, res) => {
       req.params.id
     );
 
-    const updated = db.prepare(`
+    const updated = await db.prepare(`
       SELECT i.*, u.name as owner_name, u.avatar as owner_avatar
       FROM indications i
       LEFT JOIN users u ON i.owner_id = u.id
@@ -472,26 +425,24 @@ router.put('/:id', authenticate, (req, res) => {
 });
 
 // Delete indication
-router.delete('/:id', authenticate, (req, res) => {
+router.delete('/:id', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
-    const indication = db.prepare('SELECT * FROM indications WHERE id = ?').get(req.params.id);
+    const indication = await db.prepare('SELECT * FROM indications WHERE id = ?').get(req.params.id);
 
     if (!indication) {
       return res.status(404).json({ error: 'Indication not found' });
     }
 
-    // Only owner or higher roles can delete
     if (!hasPermission(req.user.role, 'diretor') && indication.owner_id !== req.user.id) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // Soft delete by moving to 'perdido' status
-    db.prepare(`
+    await db.prepare(`
       UPDATE indications SET status = 'perdido', updated_at = ? WHERE id = ?
     `).run(new Date().toISOString(), req.params.id);
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO indication_history (indication_id, user_id, action, old_value, new_value)
       VALUES (?, ?, 'deleted', ?, 'perdido')
     `).run(req.params.id, req.user.id, indication.status);
@@ -504,7 +455,7 @@ router.delete('/:id', authenticate, (req, res) => {
 });
 
 // Add history entry (observation) to indication
-router.post('/:id/history', authenticate, (req, res) => {
+router.post('/:id/history', authenticate, async (req, res) => {
   try {
     const { txt, action = 'obs' } = req.body;
 
@@ -513,7 +464,7 @@ router.post('/:id/history', authenticate, (req, res) => {
     }
 
     const db = getDatabase();
-    const indication = db.prepare('SELECT * FROM indications WHERE id = ?').get(req.params.id);
+    const indication = await db.prepare('SELECT * FROM indications WHERE id = ?').get(req.params.id);
 
     if (!indication) {
       return res.status(404).json({ error: 'Indication not found' });
@@ -521,20 +472,20 @@ router.post('/:id/history', authenticate, (req, res) => {
 
     // Check access
     if (!hasPermission(req.user.role, 'executivo') && indication.owner_id !== req.user.id) {
-      const team = db.prepare('SELECT id FROM users WHERE manager_id = ?').all(req.user.id);
+      const team = await db.prepare('SELECT id FROM users WHERE manager_id = ?').all(req.user.id);
       const teamIds = team.map(t => t.id);
       if (!teamIds.includes(indication.owner_id)) {
         return res.status(403).json({ error: 'Access denied' });
       }
     }
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO indication_history (indication_id, user_id, action, txt)
       VALUES (?, ?, ?, ?)
     `).run(req.params.id, req.user.id, action, txt);
 
     // Return updated hist array
-    const historyRaw = db.prepare(`
+    const historyRaw = await db.prepare(`
       SELECT h.id, h.action, h.old_value, h.new_value, h.txt, h.created_at,
              u.name as user_name, u.id as user_id
       FROM indication_history h

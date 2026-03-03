@@ -23,7 +23,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+  limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowed = ['.pdf', '.xlsx', '.xls', '.docx', '.doc', '.mp4', '.pptx', '.ppt', '.png', '.jpg', '.jpeg', '.zip'];
     const ext = path.extname(file.originalname).toLowerCase();
@@ -35,38 +35,30 @@ const upload = multer({
 const router = express.Router();
 
 // Get materials
-router.get('/', authenticate, (req, res) => {
+router.get('/', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
     const { category, search } = req.query;
 
     let query = `
       SELECT m.*, u.name as created_by_name
-      FROM materials m
-      LEFT JOIN users u ON m.created_by = u.id
-      WHERE 1=1
+      FROM materials m LEFT JOIN users u ON m.created_by = u.id WHERE 1=1
     `;
     const params = [];
 
-    // Filter by role access
     query += ` AND (m.roles_allowed LIKE ? OR m.roles_allowed LIKE '%all%')`;
     params.push(`%${req.user.role}%`);
 
-    if (category) {
-      query += ` AND m.category = ?`;
-      params.push(category);
-    }
-
+    if (category) { query += ` AND m.category = ?`; params.push(category); }
     if (search) {
       query += ` AND (m.title LIKE ? OR m.description LIKE ?)`;
-      const searchPattern = `%${search}%`;
-      params.push(searchPattern, searchPattern);
+      const sp = `%${search}%`;
+      params.push(sp, sp);
     }
 
     query += ` ORDER BY m.created_at DESC`;
 
-    const materials = db.prepare(query).all(...params);
-
+    const materials = await db.prepare(query).all(...params);
     res.json({ materials });
   } catch (error) {
     console.error('Get materials error:', error);
@@ -75,26 +67,20 @@ router.get('/', authenticate, (req, res) => {
 });
 
 // Get material by ID
-router.get('/:id', authenticate, (req, res) => {
+router.get('/:id', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
-    const material = db.prepare(`
+    const material = await db.prepare(`
       SELECT m.*, u.name as created_by_name
-      FROM materials m
-      LEFT JOIN users u ON m.created_by = u.id
-      WHERE m.id = ?
+      FROM materials m LEFT JOIN users u ON m.created_by = u.id WHERE m.id = ?
     `).get(req.params.id);
 
-    if (!material) {
-      return res.status(404).json({ error: 'Material not found' });
-    }
+    if (!material) return res.status(404).json({ error: 'Material not found' });
 
-    // Check access
     const rolesAllowed = material.roles_allowed.split(',');
     if (!rolesAllowed.includes('all') && !rolesAllowed.includes(req.user.role)) {
       return res.status(403).json({ error: 'Access denied' });
     }
-
     res.json({ material });
   } catch (error) {
     console.error('Get material error:', error);
@@ -102,14 +88,11 @@ router.get('/:id', authenticate, (req, res) => {
   }
 });
 
-// Create material (with optional file upload)
-router.post('/', authenticate, requireMinRole('gerente'), upload.single('file'), (req, res) => {
+// Create material
+router.post('/', authenticate, requireMinRole('gerente'), upload.single('file'), async (req, res) => {
   try {
     const { title, description, category, file_type, roles_allowed } = req.body;
-
-    if (!title || !category) {
-      return res.status(400).json({ error: 'Title and category required' });
-    }
+    if (!title || !category) return res.status(400).json({ error: 'Title and category required' });
 
     const db = getDatabase();
     const id = uuidv4();
@@ -118,21 +101,16 @@ router.post('/', authenticate, requireMinRole('gerente'), upload.single('file'),
     const roles = roles_allowed ? roles_allowed.split(',').filter(r => validRoles.includes(r.trim())) : ['all'];
 
     const filePath = req.file ? req.file.filename : null;
-    const detectedType = req.file
-      ? path.extname(req.file.originalname).replace('.', '').toLowerCase()
-      : (file_type || null);
+    const detectedType = req.file ? path.extname(req.file.originalname).replace('.', '').toLowerCase() : (file_type || null);
     const fileSize = req.file ? req.file.size : null;
-    const fileDesc = fileSize
-      ? `${description || ''} | Tamanho: ${(fileSize / (1024 * 1024)).toFixed(1)} MB`.trim()
-      : (description || null);
+    const fileDesc = fileSize ? `${description || ''} | Tamanho: ${(fileSize / (1024 * 1024)).toFixed(1)} MB`.trim() : (description || null);
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO materials (id, title, description, category, file_path, file_type, roles_allowed, created_by)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, title, fileDesc, category, filePath, detectedType, roles.join(','), req.user.id);
 
-    const material = db.prepare('SELECT * FROM materials WHERE id = ?').get(id);
-
+    const material = await db.prepare('SELECT * FROM materials WHERE id = ?').get(id);
     res.status(201).json({ material });
   } catch (error) {
     console.error('Create material error:', error);
@@ -141,25 +119,21 @@ router.post('/', authenticate, requireMinRole('gerente'), upload.single('file'),
 });
 
 // Download material file
-router.get('/:id/download', authenticate, (req, res) => {
+router.get('/:id/download', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
-    const material = db.prepare('SELECT * FROM materials WHERE id = ?').get(req.params.id);
-
+    const material = await db.prepare('SELECT * FROM materials WHERE id = ?').get(req.params.id);
     if (!material) return res.status(404).json({ error: 'Material not found' });
 
     const rolesAllowed = material.roles_allowed.split(',');
     if (!rolesAllowed.includes('all') && !rolesAllowed.includes(req.user.role)) {
       return res.status(403).json({ error: 'Access denied' });
     }
-
     if (!material.file_path) return res.status(404).json({ error: 'No file attached' });
 
     const filePath = path.join(uploadsDir, material.file_path);
     const resolvedPath = path.resolve(filePath);
-    if (!resolvedPath.startsWith(path.resolve(uploadsDir))) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
+    if (!resolvedPath.startsWith(path.resolve(uploadsDir))) return res.status(403).json({ error: 'Access denied' });
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found on disk' });
 
     const filename = `${material.title}.${material.file_type || 'bin'}`;
@@ -171,18 +145,13 @@ router.get('/:id/download', authenticate, (req, res) => {
 });
 
 // Update material
-router.put('/:id', authenticate, requireMinRole('gerente'), (req, res) => {
+router.put('/:id', authenticate, requireMinRole('gerente'), async (req, res) => {
   try {
     const { title, description, category, file_path, file_type, roles_allowed } = req.body;
-
     const db = getDatabase();
-    const material = db.prepare('SELECT * FROM materials WHERE id = ?').get(req.params.id);
+    const material = await db.prepare('SELECT * FROM materials WHERE id = ?').get(req.params.id);
+    if (!material) return res.status(404).json({ error: 'Material not found' });
 
-    if (!material) {
-      return res.status(404).json({ error: 'Material not found' });
-    }
-
-    // Only creator or higher roles can edit
     if (material.created_by !== req.user.id && !hasPermission(req.user.role, 'diretor')) {
       return res.status(403).json({ error: 'Access denied' });
     }
@@ -190,11 +159,8 @@ router.put('/:id', authenticate, requireMinRole('gerente'), (req, res) => {
     const validRoles = ['all', 'super_admin', 'executivo', 'diretor', 'gerente', 'parceiro'];
     const roles = roles_allowed ? roles_allowed.split(',').filter(r => validRoles.includes(r.trim())) : material.roles_allowed.split(',');
 
-    db.prepare(`
-      UPDATE materials SET
-        title = ?, description = ?, category = ?,
-        file_path = ?, file_type = ?, roles_allowed = ?,
-        updated_at = ?
+    await db.prepare(`
+      UPDATE materials SET title = ?, description = ?, category = ?, file_path = ?, file_type = ?, roles_allowed = ?, updated_at = ?
       WHERE id = ?
     `).run(
       title || material.title,
@@ -207,8 +173,7 @@ router.put('/:id', authenticate, requireMinRole('gerente'), (req, res) => {
       req.params.id
     );
 
-    const updated = db.prepare('SELECT * FROM materials WHERE id = ?').get(req.params.id);
-
+    const updated = await db.prepare('SELECT * FROM materials WHERE id = ?').get(req.params.id);
     res.json({ material: updated });
   } catch (error) {
     console.error('Update material error:', error);
@@ -217,17 +182,13 @@ router.put('/:id', authenticate, requireMinRole('gerente'), (req, res) => {
 });
 
 // Delete material
-router.delete('/:id', authenticate, requireMinRole('diretor'), (req, res) => {
+router.delete('/:id', authenticate, requireMinRole('diretor'), async (req, res) => {
   try {
     const db = getDatabase();
-    const material = db.prepare('SELECT * FROM materials WHERE id = ?').get(req.params.id);
+    const material = await db.prepare('SELECT * FROM materials WHERE id = ?').get(req.params.id);
+    if (!material) return res.status(404).json({ error: 'Material not found' });
 
-    if (!material) {
-      return res.status(404).json({ error: 'Material not found' });
-    }
-
-    db.prepare('DELETE FROM materials WHERE id = ?').run(req.params.id);
-
+    await db.prepare('DELETE FROM materials WHERE id = ?').run(req.params.id);
     res.json({ message: 'Material deleted' });
   } catch (error) {
     console.error('Delete material error:', error);
@@ -236,16 +197,12 @@ router.delete('/:id', authenticate, requireMinRole('diretor'), (req, res) => {
 });
 
 // Get categories
-router.get('/meta/categories', authenticate, (req, res) => {
+router.get('/meta/categories', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
-    const categories = db.prepare(`
-      SELECT DISTINCT category, COUNT(*) as count
-      FROM materials
-      GROUP BY category
-      ORDER BY count DESC
+    const categories = await db.prepare(`
+      SELECT DISTINCT category, COUNT(*) as count FROM materials GROUP BY category ORDER BY count DESC
     `).all();
-
     res.json({ categories });
   } catch (error) {
     console.error('Get categories error:', error);

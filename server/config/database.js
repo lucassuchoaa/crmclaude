@@ -1,4 +1,3 @@
-import Database from 'better-sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -7,137 +6,235 @@ const dbPath = path.join(__dirname, '..', 'data', 'crm.db');
 
 let db = null;
 
-export function getDatabase() {
-  if (!db) {
-    db = new Database(dbPath);
-    db.pragma('journal_mode = WAL');
-    db.pragma('foreign_keys = ON');
+// ── SQL conversion helpers ──────────────────────────────────────────────────
+
+/**
+ * Convert SQLite-flavored SQL to PostgreSQL on the fly.
+ * When running on SQLite the original SQL is returned untouched.
+ */
+function convertSql(sql, dbType) {
+  if (dbType === 'sqlite') return sql;
+
+  let s = sql;
+
+  // Positional params: ? → $1, $2, …
+  let idx = 0;
+  s = s.replace(/\?/g, () => `$${++idx}`);
+
+  // INSERT OR IGNORE → INSERT … ON CONFLICT DO NOTHING
+  s = s.replace(/INSERT\s+OR\s+IGNORE\s+INTO/gi, 'INSERT INTO');
+  if (/INSERT\s+INTO/i.test(sql) && /OR\s+IGNORE/i.test(sql)) {
+    s = s.replace(/(VALUES\s*\([^)]+\))/i, '$1 ON CONFLICT DO NOTHING');
   }
+
+  // datetime('now', '+N minutes') → NOW() + INTERVAL 'N minutes'
+  s = s.replace(/datetime\(\s*'now'\s*,\s*'([^']+)'\s*\)/gi, (_m, interval) => {
+    return `NOW() + INTERVAL '${interval}'`;
+  });
+
+  // datetime('now') → NOW()
+  s = s.replace(/datetime\(\s*'now'\s*\)/gi, 'NOW()');
+
+  // CURRENT_TIMESTAMP stays the same in PG (it works)
+
+  return s;
+}
+
+/**
+ * Convert DDL statements for PostgreSQL.
+ */
+function adaptDDL(sql) {
+  let s = sql;
+
+  // INTEGER PRIMARY KEY AUTOINCREMENT → SERIAL PRIMARY KEY
+  s = s.replace(/INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT/gi, 'SERIAL PRIMARY KEY');
+
+  // Remove SQLite-specific CHECK constraint syntax that PG handles differently
+  // Keep CHECK constraints as-is — PG supports them
+
+  // BOOLEAN: SQLite uses INTEGER, PG uses BOOLEAN but INTEGER works too
+  // Keep as-is for compatibility
+
+  // datetime('now', …) in DEFAULT — use PG syntax
+  s = s.replace(/DEFAULT\s+datetime\(\s*'now'\s*,\s*'([^']+)'\s*\)/gi, (_m, interval) => {
+    return `DEFAULT (NOW() + INTERVAL '${interval}')`;
+  });
+
+  // Remove IF NOT EXISTS from CREATE INDEX for PostgreSQL compatibility
+  // Actually PG supports IF NOT EXISTS on indexes since 9.5, so keep it
+
+  return s;
+}
+
+// ── SQLite Adapter ──────────────────────────────────────────────────────────
+
+async function createSqliteAdapter() {
+  const Database = (await import('better-sqlite3')).default;
+  const raw = new Database(dbPath);
+  raw.pragma('journal_mode = WAL');
+  raw.pragma('foreign_keys = ON');
+
+  return {
+    type: 'sqlite',
+    raw,
+
+    prepare(sql) {
+      const stmt = raw.prepare(sql);
+      return {
+        get(...params) { return stmt.get(...params); },
+        all(...params) { return stmt.all(...params); },
+        run(...params) { return stmt.run(...params); },
+      };
+    },
+
+    exec(sql) {
+      return raw.exec(sql);
+    },
+
+    pragma(p) {
+      return raw.pragma(p);
+    },
+  };
+}
+
+// ── PostgreSQL Adapter ──────────────────────────────────────────────────────
+
+function createPgAdapter(pool) {
+  return {
+    type: 'pg',
+    raw: pool,
+
+    prepare(sql) {
+      const converted = convertSql(sql, 'pg');
+      return {
+        async get(...params) {
+          const { rows } = await pool.query(converted, params);
+          return rows[0] || null;
+        },
+        async all(...params) {
+          const { rows } = await pool.query(converted, params);
+          return rows;
+        },
+        async run(...params) {
+          const result = await pool.query(converted, params);
+          return { changes: result.rowCount };
+        },
+      };
+    },
+
+    async exec(sql) {
+      // exec can receive multiple statements separated by ;
+      // PG pool.query handles multi-statement as a single call
+      await pool.query(sql);
+    },
+
+    // No-op for PG (pragma is SQLite-specific)
+    pragma() { return []; },
+  };
+}
+
+// ── Initialization ──────────────────────────────────────────────────────────
+
+export async function initializeDatabase() {
+  if (db) return db;
+
+  const databaseUrl = process.env.DATABASE_URL;
+
+  if (databaseUrl) {
+    // ── PostgreSQL ──
+    const pg = await import('pg');
+    const Pool = pg.default?.Pool || pg.Pool;
+    const pool = new Pool({
+      connectionString: databaseUrl,
+      ssl: databaseUrl.includes('sslmode=require') || databaseUrl.includes('digitaloceanspaces')
+        ? { rejectUnauthorized: false }
+        : (process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false),
+    });
+
+    // Test connection
+    const client = await pool.connect();
+    client.release();
+    console.log('Connected to PostgreSQL');
+
+    db = createPgAdapter(pool);
+  } else {
+    // ── SQLite ──
+    const fs = await import('fs');
+    const dataDir = path.join(__dirname, '..', 'data');
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+
+    db = await createSqliteAdapter();
+    console.log('Connected to SQLite');
+  }
+
+  // ── Create tables ──
+  await createTables(db);
+
+  console.log('Database initialized successfully');
   return db;
 }
 
-export function initializeDatabase() {
-  const db = getDatabase();
+export function getDatabase() {
+  if (!db) throw new Error('Database not initialized. Call initializeDatabase() first.');
+  return db;
+}
+
+// ── Table creation ──────────────────────────────────────────────────────────
+
+async function createTables(db) {
+  const isPg = db.type === 'pg';
+
+  // Helper: run DDL adapted for the current driver
+  async function ddl(sql) {
+    const adapted = isPg ? adaptDDL(sql) : sql;
+    await db.exec(adapted);
+  }
 
   // Users table
-  db.exec(`
+  await ddl(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       email TEXT UNIQUE NOT NULL,
       password TEXT NOT NULL,
       name TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('super_admin', 'executivo', 'diretor', 'gerente', 'convenio', 'parceiro')),
+      role TEXT NOT NULL,
       avatar TEXT,
       manager_id TEXT,
       empresa TEXT,
       tel TEXT,
-      com_tipo TEXT CHECK(com_tipo IN ('pct', 'valor') OR com_tipo IS NULL),
+      cnpj TEXT,
+      com_tipo TEXT,
       com_val REAL,
+      must_change_password INTEGER DEFAULT 0,
       is_active INTEGER DEFAULT 1,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (manager_id) REFERENCES users(id)
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `);
-
-  // Migrate users table CHECK constraint to include 'convenio' role
-  try {
-    db.exec(`INSERT INTO users (id, email, password, name, role) VALUES ('__migrate_test__', '__test__', '__test__', '__test__', 'convenio')`);
-    db.exec(`DELETE FROM users WHERE id = '__migrate_test__'`);
-  } catch (e) {
-    // CHECK constraint rejects 'convenio' — recreate table
-    console.log('Migrating users table to include convenio role...');
-    // Get existing columns to match them in INSERT
-    const oldCols = db.pragma('table_info(users)').map(c => c.name);
-    db.pragma('foreign_keys = OFF');
-    db.exec(`ALTER TABLE users RENAME TO users_old`);
-    db.exec(`
-      CREATE TABLE users (
-        id TEXT PRIMARY KEY,
-        email TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        name TEXT NOT NULL,
-        role TEXT NOT NULL CHECK(role IN ('super_admin', 'executivo', 'diretor', 'gerente', 'convenio', 'parceiro')),
-        avatar TEXT,
-        manager_id TEXT,
-        empresa TEXT,
-        tel TEXT,
-        cnpj TEXT,
-        com_tipo TEXT CHECK(com_tipo IN ('pct', 'valor') OR com_tipo IS NULL),
-        com_val REAL,
-        is_active INTEGER DEFAULT 1,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (manager_id) REFERENCES users(id)
-      )
-    `);
-    const newCols = db.pragma('table_info(users)').map(c => c.name);
-    const commonCols = oldCols.filter(c => newCols.includes(c));
-    const colList = commonCols.join(', ');
-    db.exec(`INSERT INTO users (${colList}) SELECT ${colList} FROM users_old`);
-    db.exec(`DROP TABLE users_old`);
-    // Fix FKs in dependent tables that reference stale names (users_old or *_fk_fix)
-    // Run iteratively because renaming table X to X_fk_fix can break other tables referencing X
-    let maxPasses = 5;
-    while (maxPasses-- > 0) {
-      const allTables = db.prepare(`SELECT name FROM sqlite_master WHERE type='table'`).all().map(t => t.name);
-      let fixed = 0;
-      for (const tbl of allTables) {
-        const fks = db.pragma(`foreign_key_list(${tbl})`);
-        const brokenFk = fks.find(fk => fk.table.endsWith('_old') || fk.table.endsWith('_fk_fix'));
-        if (!brokenFk) continue;
-        const info = db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name=?`).get(tbl);
-        if (!info) continue;
-        const fixedSql = info.sql.replace(/_old"/g, '"').replace(/_fk_fix"/g, '"').replace(/_old\b/g, '').replace(/_fk_fix\b/g, '');
-        if (fixedSql === info.sql) continue;
-        const tblCols = db.pragma(`table_info(${tbl})`).map(c => c.name).join(', ');
-        db.exec(`ALTER TABLE ${tbl} RENAME TO ${tbl}_fk_fix`);
-        db.exec(fixedSql);
-        db.exec(`INSERT INTO ${tbl} (${tblCols}) SELECT ${tblCols} FROM ${tbl}_fk_fix`);
-        db.exec(`DROP TABLE ${tbl}_fk_fix`);
-        fixed++;
-      }
-      if (fixed === 0) break;
-    }
-    db.pragma('foreign_keys = ON');
-    console.log('Users table migrated successfully');
-  }
-
-  // Migrate users table: add parceiro fields if they don't exist
-  const userColumns = db.pragma('table_info(users)').map(c => c.name);
-  if (!userColumns.includes('empresa')) {
-    db.exec(`ALTER TABLE users ADD COLUMN empresa TEXT`);
-  }
-  if (!userColumns.includes('tel')) {
-    db.exec(`ALTER TABLE users ADD COLUMN tel TEXT`);
-  }
-  if (!userColumns.includes('com_tipo')) {
-    db.exec(`ALTER TABLE users ADD COLUMN com_tipo TEXT`);
-  }
-  if (!userColumns.includes('com_val')) {
-    db.exec(`ALTER TABLE users ADD COLUMN com_val REAL`);
-  }
-  if (!userColumns.includes('cnpj')) {
-    db.exec(`ALTER TABLE users ADD COLUMN cnpj TEXT`);
-  }
-  if (!userColumns.includes('must_change_password')) {
-    db.exec(`ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0`);
-  }
 
   // Refresh tokens table
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS refresh_tokens (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id TEXT NOT NULL,
-      token TEXT NOT NULL UNIQUE,
-      expires_at TEXT NOT NULL,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    )
-  `);
+  const refreshTokensDDL = isPg
+    ? `CREATE TABLE IF NOT EXISTS refresh_tokens (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        token TEXT NOT NULL UNIQUE,
+        expires_at TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )`
+    : `CREATE TABLE IF NOT EXISTS refresh_tokens (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        token TEXT NOT NULL UNIQUE,
+        expires_at TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )`;
+  await db.exec(refreshTokensDDL);
 
   // Indications table
-  db.exec(`
+  await ddl(`
     CREATE TABLE IF NOT EXISTS indications (
       id TEXT PRIMARY KEY,
       cnpj TEXT NOT NULL,
@@ -147,7 +244,7 @@ export function initializeDatabase() {
       contato_telefone TEXT,
       contato_email TEXT,
       num_funcionarios INTEGER,
-      status TEXT DEFAULT 'novo' CHECK(status IN ('novo', 'em_contato', 'proposta', 'negociacao', 'fechado', 'perdido')),
+      status TEXT DEFAULT 'novo',
       owner_id TEXT NOT NULL,
       manager_id TEXT,
       hubspot_id TEXT,
@@ -162,88 +259,67 @@ export function initializeDatabase() {
       value REAL DEFAULT 0,
       notes TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (owner_id) REFERENCES users(id),
-      FOREIGN KEY (manager_id) REFERENCES users(id)
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `);
-
-  // Migrate indications table: add new fields if they don't exist
-  const indicationColumns = db.pragma('table_info(indications)').map(c => c.name);
-  const indicationMigrations = [
-    ['num_funcionarios', 'ALTER TABLE indications ADD COLUMN num_funcionarios INTEGER'],
-    ['hubspot_id',       'ALTER TABLE indications ADD COLUMN hubspot_id TEXT'],
-    ['hubspot_status',   'ALTER TABLE indications ADD COLUMN hubspot_status TEXT'],
-    ['liberacao_status', 'ALTER TABLE indications ADD COLUMN liberacao_status TEXT'],
-    ['liberacao_data',   'ALTER TABLE indications ADD COLUMN liberacao_data TEXT'],
-    ['liberacao_expiry', 'ALTER TABLE indications ADD COLUMN liberacao_expiry TEXT'],
-    ['capital',          'ALTER TABLE indications ADD COLUMN capital REAL'],
-    ['abertura',         'ALTER TABLE indications ADD COLUMN abertura TEXT'],
-    ['cnae',             'ALTER TABLE indications ADD COLUMN cnae TEXT'],
-    ['endereco',         'ALTER TABLE indications ADD COLUMN endereco TEXT'],
-  ];
-  for (const [col, sql] of indicationMigrations) {
-    if (!indicationColumns.includes(col)) {
-      db.exec(sql);
-    }
-  }
 
   // Indication history table
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS indication_history (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      indication_id TEXT NOT NULL,
-      user_id TEXT NOT NULL,
-      action TEXT NOT NULL,
-      old_value TEXT,
-      new_value TEXT,
-      txt TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (indication_id) REFERENCES indications(id) ON DELETE CASCADE,
-      FOREIGN KEY (user_id) REFERENCES users(id)
-    )
-  `);
-
-  // Migrate indication_history table: add txt column if it doesn't exist
-  const historyColumns = db.pragma('table_info(indication_history)').map(c => c.name);
-  if (!historyColumns.includes('txt')) {
-    db.exec(`ALTER TABLE indication_history ADD COLUMN txt TEXT`);
-  }
+  const indicationHistoryDDL = isPg
+    ? `CREATE TABLE IF NOT EXISTS indication_history (
+        id SERIAL PRIMARY KEY,
+        indication_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        old_value TEXT,
+        new_value TEXT,
+        txt TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )`
+    : `CREATE TABLE IF NOT EXISTS indication_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        indication_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        old_value TEXT,
+        new_value TEXT,
+        txt TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (indication_id) REFERENCES indications(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      )`;
+  await db.exec(indicationHistoryDDL);
 
   // Commissions table
-  db.exec(`
+  await ddl(`
     CREATE TABLE IF NOT EXISTS commissions (
       id TEXT PRIMARY KEY,
       indication_id TEXT NOT NULL,
       user_id TEXT NOT NULL,
       amount REAL NOT NULL,
       percentage REAL NOT NULL,
-      status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'paid', 'cancelled')),
+      status TEXT DEFAULT 'pending',
       payment_date TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (indication_id) REFERENCES indications(id),
-      FOREIGN KEY (user_id) REFERENCES users(id)
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
   // NFEs table
-  db.exec(`
+  await ddl(`
     CREATE TABLE IF NOT EXISTS nfes (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       number TEXT NOT NULL,
       value REAL NOT NULL,
-      status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected', 'paid')),
+      status TEXT DEFAULT 'pending',
       file_path TEXT,
       notes TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users(id)
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
   // Materials table
-  db.exec(`
+  await ddl(`
     CREATE TABLE IF NOT EXISTS materials (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
@@ -254,80 +330,60 @@ export function initializeDatabase() {
       roles_allowed TEXT NOT NULL,
       created_by TEXT NOT NULL,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (created_by) REFERENCES users(id)
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
   // Notifications table
-  db.exec(`
+  await ddl(`
     CREATE TABLE IF NOT EXISTS notifications (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       title TEXT NOT NULL,
       message TEXT NOT NULL,
-      type TEXT DEFAULT 'info' CHECK(type IN ('info', 'success', 'warning', 'error')),
+      type TEXT DEFAULT 'info',
       is_read INTEGER DEFAULT 0,
+      email_sent INTEGER DEFAULT 0,
       link TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
-  // Migrate notifications table: add email_sent column
-  const notifColumns = db.pragma('table_info(notifications)').map(c => c.name);
-  if (!notifColumns.includes('email_sent')) {
-    db.exec(`ALTER TABLE notifications ADD COLUMN email_sent INTEGER DEFAULT 0`);
-  }
-
-  // Messages table (groups chat)
-  db.exec(`
+  // Messages table
+  await ddl(`
     CREATE TABLE IF NOT EXISTS messages (
       id TEXT PRIMARY KEY,
       group_gerente_id TEXT NOT NULL,
       group_parceiro_id TEXT NOT NULL,
       sender_id TEXT NOT NULL,
-      sender_type TEXT NOT NULL DEFAULT 'user' CHECK(sender_type IN ('user', 'bot')),
+      sender_type TEXT NOT NULL DEFAULT 'user',
       content TEXT NOT NULL,
-      message_type TEXT NOT NULL DEFAULT 'text' CHECK(message_type IN ('text', 'cnpj_query', 'cnpj_result', 'cnpj_duplicate', 'indication_created')),
+      message_type TEXT NOT NULL DEFAULT 'text',
       metadata TEXT,
       is_read INTEGER DEFAULT 0,
       source TEXT DEFAULT 'crm',
       whatsapp_message_id TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (group_gerente_id) REFERENCES users(id),
-      FOREIGN KEY (group_parceiro_id) REFERENCES users(id),
-      FOREIGN KEY (sender_id) REFERENCES users(id)
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
-  // Migrate messages table: add WhatsApp columns
-  const msgColumns = db.pragma('table_info(messages)').map(c => c.name);
-  if (!msgColumns.includes('source')) {
-    db.exec(`ALTER TABLE messages ADD COLUMN source TEXT DEFAULT 'crm'`);
-  }
-  if (!msgColumns.includes('whatsapp_message_id')) {
-    db.exec(`ALTER TABLE messages ADD COLUMN whatsapp_message_id TEXT`);
-  }
-
   // WhatsApp instances table
-  db.exec(`
+  await ddl(`
     CREATE TABLE IF NOT EXISTS whatsapp_instances (
       id TEXT PRIMARY KEY,
       gerente_id TEXT UNIQUE NOT NULL,
       instance_name TEXT UNIQUE NOT NULL,
-      status TEXT DEFAULT 'disconnected' CHECK(status IN ('disconnected', 'connecting', 'connected', 'qr_pending')),
+      status TEXT DEFAULT 'disconnected',
       qr_code TEXT,
       qr_expires_at TEXT,
       connected_phone TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (gerente_id) REFERENCES users(id)
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
   // Convenios table
-  db.exec(`
+  await ddl(`
     CREATE TABLE IF NOT EXISTS convenios (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -338,32 +394,28 @@ export function initializeDatabase() {
     )
   `);
 
-  // Parceiro-Convenio junction table (many-to-many)
-  db.exec(`
+  // Parceiro-Convenio junction table
+  await ddl(`
     CREATE TABLE IF NOT EXISTS parceiro_convenios (
       parceiro_id TEXT NOT NULL,
       convenio_id TEXT NOT NULL,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (parceiro_id, convenio_id),
-      FOREIGN KEY (parceiro_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY (convenio_id) REFERENCES convenios(id) ON DELETE CASCADE
+      PRIMARY KEY (parceiro_id, convenio_id)
     )
   `);
 
-  // User-Convenio junction table (links convenio-role users to their convenios)
-  db.exec(`
+  // User-Convenio junction table
+  await ddl(`
     CREATE TABLE IF NOT EXISTS user_convenios (
       user_id TEXT NOT NULL,
       convenio_id TEXT NOT NULL,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (user_id, convenio_id),
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY (convenio_id) REFERENCES convenios(id) ON DELETE CASCADE
+      PRIMARY KEY (user_id, convenio_id)
     )
   `);
 
-  // Settings table (for HubSpot API keys, etc.)
-  db.exec(`
+  // Settings table
+  await ddl(`
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT,
@@ -372,8 +424,9 @@ export function initializeDatabase() {
     )
   `);
 
-  // Create indexes
-  db.exec(`
+  // ── Indexes ──
+  // PG and SQLite both support CREATE INDEX IF NOT EXISTS
+  const indexes = `
     CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
     CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
     CREATE INDEX IF NOT EXISTS idx_users_manager ON users(manager_id);
@@ -398,10 +451,41 @@ export function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS idx_parceiro_convenios_convenio ON parceiro_convenios(convenio_id);
     CREATE INDEX IF NOT EXISTS idx_user_convenios_user ON user_convenios(user_id);
     CREATE INDEX IF NOT EXISTS idx_user_convenios_convenio ON user_convenios(convenio_id);
-  `);
+  `;
 
-  console.log('Database initialized successfully');
-  return db;
+  if (isPg) {
+    // PG: execute each CREATE INDEX individually (multi-statement with ; can fail)
+    for (const line of indexes.split(';')) {
+      const trimmed = line.trim();
+      if (trimmed) await db.exec(trimmed);
+    }
+  } else {
+    await db.exec(indexes);
+  }
+
+  // ── SQLite-only migrations ──
+  if (!isPg) {
+    // Add columns that may not exist in older SQLite databases
+    const safeAddColumn = async (table, column, definition) => {
+      try {
+        const cols = db.pragma(`table_info(${table})`).map(c => c.name);
+        if (!cols.includes(column)) {
+          await db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+        }
+      } catch { /* column already exists */ }
+    };
+
+    await safeAddColumn('users', 'empresa', 'TEXT');
+    await safeAddColumn('users', 'tel', 'TEXT');
+    await safeAddColumn('users', 'com_tipo', 'TEXT');
+    await safeAddColumn('users', 'com_val', 'REAL');
+    await safeAddColumn('users', 'cnpj', 'TEXT');
+    await safeAddColumn('users', 'must_change_password', 'INTEGER DEFAULT 0');
+    await safeAddColumn('indication_history', 'txt', 'TEXT');
+    await safeAddColumn('notifications', 'email_sent', 'INTEGER DEFAULT 0');
+    await safeAddColumn('messages', 'source', "TEXT DEFAULT 'crm'");
+    await safeAddColumn('messages', 'whatsapp_message_id', 'TEXT');
+  }
 }
 
 export default { getDatabase, initializeDatabase };
