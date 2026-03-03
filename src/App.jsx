@@ -23,6 +23,7 @@ const transformUser = (u) => ({
   eId: u.role === 'diretor' ? u.manager_id : undefined,
   dId: u.role === 'gerente' ? u.manager_id : undefined,
   gId: u.role === 'parceiro' ? u.manager_id : undefined,
+  mustChangePassword: !!u.must_change_password,
 });
 
 // Transform API indication data to match frontend structure
@@ -81,6 +82,7 @@ const mapKanbanToDb = (kanbSt) => {
   const map = {
     'nova': 'novo',
     'analise': 'em_contato',
+    'prospeccao': 'em_contato',
     'docs': 'proposta',
     'aprovado': 'negociacao',
     'implant': 'negociacao',
@@ -110,6 +112,7 @@ const formatCapital = (val) => {
 const KCOLS = [
   { id: "nova", label: "Nova Indicação", co: "#6366f1" },
   { id: "analise", label: "Em Análise", co: "#f59e0b" },
+  { id: "prospeccao", label: "Em Prospecção", co: "#e879f9" },
   { id: "docs", label: "Documentação", co: "#3b82f6" },
   { id: "aprovado", label: "Aprovado", co: "#10b981" },
   { id: "implant", label: "Implantação", co: "#8b5cf6" },
@@ -133,9 +136,9 @@ const DEFAULT_CADENCE = [
   { id: "cad_liberacao", ev: "Liberação/Bloqueio", dest: "Parceiro", tipo: "liberacao", ativo: true },
   { id: "cad_interacao", ev: "Nova interação/nota", dest: "Parceiro", tipo: "sistema", ativo: true },
   { id: "cad_comissao", ev: "Relatório de comissão enviado", dest: "Parceiro", tipo: "financeiro", ativo: true },
-  { id: "cad_nfe_enviada", ev: "NFe enviada", dest: "Gerente", tipo: "financeiro", ativo: true },
+  { id: "cad_nfe_enviada", ev: "NFe enviada", dest: "Executivo", tipo: "financeiro", ativo: true },
   { id: "cad_nfe_paga", ev: "NFe marcada como paga", dest: "Parceiro", tipo: "financeiro", ativo: true },
-  { id: "cad_nova_indicacao", ev: "Nova indicação criada", dest: "Gerente", tipo: "sistema", ativo: true },
+  { id: "cad_nova_indicacao", ev: "Nova indicação criada", dest: "Executivo", tipo: "sistema", ativo: true },
 ];
 
 const isCadenceActive = (cadenceRules, ruleId) => cadenceRules.find(r => r.id === ruleId)?.ativo !== false;
@@ -259,6 +262,51 @@ function Login({ onLogin }) {
   );
 }
 
+// ===== FORCE CHANGE PASSWORD =====
+function ForceChangePassword({ user, onChanged, onLogout }) {
+  const [cur, setCur] = useState("");
+  const [np, setNp] = useState("");
+  const [np2, setNp2] = useState("");
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const go = async () => {
+    if (loading) return;
+    setErr("");
+    if (np.length < 8) return setErr("A nova senha deve ter pelo menos 8 caracteres.");
+    if (np !== np2) return setErr("As senhas não coincidem.");
+    if (np === cur) return setErr("A nova senha deve ser diferente da atual.");
+    setLoading(true);
+    try {
+      await authApi.changePassword(cur, np);
+      onChanged();
+    } catch (e) {
+      setErr(e.response?.data?.error === "Current password is incorrect" ? "Senha atual incorreta." : "Erro ao alterar senha. Tente novamente.");
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: T.bg, fontFamily: "'DM Sans',sans-serif", color: T.txt }}>
+      <style>{fonts}</style>
+      <div style={{ position: "absolute", inset: 0, background: `radial-gradient(ellipse 80% 60% at 50% 0%, ${T.wn}14 0%, transparent 60%)` }} />
+      <div style={{ position: "relative", background: T.card, border: `1px solid ${T.bor}`, borderRadius: 16, padding: "44px 36px", width: 420, maxWidth: "90vw", boxShadow: "0 8px 40px rgba(0,0,0,0.5)" }}>
+        <div style={{ position: "absolute", top: -1, left: "20%", right: "20%", height: 2, background: `linear-gradient(90deg, transparent, ${T.wn}, transparent)` }} />
+        <div style={{ textAlign: "center", marginBottom: 24 }}>
+          <div style={{ fontSize: 36, marginBottom: 8 }}>🔐</div>
+          <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>Alterar Senha</h1>
+          <p style={{ fontSize: 13, color: T.t2, marginTop: 8 }}>Olá, <strong>{user.name}</strong>. Por segurança, é necessário alterar sua senha no primeiro acesso.</p>
+        </div>
+        <Inp label="Senha atual" value={cur} onChange={v => { setCur(v); setErr(""); }} type="password" placeholder="Senha fornecida pelo administrador" />
+        <Inp label="Nova senha" value={np} onChange={v => { setNp(v); setErr(""); }} type="password" placeholder="Mínimo 8 caracteres" />
+        <Inp label="Confirmar nova senha" value={np2} onChange={v => { setNp2(v); setErr(""); }} type="password" placeholder="Repita a nova senha" />
+        {err && <p style={{ color: T.er, fontSize: 13, textAlign: "center", margin: "8px 0" }}>{err}</p>}
+        <Btn v="primary" full onClick={go} disabled={loading} style={{ marginTop: 12, padding: 14 }}>{loading ? "Alterando..." : "Alterar Senha e Continuar"}</Btn>
+        <button onClick={onLogout} style={{ width: "100%", marginTop: 12, padding: 10, background: "transparent", border: `1px solid ${T.bor}`, borderRadius: 6, color: T.tm, cursor: "pointer", fontFamily: "'DM Sans',sans-serif", fontSize: 12 }}>Sair</button>
+      </div>
+    </div>
+  );
+}
+
 // ===== HELPERS =====
 function LibBadge({ lib }) {
   if (lib === "liberado") return <Badge type="success">🔓 Liberado</Badge>;
@@ -290,7 +338,8 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
   const myDiretorIds = isExec ? myDiretores.map(d => d.id) : [];
   const chainGerenteIds = isExec ? users.filter(u => u.role === "gerente" && myDiretorIds.includes(u.dId)).map(g => g.id) : [];
 
-  const baseInds = isGerente ? inds.filter(i => i.gId === user.id)
+  const myParceiroIds = isGerente ? users.filter(u => u.role === "parceiro" && u.gId === user.id).map(u => u.id) : [];
+  const baseInds = isGerente ? inds.filter(i => i.gId === user.id || myParceiroIds.includes(i.pId))
     : isParceiro ? inds.filter(i => i.pId === user.id)
       : user.role === "diretor" ? inds.filter(i => { const g = users.find(u => u.id === i.gId); return g && g.dId === user.id; })
         : isExec ? inds.filter(i => chainGerenteIds.includes(i.gId))
@@ -336,7 +385,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
 
   // Stats (always from baseInds for KPIs, filtered for tables)
   const total = baseInds.length;
-  const pipeline = baseInds.filter(i => ["nova", "analise", "docs"].includes(i.st)).length;
+  const pipeline = baseInds.filter(i => ["nova", "analise", "prospeccao", "docs"].includes(i.st)).length;
   const aprovadas = baseInds.filter(i => ["aprovado", "implant", "ativo"].includes(i.st)).length;
   const ativas = baseInds.filter(i => i.st === "ativo").length;
   const recusadas = baseInds.filter(i => i.st === "recusado").length;
@@ -351,7 +400,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
   // Ranking parceiros
   const parcRanking = myParceiros.map(p => {
     const pi = baseInds.filter(i => i.pId === p.id);
-    return { ...p, total: pi.length, ativas: pi.filter(i => i.st === "ativo").length, pipeline: pi.filter(i => ["nova", "analise", "docs"].includes(i.st)).length, recusadas: pi.filter(i => i.st === "recusado").length, tx: pi.length > 0 ? ((pi.filter(i => i.st === "ativo").length / pi.length) * 100).toFixed(0) : "0" };
+    return { ...p, total: pi.length, ativas: pi.filter(i => i.st === "ativo").length, pipeline: pi.filter(i => ["nova", "analise", "prospeccao", "docs"].includes(i.st)).length, recusadas: pi.filter(i => i.st === "recusado").length, tx: pi.length > 0 ? ((pi.filter(i => i.st === "ativo").length / pi.length) * 100).toFixed(0) : "0" };
   }).sort((a, b) => b.ativas - a.ativas);
 
   // Performance por gerente (só diretor)
@@ -406,7 +455,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
 
     // Stats
     const pTotal = all.length;
-    const pPipeline = all.filter(i => ["nova", "analise", "docs"].includes(i.st)).length;
+    const pPipeline = all.filter(i => ["nova", "analise", "prospeccao", "docs"].includes(i.st)).length;
     const pAprov = all.filter(i => ["aprovado", "implant", "ativo"].includes(i.st)).length;
     const pAtivas = all.filter(i => i.st === "ativo").length;
     const pRecusadas = all.filter(i => i.st === "recusado").length;
@@ -454,7 +503,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
             <div style={{ fontSize: 12, color: T.t2 }}>{me?.empresa || "Parceiro"}</div>
             <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
               <div style={{ padding: "6px 12px", background: T.card, borderRadius: 6, border: `1px solid ${T.bor}`, fontSize: 11 }}>
-                <span style={{ color: T.tm }}>Gerente: </span><span style={{ fontWeight: 600 }}>{myGerente?.name || "—"}</span>
+                <span style={{ color: T.tm }}>Executivo: </span><span style={{ fontWeight: 600 }}>{myGerente?.name || "—"}</span>
               </div>
               <div style={{ padding: "6px 12px", background: T.card, borderRadius: 6, border: `1px solid ${T.bor}`, fontSize: 11 }}>
                 <span style={{ color: T.tm }}>Conversão: </span><span style={{ fontWeight: 700, color: parseFloat(pTx) >= 20 ? T.ok : T.wn }}>{pTx}%</span>
@@ -709,7 +758,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
           { l: "Recusadas", v: recusadas, co: T.er, ic: "❌" },
           { l: "Travas Vencidas", v: travasVencidas, co: travasVencidas > 0 ? T.er : T.ok, ic: travasVencidas > 0 ? "⚠️" : "🔒" },
           { l: "Taxa Conversão", v: txConversao + "%", co: parseFloat(txConversao) >= 20 ? T.ok : T.wn, ic: "📈" },
-          { l: isExec ? "Diretores" : isDiretor ? "Gerentes" : "Liberadas", v: isExec ? myDiretores.length : isDiretor ? myGerentes.length : baseInds.filter(i => i.lib === "liberado").length, co: T.ac, ic: isExec ? "🏛️" : isDiretor ? "👔" : "🔓" },
+          { l: isExec ? "Gerentes" : isDiretor ? "Executivos" : "Liberadas", v: isExec ? myDiretores.length : isDiretor ? myGerentes.length : baseInds.filter(i => i.lib === "liberado").length, co: T.ac, ic: isExec ? "🏛️" : isDiretor ? "👔" : "🔓" },
         ].map((s, i) => (
           <div key={i} style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 16, borderLeft: `3px solid ${s.co}` }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -745,11 +794,11 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, flexWrap: "wrap", padding: "10px 14px", background: T.card, border: `1px solid ${T.bor}`, borderRadius: 8 }}>
         <span style={{ fontSize: 11, color: T.tm, fontWeight: 600 }}>🔍 Filtros:</span>
         {isExec && <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", fontWeight: 600 }}>Diretor:</span>
+          <span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", fontWeight: 600 }}>Gerente:</span>
           <select value={fDir} onChange={e => setFDir(e.target.value)} style={selS}><option value="todos">Todos</option>{myDiretores.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select>
         </div>}
         {isDiretor && <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-          <span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", fontWeight: 600 }}>Gerente:</span>
+          <span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", fontWeight: 600 }}>Executivo:</span>
           <select value={fGer} onChange={e => setFGer(e.target.value)} style={selS}><option value="todos">Todos</option>{myGerentes.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select>
         </div>}
         <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
@@ -844,10 +893,10 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
       {/* ROW 6: Director Ranking (Exec only) */}
       {isExec && dirRanking.length > 0 && (
         <div style={{ marginBottom: 16 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>🏛️ Performance dos Diretores</h3>
+          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>🏛️ Performance dos Gerentes</h3>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
             <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
-              <thead><tr>{["Diretor", "Gerentes", "Parceiros", "Indicações", "Ativas", "Conversão"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
+              <thead><tr>{["Gerente", "Executivos", "Parceiros", "Indicações", "Ativas", "Conversão"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>{dirRanking.map(d => (
                 <tr key={d.id}>
                   <td style={tdS}>
@@ -913,10 +962,10 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
         {/* Gerentes Performance (Diretor) or HubSpot Deals (Gerente) */}
         {isDiretor ? (
           <div>
-            <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>👔 Performance dos Gerentes</h3>
+            <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>👔 Performance dos Executivos</h3>
             <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
               <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
-                <thead><tr>{["Gerente", "Parceiros", "Indicações", "Ativas", "Conversão"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
+                <thead><tr>{["Executivo", "Parceiros", "Indicações", "Ativas", "Conversão"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
                 <tbody>{gerRanking.map(g => (
                   <tr key={g.id}>
                     <td style={tdS}>
@@ -977,7 +1026,8 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenc
   // Chain filtering
   const myDiretorIds = user.role === "executivo" ? users.filter(u => u.role === "diretor" && u.eId === user.id).map(d => d.id) : [];
   const chainGerenteIds = user.role === "executivo" ? users.filter(u => u.role === "gerente" && myDiretorIds.includes(u.dId)).map(g => g.id) : [];
-  const base = user.role === "gerente" ? inds.filter(i => i.gId === user.id)
+  const kMyParceiroIds = isGerente ? users.filter(u => u.role === "parceiro" && u.gId === user.id).map(u => u.id) : [];
+  const base = user.role === "gerente" ? inds.filter(i => i.gId === user.id || kMyParceiroIds.includes(i.pId))
     : user.role === "parceiro" ? inds.filter(i => i.pId === user.id)
       : user.role === "diretor" ? inds.filter(i => { const g = users.find(u => u.id === i.gId); return g && g.dId === user.id; })
         : user.role === "executivo" ? inds.filter(i => chainGerenteIds.includes(i.gId))
@@ -1225,7 +1275,7 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenc
       </> : null}>
         {sel && <div>
           {[["Empresa", sel.emp, true], ["CNPJ", sel.cnpj], ["Contato", sel.cont], ["Telefone", sel.tel], ["E-mail", sel.em], ["Funcionários", sel.nf], ["Data", sel.dt],
-          ["Parceiro", users.find(u => u.id === sel.pId)?.name], ["Gerente", users.find(u => u.id === sel.gId)?.name]
+          ["Parceiro", users.find(u => u.id === sel.pId)?.name], ["Executivo", users.find(u => u.id === sel.gId)?.name]
           ].map(([l, v, b], i) => (
             <div key={i} style={{ display: "flex", padding: "8px 0", borderBottom: `1px solid ${T.bor}33` }}>
               <div style={{ width: 130, fontSize: 11, color: T.tm, textTransform: "uppercase", flexShrink: 0 }}>{l}</div>
@@ -1274,7 +1324,7 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenc
                   onChange={e => editLibExp(sel.id, e.target.value)}
                   style={{ padding: "7px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12, outline: "none" }} />
                 <span style={{ fontSize: 11, color: T.tm }}>
-                  {isGerente ? `Máx: +60 dias do padrão (${getMaxLibExp(sel)})` : "Diretor: sem limite de data"}
+                  {isGerente ? `Máx: +60 dias do padrão (${getMaxLibExp(sel)})` : "Gerente: sem limite de data"}
                 </span>
               </div>
             </div>
@@ -1458,7 +1508,7 @@ function ParcPage({ users, setUsers, inds }) {
       </div>
       <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
         <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
-          <thead><tr>{["Parceiro", "Empresa", "Condição Comercial", "Gerente", "Ind.", "Ativas", "Ações"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
+          <thead><tr>{["Parceiro", "Empresa", "Condição Comercial", "Executivo", "Ind.", "Ativas", "Ações"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
           <tbody>{parcs.map(p => {
             const pi = inds.filter(i => i.pId === p.id);
             return (
@@ -1495,7 +1545,7 @@ function ParcPage({ users, setUsers, inds }) {
               <div style={{ fontSize: 12, color: T.tm }}>{detail.empresa || "Sem empresa"}</div>
             </div>
           </div>
-          {[["CNPJ", detail.cnpj ? detail.cnpj.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5') : null], ["E-mail", detail.email], ["Telefone", detail.tel], ["Gerente", users.find(u => u.id === detail.gId)?.name]].map(([l, v], i) => (
+          {[["CNPJ", detail.cnpj ? detail.cnpj.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5') : null], ["E-mail", detail.email], ["Telefone", detail.tel], ["Executivo", users.find(u => u.id === detail.gId)?.name]].map(([l, v], i) => (
             <div key={i} style={{ display: "flex", padding: "8px 0", borderBottom: `1px solid ${T.bor}33` }}>
               <div style={{ width: 130, fontSize: 11, color: T.tm, textTransform: "uppercase", flexShrink: 0 }}>{l}</div>
               <div style={{ fontSize: 13 }}>{v || "—"}</div>
@@ -1550,7 +1600,7 @@ function ParcPage({ users, setUsers, inds }) {
           </div>
           <Inp label="Telefone" value={f.tel} onChange={v => setF({ ...f, tel: v })} placeholder="(00) 00000-0000" />
           {user.role !== "gerente" && <div style={{ marginBottom: 14 }}>
-            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Gerente</label>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Executivo</label>
             <select value={f.gId} onChange={e => setF({ ...f, gId: e.target.value })} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
               <option value="">Selecione...</option>
               {users.filter(u => u.role === "gerente").map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
@@ -1802,6 +1852,14 @@ function ConvenioPage() {
 function MinhasInd({ inds, setInds, notifs, setNotifs, users, cadenceRules }) {
   const { user } = useAuth();
   const { breakpoint } = useBreakpoint();
+  const formatCnpj = (v) => {
+    const n = v.replace(/\D/g, '').slice(0, 14);
+    if (n.length <= 2) return n;
+    if (n.length <= 5) return n.replace(/(\d{2})(\d+)/, '$1.$2');
+    if (n.length <= 8) return n.replace(/(\d{2})(\d{3})(\d+)/, '$1.$2.$3');
+    if (n.length <= 12) return n.replace(/(\d{2})(\d{3})(\d{3})(\d+)/, '$1.$2.$3/$4');
+    return n.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d+)/, '$1.$2.$3/$4-$5');
+  };
   const [modal, setModal] = useState(false);
   const [sel, setSel] = useState(null);
   const [view, setView] = useState("list");
@@ -2075,7 +2133,7 @@ function MinhasInd({ inds, setInds, notifs, setNotifs, users, cadenceRules }) {
           <div style={{ gridColumn: "1/-1", marginBottom: 14 }}>
             <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>CNPJ *</label>
             <div style={{ display: "flex", gap: 6 }}>
-              <input value={f.cnpj} onChange={e => { setF({ ...f, cnpj: e.target.value }); setHr(null); setCnpjData(null); }} placeholder="00.000.000/0000-00" style={{ flex: 1, padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13, outline: "none" }} />
+              <input value={f.cnpj} onChange={e => { setF({ ...f, cnpj: formatCnpj(e.target.value) }); setHr(null); setCnpjData(null); }} placeholder="00.000.000/0000-00" style={{ flex: 1, padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13, outline: "none" }} />
               <Btn v="secondary" sm onClick={checkHS} disabled={!f.cnpj || ck}>{ck ? "⏳ Consultando..." : "🔍 Consultar CNPJ"}</Btn>
             </div>
           </div>
@@ -2455,7 +2513,7 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0", borderBottom: `1px solid ${T.bor}` }}>
             <div>
               <div style={{ fontSize: 14, fontWeight: 500 }}>🔒 Prazo Trava da Oportunidade (dias)</div>
-              <div style={{ fontSize: 11, color: T.tm, marginTop: 2 }}>Ao liberar uma indicação, a trava expira após este período. Gerentes podem estender até +60 dias.</div>
+              <div style={{ fontSize: 11, color: T.tm, marginTop: 2 }}>Ao liberar uma indicação, a trava expira após este período. Executivos podem estender até +60 dias.</div>
             </div>
             <input type="number" value={travaDias} onChange={e => setTravaDias(parseInt(e.target.value) || 90)} style={{ width: 90, textAlign: "right", padding: "8px 10px", background: T.inp, border: `1px solid ${T.ac}44`, borderRadius: 6, color: T.ac, fontFamily: "'Space Mono',monospace", fontSize: 15, fontWeight: 700, outline: "none" }} />
           </div>
@@ -2482,7 +2540,7 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
           <div style={{ fontSize: 11, fontWeight: 600, color: T.t2, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>Condições por Parceiro</div>
           <div style={{ background: T.bg2, borderRadius: 8, border: `1px solid ${T.bor}`, overflow: "hidden" }}>
             <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
-              <thead><tr>{["Parceiro", "Empresa", "Tipo", "Valor", "Gerente"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
+              <thead><tr>{["Parceiro", "Empresa", "Tipo", "Valor", "Executivo"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>{users.filter(u => u.role === "parceiro").map(p => (
                 <tr key={p.id}>
                   <td style={{ ...tdS, fontWeight: 600 }}>{p.name}</td>
@@ -2668,9 +2726,9 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
                 <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.5 }}>Destinatário</label>
                 <select value={cadEditModal.dest} onChange={e => setCadEditModal(prev => ({ ...prev, dest: e.target.value }))} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
                   <option value="Parceiro">Parceiro</option>
-                  <option value="Gerente">Gerente</option>
+                  <option value="Executivo">Executivo</option>
                   <option value="Superior hierárquico">Superior hierárquico</option>
-                  <option value="Diretor">Diretor</option>
+                  <option value="Gerente">Gerente</option>
                 </select>
               </div>
               <div style={{ marginBottom: 14 }}>
@@ -2799,9 +2857,9 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
             <select value={uRoleFilter} onChange={e => setURoleFilter(e.target.value)} style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13, minWidth: 140 }}>
               <option value="">Todos os perfis</option>
               <option value="super_admin">Super Admin</option>
-              <option value="executivo">Executivo</option>
-              <option value="diretor">Diretoria</option>
-              <option value="gerente">Gerente</option>
+              <option value="executivo">Diretor</option>
+              <option value="diretor">Gerente</option>
+              <option value="gerente">Executivo</option>
             </select>
             {(uSearch || uRoleFilter) && <Btn v="secondary" sm onClick={() => { setUSearch(""); setURoleFilter(""); }}>Limpar</Btn>}
           </div>
@@ -2818,7 +2876,7 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
                   </td>
                   <td style={{ ...tdS, fontSize: 12, color: T.t2 }}>{u.email}</td>
                   <td style={tdS}><Badge type={u.role === "super_admin" ? "accent" : u.role === "executivo" ? "accent" : u.role === "diretor" ? "warning" : "info"}>{RL[u.role]}</Badge></td>
-                  <td style={{ ...tdS, fontSize: 12 }}>{u.role === "gerente" ? (users.find(d => d.id === u.dId)?.name || <span style={{ color: T.er, fontSize: 11 }}>⚠ Sem diretor</span>) : u.role === "diretor" ? (users.find(e => e.id === u.eId)?.name || <span style={{ color: T.er, fontSize: 11 }}>⚠ Sem executivo</span>) : <span style={{ color: T.tm }}>—</span>}</td>
+                  <td style={{ ...tdS, fontSize: 12 }}>{u.role === "gerente" ? (users.find(d => d.id === u.dId)?.name || <span style={{ color: T.er, fontSize: 11 }}>⚠ Sem gerente</span>) : u.role === "diretor" ? (users.find(e => e.id === u.eId)?.name || <span style={{ color: T.er, fontSize: 11 }}>⚠ Sem diretor</span>) : <span style={{ color: T.tm }}>—</span>}</td>
                   <td style={tdS}><Badge type="success">Ativo</Badge></td>
                   <td style={tdS}>
                     {u.id === "sa1" ? <span style={{ fontSize: 11, color: T.tm }}>—</span> :
@@ -2849,31 +2907,31 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
               <div style={{ marginBottom: 14 }}>
                 <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Perfil *</label>
                 <select value={uf.role} onChange={e => { setUf({ ...uf, role: e.target.value, dId: "", eId: "" }); setUfConvIds([]); }} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
-                  <option value="gerente">Gerente</option>
-                  <option value="diretor">Diretoria</option>
-                  <option value="executivo">Executivo</option>
+                  <option value="gerente">Executivo</option>
+                  <option value="diretor">Gerente</option>
+                  <option value="executivo">Diretor</option>
                   <option value="convenio">Convênio</option>
                   <option value="super_admin">Super Admin</option>
                 </select>
               </div>
               {uf.role === "gerente" && (
                 <div style={{ gridColumn: "1/-1", padding: 14, background: T.wn + "0A", border: `1px solid ${T.wn}25`, borderRadius: 8 }}>
-                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.wn, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>👤 Diretor Responsável *</label>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.wn, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>👤 Gerente Responsável *</label>
                   <select value={uf.dId} onChange={e => setUf({ ...uf, dId: e.target.value })} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
-                    <option value="">Selecione o diretor...</option>
+                    <option value="">Selecione o gerente...</option>
                     {users.filter(u => u.role === "diretor").map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                   </select>
-                  <div style={{ fontSize: 11, color: T.tm, marginTop: 6 }}>ℹ️ Todo gerente deve estar vinculado a um diretor.</div>
+                  <div style={{ fontSize: 11, color: T.tm, marginTop: 6 }}>ℹ️ Todo executivo deve estar vinculado a um gerente.</div>
                 </div>
               )}
               {uf.role === "diretor" && (
                 <div style={{ gridColumn: "1/-1", padding: 14, background: T.ac + "0A", border: `1px solid ${T.ac}25`, borderRadius: 8 }}>
-                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.ac, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>🏛️ Executivo Responsável *</label>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.ac, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>🏛️ Diretor Responsável *</label>
                   <select value={uf.eId} onChange={e => setUf({ ...uf, eId: e.target.value })} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
-                    <option value="">Selecione o executivo...</option>
+                    <option value="">Selecione o diretor...</option>
                     {users.filter(u => u.role === "executivo").map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
                   </select>
-                  <div style={{ fontSize: 11, color: T.tm, marginTop: 6 }}>ℹ️ Todo diretor deve estar vinculado a um executivo.</div>
+                  <div style={{ fontSize: 11, color: T.tm, marginTop: 6 }}>ℹ️ Todo gerente deve estar vinculado a um diretor.</div>
                 </div>
               )}
               {uf.role === "convenio" && cfgConvenios.length > 0 && (
@@ -2906,9 +2964,9 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
                 <div style={{ marginBottom: 14 }}>
                   <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Perfil</label>
                   <select value={euF.role} onChange={e => setEuF({ ...euF, role: e.target.value, managerId: "" })} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
-                    <option value="gerente">Gerente</option>
-                    <option value="diretor">Diretoria</option>
-                    <option value="executivo">Executivo</option>
+                    <option value="gerente">Executivo</option>
+                    <option value="diretor">Gerente</option>
+                    <option value="executivo">Diretor</option>
                     <option value="super_admin">Super Admin</option>
                   </select>
                 </div>
@@ -2922,7 +2980,7 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
               </div>
               {euF.role === "gerente" && (
                 <div style={{ padding: 14, background: T.wn + "0A", border: `1px solid ${T.wn}25`, borderRadius: 8, marginBottom: 14 }}>
-                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.wn, marginBottom: 8, textTransform: "uppercase" }}>Diretor Responsável</label>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.wn, marginBottom: 8, textTransform: "uppercase" }}>Gerente Responsável</label>
                   <select value={euF.managerId} onChange={e => setEuF({ ...euF, managerId: e.target.value })} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
                     <option value="">Selecione...</option>
                     {users.filter(u => u.role === "diretor").map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -2931,7 +2989,7 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
               )}
               {euF.role === "diretor" && (
                 <div style={{ padding: 14, background: T.ac + "0A", border: `1px solid ${T.ac}25`, borderRadius: 8, marginBottom: 14 }}>
-                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.ac, marginBottom: 8, textTransform: "uppercase" }}>Executivo Responsável</label>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.ac, marginBottom: 8, textTransform: "uppercase" }}>Diretor Responsável</label>
                   <select value={euF.managerId} onChange={e => setEuF({ ...euF, managerId: e.target.value })} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
                     <option value="">Selecione...</option>
                     {users.filter(u => u.role === "executivo").map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
@@ -4001,7 +4059,7 @@ function DiretoriaPage() {
             <div style={{ fontSize: 16, fontWeight: 700, color: T.txt, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ width: 28, height: 28, borderRadius: 8, background: T.inf + "22", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: T.inf }}>👔</span>
               {dir.diretor_name}
-              <Badge type="muted">{dir.gerentes.length} gerentes</Badge>
+              <Badge type="muted">{dir.gerentes.length} executivos</Badge>
             </div>
             {dir.gerentes.map(renderGerenteCard)}
           </div>
@@ -4018,7 +4076,7 @@ function DiretoriaPage() {
 }
 
 // ===== APP =====
-const RL = { super_admin: "Super Admin", executivo: "Executivo", diretor: "Diretoria", gerente: "Gerente", convenio: "Convênio", parceiro: "Parceiro" };
+const RL = { super_admin: "Super Admin", executivo: "Diretor", diretor: "Gerente", gerente: "Executivo", convenio: "Convênio", parceiro: "Parceiro" };
 const NAV = [
   { id: "dash", l: "Dashboard", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro", "convenio"] },
   { id: "kanban", l: "Kanban", r: ["super_admin", "executivo", "diretor", "gerente"] },
@@ -4271,6 +4329,8 @@ export default function App() {
   }
 
   if (!user) return <Login onLogin={u => { setUser(u); setPg("dash"); }} />;
+
+  if (user.mustChangePassword) return <ForceChangePassword user={user} onChanged={() => setUser(u => ({ ...u, mustChangePassword: false }))} onLogout={handleLogout} />;
 
   const nav = NAV.filter(n => n.r.includes(user.role));
   const useDrawer = isMobile || isTablet;

@@ -297,6 +297,9 @@ router.post('/', authenticate, (req, res) => {
     const id = uuidv4();
     const cleanCnpj = cnpj.replace(/\D/g, '');
 
+    // Fallback: if no manager_id provided, use the parceiro's own manager
+    const effectiveManagerId = manager_id || db.prepare('SELECT manager_id FROM users WHERE id = ?').get(req.user.id)?.manager_id || null;
+
     db.prepare(`
       INSERT INTO indications (
         id, cnpj, razao_social, nome_fantasia,
@@ -320,7 +323,7 @@ router.post('/', authenticate, (req, res) => {
       contato_nome || null, contato_telefone || null, contato_email || null,
       num_funcionarios !== undefined ? num_funcionarios : null,
       req.user.id,
-      manager_id || null,
+      effectiveManagerId,
       hubspot_id || null, hubspot_status || null,
       liberacao_status || null, liberacao_data || null, liberacao_expiry || null,
       capital !== undefined ? capital : null,

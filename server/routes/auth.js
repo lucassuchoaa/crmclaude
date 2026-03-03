@@ -50,7 +50,8 @@ router.post('/login', async (req, res) => {
         email: user.email,
         name: user.name,
         role: user.role,
-        avatar: user.avatar
+        avatar: user.avatar,
+        must_change_password: !!user.must_change_password
       },
       accessToken,
       refreshToken
@@ -133,7 +134,7 @@ router.post('/logout', authenticate, (req, res) => {
 router.get('/me', authenticate, (req, res) => {
   const db = getDatabase();
   const user = db.prepare(`
-    SELECT id, email, name, role, avatar, manager_id, created_at
+    SELECT id, email, name, role, avatar, manager_id, must_change_password, created_at
     FROM users WHERE id = ?
   `).get(req.user.id);
 
@@ -166,7 +167,7 @@ router.post('/change-password', authenticate, async (req, res) => {
     }
 
     const hashedPassword = await hashPassword(newPassword);
-    db.prepare('UPDATE users SET password = ?, updated_at = ? WHERE id = ?')
+    db.prepare('UPDATE users SET password = ?, must_change_password = 0, updated_at = ? WHERE id = ?')
       .run(hashedPassword, new Date().toISOString(), req.user.id);
 
     // Invalidate all refresh tokens for this user

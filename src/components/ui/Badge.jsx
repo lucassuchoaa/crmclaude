@@ -81,9 +81,9 @@ Badge.Status = function StatusBadge({ status }) {
 Badge.Role = function RoleBadge({ role }) {
   const roleConfig = {
     super_admin: { variant: 'danger', label: 'Super Admin' },
-    executivo: { variant: 'primary', label: 'Executivo' },
-    diretor: { variant: 'info', label: 'Diretor' },
-    gerente: { variant: 'warning', label: 'Gerente' },
+    executivo: { variant: 'primary', label: 'Diretor' },
+    diretor: { variant: 'info', label: 'Gerente' },
+    gerente: { variant: 'warning', label: 'Executivo' },
     parceiro: { variant: 'success', label: 'Parceiro' },
   };
 

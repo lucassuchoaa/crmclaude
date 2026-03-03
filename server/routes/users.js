@@ -143,8 +143,8 @@ router.post('/', authenticate, requireMinRole('gerente'), async (req, res) => {
     const avatar = name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
 
     db.prepare(`
-      INSERT INTO users (id, email, password, name, role, avatar, manager_id, empresa, tel, com_tipo, com_val, cnpj)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO users (id, email, password, name, role, avatar, manager_id, empresa, tel, com_tipo, com_val, cnpj, must_change_password)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
     `).run(
       id, email.toLowerCase(), hashedPassword, name, role, avatar,
       manager_id || null,
@@ -316,7 +316,7 @@ router.post('/:id/reset-password', authenticate, requireMinRole('gerente'), asyn
     const newPassword = generatePassword(8);
     const hashed = await hashPassword(newPassword);
 
-    db.prepare('UPDATE users SET password = ?, updated_at = ? WHERE id = ?')
+    db.prepare('UPDATE users SET password = ?, must_change_password = 1, updated_at = ? WHERE id = ?')
       .run(hashed, new Date().toISOString(), req.params.id);
 
     // Invalidate all refresh tokens

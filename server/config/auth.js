@@ -74,6 +74,7 @@ export function hasPermission(userRole, requiredRole) {
 }
 
 export function canManageUser(managerRole, targetRole) {
+  if (managerRole === 'super_admin') return true;
   return ROLE_HIERARCHY[managerRole] > ROLE_HIERARCHY[targetRole];
 }
 

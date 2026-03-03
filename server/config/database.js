@@ -76,20 +76,28 @@ export function initializeDatabase() {
     const colList = commonCols.join(', ');
     db.exec(`INSERT INTO users (${colList}) SELECT ${colList} FROM users_old`);
     db.exec(`DROP TABLE users_old`);
-    // Fix FKs in dependent tables that now reference users_old instead of users
-    const depTables = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name != 'users'`).all().map(t => t.name);
-    for (const tbl of depTables) {
-      const fks = db.pragma(`foreign_key_list(${tbl})`);
-      if (fks.some(fk => fk.table === 'users_old')) {
+    // Fix FKs in dependent tables that reference stale names (users_old or *_fk_fix)
+    // Run iteratively because renaming table X to X_fk_fix can break other tables referencing X
+    let maxPasses = 5;
+    while (maxPasses-- > 0) {
+      const allTables = db.prepare(`SELECT name FROM sqlite_master WHERE type='table'`).all().map(t => t.name);
+      let fixed = 0;
+      for (const tbl of allTables) {
+        const fks = db.pragma(`foreign_key_list(${tbl})`);
+        const brokenFk = fks.find(fk => fk.table.endsWith('_old') || fk.table.endsWith('_fk_fix'));
+        if (!brokenFk) continue;
         const info = db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name=?`).get(tbl);
         if (!info) continue;
-        const fixedSql = info.sql.replace(/users_old/g, 'users');
+        const fixedSql = info.sql.replace(/_old"/g, '"').replace(/_fk_fix"/g, '"').replace(/_old\b/g, '').replace(/_fk_fix\b/g, '');
+        if (fixedSql === info.sql) continue;
         const tblCols = db.pragma(`table_info(${tbl})`).map(c => c.name).join(', ');
         db.exec(`ALTER TABLE ${tbl} RENAME TO ${tbl}_fk_fix`);
         db.exec(fixedSql);
         db.exec(`INSERT INTO ${tbl} (${tblCols}) SELECT ${tblCols} FROM ${tbl}_fk_fix`);
         db.exec(`DROP TABLE ${tbl}_fk_fix`);
+        fixed++;
       }
+      if (fixed === 0) break;
     }
     db.pragma('foreign_keys = ON');
     console.log('Users table migrated successfully');
@@ -111,6 +119,9 @@ export function initializeDatabase() {
   }
   if (!userColumns.includes('cnpj')) {
     db.exec(`ALTER TABLE users ADD COLUMN cnpj TEXT`);
+  }
+  if (!userColumns.includes('must_change_password')) {
+    db.exec(`ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0`);
   }
 
   // Refresh tokens table
