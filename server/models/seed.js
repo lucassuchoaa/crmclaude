@@ -32,22 +32,14 @@ const ALL_USERS = [
 
 // ─── Seed function ───────────────────────────────────────────────────────────
 
-async function seed() {
-  console.log('Initializing database...');
-  initializeDatabase();
-
-  const db = getDatabase();
-
-  // Check if already seeded
+export async function seedIfEmpty(db) {
   const existingUsers = db.prepare('SELECT COUNT(*) as count FROM users').get();
   if (existingUsers.count > 0) {
-    console.log('Database already seeded. Skipping...');
     return;
   }
 
   console.log('Seeding database with users only (clean database)...');
 
-  // ── Users ──────────────────────────────────────────────────────────────
   for (const u of ALL_USERS) {
     const hashedPassword = await hashPassword(u.pw);
 
@@ -71,9 +63,18 @@ async function seed() {
     console.log(`  Created user: ${u.email} (${u.id})`);
   }
 
-  // ── Summary ───────────────────────────────────────────────────────────────
-  console.log('\nDatabase seeded successfully (users only - clean start)!');
-  console.log(`\n${ALL_USERS.length} users created.`);
+  console.log(`Database seeded: ${ALL_USERS.length} users created.`);
 }
 
-seed().catch(console.error);
+// Run standalone if called directly
+async function seed() {
+  console.log('Initializing database...');
+  initializeDatabase();
+  const db = getDatabase();
+  await seedIfEmpty(db);
+}
+
+const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
+if (isMain) {
+  seed().catch(console.error);
+}

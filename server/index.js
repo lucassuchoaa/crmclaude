@@ -7,7 +7,8 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { initializeDatabase } from './config/database.js';
+import { initializeDatabase, getDatabase } from './config/database.js';
+import { seedIfEmpty } from './models/seed.js';
 import authRoutes from './routes/auth.js';
 import usersRoutes from './routes/users.js';
 import indicationsRoutes from './routes/indications.js';
@@ -69,8 +70,9 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-// Initialize database
+// Initialize database and seed if empty
 initializeDatabase();
+await seedIfEmpty(getDatabase());
 
 // Routes
 app.use('/api/auth', authRoutes);
