@@ -144,11 +144,14 @@ export async function initializeDatabase() {
     // ── PostgreSQL ──
     const pg = await import('pg');
     const Pool = pg.default?.Pool || pg.Pool;
+
+    // Remove sslmode from connection string to prevent pg from overriding our ssl config
+    let cleanUrl = databaseUrl.replace(/[?&]sslmode=[^&]*/g, '').replace(/\?$/, '');
+    const needsSsl = databaseUrl.includes('sslmode=require') || databaseUrl.includes('sslmode=verify') || process.env.NODE_ENV === 'production';
+
     const pool = new Pool({
-      connectionString: databaseUrl,
-      ssl: databaseUrl.includes('sslmode=require') || databaseUrl.includes('digitaloceanspaces')
-        ? { rejectUnauthorized: false }
-        : (process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false),
+      connectionString: cleanUrl,
+      ssl: needsSsl ? { rejectUnauthorized: false } : false,
     });
 
     // Test connection
