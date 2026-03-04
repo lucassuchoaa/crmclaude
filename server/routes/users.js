@@ -64,9 +64,13 @@ router.get('/', authenticate, async (req, res) => {
       params.push(manager_id);
     }
 
-    if (is_active !== undefined) {
-      query += ` AND u.is_active = ?`;
-      params.push(is_active === 'true' ? 1 : 0);
+    if (is_active === 'false') {
+      query += ` AND u.is_active = 0`;
+    } else if (is_active === 'all') {
+      // show all users (active + inactive)
+    } else {
+      // default: only active users
+      query += ` AND u.is_active = 1`;
     }
 
     query += ` ORDER BY u.created_at DESC`;
