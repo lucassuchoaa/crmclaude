@@ -37,6 +37,9 @@ function convertSql(sql, dbType) {
 
   // CURRENT_TIMESTAMP stays the same in PG (it works)
 
+  // LIKE → ILIKE (PG LIKE is case-sensitive, SQLite is case-insensitive)
+  s = s.replace(/\bLIKE\b/g, 'ILIKE');
+
   return s;
 }
 

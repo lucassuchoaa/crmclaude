@@ -40,7 +40,7 @@ router.get('/summary', authenticate, async (req, res) => {
         FROM users u
         LEFT JOIN indications i ON i.owner_id = u.id
         WHERE u.manager_id = ? AND u.role = 'parceiro' AND u.is_active = 1
-        GROUP BY u.id ORDER BY total_indications DESC
+        GROUP BY u.id, u.name, u.empresa, u.avatar ORDER BY total_indications DESC
       `).all(g.id);
 
       const totals = parceiros.reduce((acc, p) => ({

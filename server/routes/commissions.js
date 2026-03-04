@@ -184,7 +184,7 @@ router.get('/summary', authenticate, requireMinRole('diretor'), async (req, res)
     if (from_date) { query += ` AND c.created_at >= ?`; params.push(from_date); }
     if (to_date) { query += ` AND c.created_at <= ?`; params.push(to_date); }
 
-    query += ` GROUP BY u.id ORDER BY total_amount DESC`;
+    query += ` GROUP BY u.id, u.name, u.avatar, u.role ORDER BY total_amount DESC`;
 
     const summary = await db.prepare(query).all(...params);
     res.json({ summary });

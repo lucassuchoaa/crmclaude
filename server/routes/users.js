@@ -346,7 +346,7 @@ router.get('/:id/team', authenticate, async (req, res) => {
     const team = await db.prepare(`
       SELECT id, email, name, role, avatar, is_active, empresa, tel, com_tipo, com_val, created_at
       FROM users
-      WHERE manager_id = ?
+      WHERE manager_id = ? AND is_active = 1
       ORDER BY role, name
     `).all(req.params.id);
 

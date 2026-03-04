@@ -160,7 +160,7 @@ router.get('/team-performance', authenticate, async (req, res) => {
     `;
 
     if (!isAdmin) query += ` AND (u.id = ? OR u.manager_id = ?)`;
-    query += ` GROUP BY u.id ORDER BY closed_value DESC`;
+    query += ` GROUP BY u.id, u.name, u.avatar, u.role ORDER BY closed_value DESC`;
 
     const team = isAdmin
       ? await db.prepare(query).all()

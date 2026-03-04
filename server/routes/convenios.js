@@ -154,7 +154,7 @@ router.get('/:id/parceiros', authenticate, async (req, res) => {
         (SELECT COUNT(*) FROM indications i WHERE i.owner_id = u.id AND i.status NOT IN ('perdido', 'fechado')) as active_indications
       FROM users u
       INNER JOIN parceiro_convenios pc ON pc.parceiro_id = u.id
-      WHERE pc.convenio_id = ?
+      WHERE pc.convenio_id = ? AND u.is_active = 1
       ORDER BY u.name
     `).all(convenioId);
 
