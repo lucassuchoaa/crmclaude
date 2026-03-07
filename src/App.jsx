@@ -384,30 +384,31 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
   const hasFilters = fSt !== "todos" || fDtDe || fDtAte || fPar !== "todos" || fLib !== "todos" || fGer !== "todos" || fDir !== "todos";
   const clearFilters = () => { setFSt("todos"); setFDtDe(""); setFDtAte(""); setFPar("todos"); setFLib("todos"); setFGer("todos"); setFDir("todos"); };
 
-  // Stats (always from baseInds for KPIs, filtered for tables)
-  const total = baseInds.length;
-  const pipeline = baseInds.filter(i => ["nova", "analise", "prospeccao", "docs"].includes(i.st)).length;
-  const aprovadas = baseInds.filter(i => ["aprovado", "implant", "ativo"].includes(i.st)).length;
-  const ativas = baseInds.filter(i => i.st === "ativo").length;
-  const recusadas = baseInds.filter(i => i.st === "recusado").length;
-  const travasVencidas = baseInds.filter(i => i.lib === "liberado" && i.libExp && i.libExp < today).length;
-  const totalFuncionarios = baseInds.reduce((sum, i) => sum + (parseInt(i.nf) || 0), 0);
+  // Stats — use filtered data when filters are active, baseInds otherwise
+  const statsSource = hasFilters ? filtered : baseInds;
+  const total = statsSource.length;
+  const pipeline = statsSource.filter(i => ["nova", "analise", "prospeccao", "docs"].includes(i.st)).length;
+  const aprovadas = statsSource.filter(i => ["aprovado", "implant", "ativo"].includes(i.st)).length;
+  const ativas = statsSource.filter(i => i.st === "ativo").length;
+  const recusadas = statsSource.filter(i => i.st === "recusado").length;
+  const travasVencidas = statsSource.filter(i => i.lib === "liberado" && i.libExp && i.libExp < today).length;
+  const totalFuncionarios = statsSource.reduce((sum, i) => sum + (parseInt(i.nf) || 0), 0);
   const txConversao = total > 0 ? ((ativas / total) * 100).toFixed(1) : "0.0";
   const parcCount = myParceiros.length;
 
   // Funnel data
-  const funnelData = KCOLS.map(col => ({ ...col, count: baseInds.filter(i => i.st === col.id).length }));
+  const funnelData = KCOLS.map(col => ({ ...col, count: statsSource.filter(i => i.st === col.id).length }));
   const maxFunnel = Math.max(...funnelData.map(f => f.count), 1);
 
   // Ranking parceiros
   const parcRanking = myParceiros.map(p => {
-    const pi = baseInds.filter(i => i.pId === p.id);
+    const pi = statsSource.filter(i => i.pId === p.id);
     return { ...p, total: pi.length, ativas: pi.filter(i => i.st === "ativo").length, pipeline: pi.filter(i => ["nova", "analise", "prospeccao", "docs"].includes(i.st)).length, recusadas: pi.filter(i => i.st === "recusado").length, funcionarios: pi.reduce((s, i) => s + (parseInt(i.nf) || 0), 0), tx: pi.length > 0 ? ((pi.filter(i => i.st === "ativo").length / pi.length) * 100).toFixed(0) : "0" };
   }).sort((a, b) => b.ativas - a.ativas);
 
   // Performance por gerente (só diretor)
   const gerRanking = isDiretor ? myGerentes.map(g => {
-    const gi = baseInds.filter(i => i.gId === g.id);
+    const gi = statsSource.filter(i => i.gId === g.id);
     const gp = users.filter(u => u.role === "parceiro" && u.gId === g.id);
     return { ...g, total: gi.length, ativas: gi.filter(i => i.st === "ativo").length, parceiros: gp.length, tx: gi.length > 0 ? ((gi.filter(i => i.st === "ativo").length / gi.length) * 100).toFixed(0) : "0" };
   }).sort((a, b) => b.ativas - a.ativas) : [];
@@ -416,7 +417,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
   const dirRanking = isExec ? myDiretores.map(d => {
     const dGerentes = users.filter(u => u.role === "gerente" && u.dId === d.id);
     const dGerenteIds = dGerentes.map(g => g.id);
-    const di = inds.filter(i => dGerenteIds.includes(i.gId));
+    const di = statsSource.filter(i => dGerenteIds.includes(i.gId));
     const dp = users.filter(u => u.role === "parceiro" && dGerenteIds.includes(u.gId));
     return { ...d, gerentes: dGerentes.length, parceiros: dp.length, total: di.length, ativas: di.filter(i => i.st === "ativo").length, tx: di.length > 0 ? ((di.filter(i => i.st === "ativo").length / di.length) * 100).toFixed(0) : "0" };
   }).sort((a, b) => b.ativas - a.ativas) : [];
@@ -455,19 +456,20 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
     });
     const pHasFilters = fSt !== "todos" || fDtDe || fDtAte || fLib !== "todos";
 
-    // Stats
-    const pTotal = all.length;
-    const pPipeline = all.filter(i => ["nova", "analise", "prospeccao", "docs"].includes(i.st)).length;
-    const pAprov = all.filter(i => ["aprovado", "implant", "ativo"].includes(i.st)).length;
-    const pAtivas = all.filter(i => i.st === "ativo").length;
-    const pRecusadas = all.filter(i => i.st === "recusado").length;
-    const pLiberadas = all.filter(i => i.lib === "liberado").length;
-    const pVencidas = all.filter(i => i.lib === "liberado" && i.libExp && i.libExp < today).length;
-    const pTotalFunc = all.reduce((sum, i) => sum + (parseInt(i.nf) || 0), 0);
+    // Stats — use filtered data when filters active
+    const pSource = pHasFilters ? my : all;
+    const pTotal = pSource.length;
+    const pPipeline = pSource.filter(i => ["nova", "analise", "prospeccao", "docs"].includes(i.st)).length;
+    const pAprov = pSource.filter(i => ["aprovado", "implant", "ativo"].includes(i.st)).length;
+    const pAtivas = pSource.filter(i => i.st === "ativo").length;
+    const pRecusadas = pSource.filter(i => i.st === "recusado").length;
+    const pLiberadas = pSource.filter(i => i.lib === "liberado").length;
+    const pVencidas = pSource.filter(i => i.lib === "liberado" && i.libExp && i.libExp < today).length;
+    const pTotalFunc = pSource.reduce((sum, i) => sum + (parseInt(i.nf) || 0), 0);
     const pTx = pTotal > 0 ? ((pAtivas / pTotal) * 100).toFixed(1) : "0.0";
 
     // Funnel
-    const pFunnel = KCOLS.map(col => ({ ...col, count: all.filter(i => i.st === col.id).length }));
+    const pFunnel = KCOLS.map(col => ({ ...col, count: pSource.filter(i => i.st === col.id).length }));
     const pMaxFunnel = Math.max(...pFunnel.map(f => f.count), 1);
 
     // Financial
@@ -4113,10 +4115,30 @@ function DiretoriaPage() {
         // Executivo view: grouped by director
         (data.summary || []).map(dir => (
           <div key={dir.diretor_id} style={{ marginBottom: 24 }}>
-            <div style={{ fontSize: 16, fontWeight: 700, color: T.txt, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ width: 28, height: 28, borderRadius: 8, background: T.inf + "22", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: T.inf }}>👔</span>
-              {dir.diretor_name}
-              <Badge type="muted">{dir.gerentes.length} executivos</Badge>
+            <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 16, marginBottom: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ width: 36, height: 36, borderRadius: 10, background: T.inf + "22", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: T.inf }}>👔</span>
+                  <div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: T.txt }}>{dir.diretor_name}</div>
+                    <div style={{ fontSize: 11, color: T.t2 }}>{dir.gerentes.length} executivos · {dir.parceiro_count || 0} parceiros</div>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
+                  {[
+                    { l: "Total", v: dir.total_indications || 0, co: T.txt },
+                    { l: "Ativas", v: dir.active_count || 0, co: T.ok },
+                    { l: "Pipeline", v: dir.pipeline_count || 0, co: T.inf },
+                    { l: "Funcionários", v: (dir.total_funcionarios || 0).toLocaleString('pt-BR'), co: T.ac },
+                    { l: "Conversão", v: `${dir.conversion_rate || 0}%`, co: convColor(dir.conversion_rate || 0) },
+                  ].map((s, i) => (
+                    <div key={i} style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: s.co }}>{s.v}</div>
+                      <div style={{ fontSize: 10, color: T.t2 }}>{s.l}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
             {dir.gerentes.map(renderGerenteCard)}
           </div>

@@ -72,8 +72,19 @@ router.get('/summary', authenticate, async (req, res) => {
       for (const item of summary) {
         const dirKey = item.gerente.diretor_id || 'sem_diretor';
         const dirName = item.gerente.diretor_name || 'Sem Diretor';
-        if (!byDiretor[dirKey]) byDiretor[dirKey] = { diretor_id: dirKey, diretor_name: dirName, gerentes: [] };
+        if (!byDiretor[dirKey]) byDiretor[dirKey] = { diretor_id: dirKey, diretor_name: dirName, gerentes: [], total_indications: 0, active_count: 0, pipeline_count: 0, closed_count: 0, total_funcionarios: 0, parceiro_count: 0 };
         byDiretor[dirKey].gerentes.push(item);
+        byDiretor[dirKey].total_indications += item.total_indications || 0;
+        byDiretor[dirKey].active_count += item.active_count || 0;
+        byDiretor[dirKey].pipeline_count += item.pipeline_count || 0;
+        byDiretor[dirKey].closed_count += item.closed_count || 0;
+        byDiretor[dirKey].total_funcionarios += item.total_funcionarios || 0;
+        byDiretor[dirKey].parceiro_count += item.parceiro_count || 0;
+      }
+      // Calculate conversion rate per director
+      for (const dir of Object.values(byDiretor)) {
+        dir.conversion_rate = dir.total_indications > 0
+          ? parseFloat(((dir.closed_count / dir.total_indications) * 100).toFixed(1)) : 0;
       }
       return res.json({ summary: Object.values(byDiretor), grouped: true });
     }
