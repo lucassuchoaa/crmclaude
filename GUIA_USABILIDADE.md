@@ -1,6 +1,7 @@
+
 # CRM Somapay — Guia de Usabilidade Completo
 
-> Portal de Parceiros Indicadores
+> Portal de Parceiros Indicadores — v2.0
 
 ---
 
@@ -30,25 +31,30 @@
 O **CRM Somapay** é um portal web para gestão de **parceiros indicadores**. Ele cobre o ciclo completo do programa de indicações:
 
 ```
-Captação → Indicação → Análise → Aprovação → Implantação → Conta Ativa → Comissão → NFe
+Captação → Indicação → Análise → Prospecção → Aprovação → Implantação → Conta Ativa → Comissão → NFe
 ```
 
 O sistema permite que parceiros indiquem empresas, gerentes acompanhem o pipeline, diretores supervisionem a operação e o financeiro gerencie comissões e notas fiscais.
 
 ### Principais capacidades
 
-- Pipeline visual (Kanban) com 7 estágios
-- Consulta automática de CNPJ na Receita Federal
-- Integração com HubSpot CRM
-- Chat com integração WhatsApp (Evolution API)
-- Gestão de comissões e NFes
-- Sistema de liberação com trava temporal
-- Notificações automáticas por cadência
-- Comunicação segmentada por perfil
-- Gestão de convênios
-- Material de apoio por categoria
+- Pipeline visual (Kanban) com **8 estágios** (incluindo Prospecção)
+- Consulta automática de CNPJ na Receita Federal (BrasilAPI)
+- Integração com HubSpot CRM (verificação de duplicatas, deals)
+- Chat com integração WhatsApp (Evolution API) — envio e recebimento bidirecional
+- Agente CNPJ no chat — consulta e criação de indicações diretamente na conversa
+- Gestão de comissões e NFes com KPIs financeiros
+- Sistema de liberação com trava temporal e prorrogação
+- Notificações automáticas por cadência (8 regras configuráveis)
+- Comunicação segmentada por perfil de usuário
+- Gestão de convênios com vínculo a parceiros
+- KPI de total de funcionários por indicação
+- Troca obrigatória de senha no primeiro login
+- Material de apoio por categoria com upload de arquivos
 - Tema claro e escuro
 - Layout responsivo (mobile, tablet e desktop)
+- Deploy com Docker + Nginx + SSL (Certbot)
+- Banco de dados dual: SQLite (local) e PostgreSQL (cloud/produção)
 
 ---
 
@@ -59,6 +65,16 @@ O sistema permite que parceiros indiquem empresas, gerentes acompanhem o pipelin
 1. Acesse o endereço do portal.
 2. Insira seu **e-mail** e **senha**.
 3. Clique em **Entrar**.
+
+### Troca Obrigatória de Senha
+
+Quando um administrador ou gerente cria sua conta e marca a opção de troca obrigatória, no primeiro login o sistema exige que o usuário defina uma **nova senha**:
+
+1. O sistema exibe a tela de troca de senha.
+2. Digite a **nova senha** (mínimo 6 caracteres).
+3. **Confirme** a nova senha.
+4. Clique em **Alterar Senha**.
+5. O sistema redireciona automaticamente para o portal.
 
 ### Escolha de Tema
 
@@ -71,7 +87,7 @@ O tema pode ser alterado a qualquer momento pelo botão no rodapé do menu later
 
 ### Sessão
 
-- A sessão é mantida automaticamente por até **7 dias**.
+- A sessão é mantida automaticamente por até **7 dias** (via refresh token).
 - Ao recarregar a página, o sistema restaura a sessão sem pedir login novamente.
 - Para encerrar, clique no botão **Sair** no rodapé do menu lateral.
 
@@ -79,7 +95,7 @@ O tema pode ser alterado a qualquer momento pelo botão no rodapé do menu later
 
 ## 3. Papéis e Permissões
 
-O sistema possui 6 papéis organizados em hierarquia:
+O sistema possui **6 papéis** organizados em hierarquia:
 
 ```
 Super Admin
@@ -102,7 +118,7 @@ Super Admin
 | WhatsApp/Chat | Todos | Todos | Todos | Seus parceiros | — | — |
 | Visão Diretoria | Todos | Todos | Sua equipe | — | — | — |
 | Financeiro | Todos | Todos | Sua equipe | Seus parceiros | Próprio | — |
-| Aprovar/Pagar NFe | — | — | Sim | — | — | — |
+| Aprovar/Pagar NFe | Sim | — | Sim | — | — | — |
 | Enviar NFe | — | — | — | — | Sim | — |
 | Material de Apoio | Sim | Sim | Sim | Sim | Sim | Sim |
 | Notificações | Sim | Sim | Sim | Sim | Sim | Sim |
@@ -134,6 +150,7 @@ A página inicial do sistema. O conteúdo varia conforme o perfil do usuário.
 | **Pipeline** | Indicações em andamento (excluindo fechadas e perdidas) |
 | **Aprovadas/Ativas** | Indicações que chegaram ao status "Ativo" |
 | **Parceiros** | Total de parceiros ativos |
+| **Funcionários** | Soma total de funcionários das empresas indicadas |
 | **Recusadas** | Indicações com status "Recusado" |
 | **Travas Vencidas** | Indicações com liberação expirada |
 | **Taxa de Conversão** | Percentual de indicações fechadas sobre o total |
@@ -141,10 +158,10 @@ A página inicial do sistema. O conteúdo varia conforme o perfil do usuário.
 
 #### Funil do Pipeline
 
-Representação visual dos 7 estágios:
+Representação visual dos **8 estágios**:
 
 ```
-Nova Indicação → Em Análise → Documentação → Aprovado → Implantação → Ativo → Recusado
+Nova Indicação → Em Análise → Em Prospecção → Documentação → Aprovado → Implantação → Ativo → Recusado
 ```
 
 Cada barra mostra a contagem de indicações naquele estágio.
@@ -156,10 +173,11 @@ Cada barra mostra a contagem de indicações naquele estágio.
 - **Status**: filtra por estágio do pipeline
 - **Liberação**: filtra por status de liberação (Liberado, Bloqueado, Pendente, Vencido)
 - **Período**: filtro por data (De / Até)
+- **Botão "Limpar Filtros"**: reseta todos os filtros de uma vez
 
 #### Tabelas e Rankings
 
-- **Indicações Recentes**: últimas indicações com empresa, parceiro, status, liberação, limite e data
+- **Indicações Recentes**: últimas indicações com empresa, parceiro, status, liberação, funcionários, limite e data
 - **Atividade Recente**: histórico cronológico de ações (quem fez o quê, quando)
 - **Ranking de Parceiros**: ordenado por indicações ativas, com taxa de conversão
 - **Performance dos Gerentes**: parceiros sob gestão, indicações, ativas e conversão
@@ -167,7 +185,7 @@ Cada barra mostra a contagem de indicações naquele estágio.
 ### Dashboard — Parceiro
 
 Versão simplificada com:
-- Cards: Total de indicações, Indicações ativas, Taxa de conversão
+- Cards: Total de indicações, Indicações ativas, Total de funcionários, Taxa de conversão
 - Tabela de indicações recentes com status
 - Comissões recebidas (se houver)
 
@@ -177,17 +195,18 @@ Versão simplificada com:
 
 > Acesso: Super Admin, Executivo, Diretor, Gerente
 
-O Kanban é o coração operacional do sistema. Exibe todas as indicações organizadas em **7 colunas**:
+O Kanban é o coração operacional do sistema. Exibe todas as indicações organizadas em **8 colunas**:
 
-| Coluna | Status no Banco | Descrição |
-|--------|----------------|-----------|
-| **Nova Indicação** | `novo` | Indicação recém-criada pelo parceiro |
-| **Em Análise** | `em_contato` | Equipe comercial entrou em contato |
-| **Documentação** | `proposta` | Coleta de documentos/proposta em andamento |
-| **Aprovado** | `negociacao` | Aprovado internamente |
-| **Implantação** | `negociacao` | Em processo de implantação |
-| **Ativo** | `fechado` | Conta ativa — conversão concluída |
-| **Recusado** | `perdido` | Indicação perdida ou recusada |
+| Coluna | Status | Descrição |
+|--------|--------|-----------|
+| **Nova Indicação** | `nova` | Indicação recém-criada pelo parceiro |
+| **Em Análise** | `analise` | Equipe comercial entrou em contato |
+| **Em Prospecção** | `prospeccao` | Prospecção ativa com o cliente |
+| **Documentação** | `documentacao` | Coleta de documentos em andamento |
+| **Aprovado** | `aprovado` | Aprovado internamente |
+| **Implantação** | `implantacao` | Em processo de implantação |
+| **Ativo** | `ativo` | Conta ativa — conversão concluída |
+| **Recusado** | `recusado` | Indicação perdida ou recusada |
 
 ### Modos de visualização
 
@@ -201,6 +220,7 @@ Cada card exibe:
 - Razão social da empresa
 - Nome do parceiro responsável
 - Valor estimado (R$)
+- Número de funcionários
 - Badge de liberação (se aplicável)
 - Data da última atualização
 - Alerta se trava expirando (< 7 dias)
@@ -210,14 +230,17 @@ Cada card exibe:
 1. **Arrastar o card** de uma coluna para outra.
 2. O sistema atualiza o status automaticamente.
 3. O parceiro é notificado da mudança (se cadência ativa).
-4. O histórico da indicação registra a movimentação.
+4. O histórico da indicação registra a movimentação com data e autor.
 
 ### Detalhes da indicação (clique no card)
 
 Ao clicar em um card, abre-se o painel de detalhes com:
 
 - **Dados do CNPJ**: razão social, situação cadastral, capital social, CNAE, sócios, endereço
+- **Análise HubSpot**: se houver deals existentes no HubSpot, mostra alerta com detalhes
+- **Número de funcionários**: campo editável
 - **Observações**: campo de texto livre para anotar sobre a indicação
+- **Notas internas**: adicionar anotações visíveis apenas para gestores
 - **Histórico**: lista cronológica de todas as movimentações com data, autor e ação
 - **Status de liberação**: informação sobre trava e prazo
 
@@ -225,7 +248,7 @@ Ao clicar em um card, abre-se o painel de detalhes com:
 
 Quando uma indicação chega ao status **Ativo**, ela recebe uma **trava temporal**:
 
-- **Prazo padrão**: configurável (padrão 90 dias)
+- **Prazo padrão**: configurável em Configurações > Geral (padrão 90 dias)
 - **Gerente**: pode prorrogar em até +60 dias
 - **Diretor+**: pode definir qualquer prazo
 - **Ao expirar**: a indicação fica com badge vermelho "Expirado" e precisa ser revalidada
@@ -243,6 +266,7 @@ Status possíveis:
 - Filtro por parceiro
 - Filtro por status de liberação
 - Ordenação: mais recente, mais antigo, por valor
+- Botão "Limpar Filtros"
 
 ---
 
@@ -263,19 +287,22 @@ Página exclusiva do parceiro para gerenciar suas indicações.
    - CNAE principal
    - Endereço
 4. O sistema verifica **duplicatas**:
-   - No CRM (se o CNPJ já foi indicado)
-   - No HubSpot (se integração ativa)
-5. Preencha os campos adicionais: nome fantasia, valor estimado
+   - No CRM (se o CNPJ já foi indicado — ignora indicações recusadas/perdidas)
+   - No HubSpot (se integração ativa — mostra detalhes dos deals existentes)
+5. Preencha os campos adicionais: nome fantasia, valor estimado, número de funcionários
 6. Clique em **Confirmar** para criar a indicação
 
-A indicação é criada com status **"Novo"** e o gerente responsável é notificado.
+A indicação é criada com status **"Nova"** e o gerente responsável é notificado.
+
+> **Nota:** Mesmo que existam deals no HubSpot, o parceiro pode prosseguir com a indicação. O sistema registra a análise HubSpot nos dados da indicação para referência.
 
 ### Visualização
 
 - Toggle entre **modo lista** e **modo kanban** (simplificado, sem drag-and-drop)
 - Filtro por status
 - Busca por razão social ou CNPJ
-- Cada indicação mostra: CNPJ, razão social, status, valor, data, badge de liberação
+- Cada indicação mostra: CNPJ, razão social, status, valor, funcionários, data, badge de liberação
+- Clicar em uma indicação abre os detalhes com dados do CNPJ e histórico
 
 ---
 
@@ -290,14 +317,14 @@ Dashboard exclusivo para usuários com papel "Convênio", mostrando dados dos pa
 - Total de parceiros vinculados
 - Total de indicações
 - Indicações ativas
-- Indicações fechadas
+- Total de funcionários
 - Taxa de conversão
 
 ### Seções
 
 - **Distribuição por status**: gráfico visual por estágio
 - **Lista de parceiros**: nome, empresa, CNPJ, telefone, status, indicações
-- **Lista de indicações**: todas as indicações dos parceiros do convênio
+- **Lista de indicações**: todas as indicações dos parceiros do convênio com status e valores
 
 ---
 
@@ -314,6 +341,7 @@ Tabela com:
 - Gerente responsável
 - Modelo de comissão (badge: "X% cashin" ou "R$X/conta")
 - Total de indicações e indicações ativas
+- Convênios vinculados
 - Status (Ativo/Inativo)
 
 **Filtros**: busca por nome/e-mail/empresa, filtro por gerente, filtro por status.
@@ -327,9 +355,10 @@ Clique em **"+ Novo Parceiro"** e preencha:
 | Nome | Sim | Nome completo do parceiro |
 | E-mail | Sim | E-mail para login (deve ser único) |
 | Senha | Sim | Senha de acesso inicial |
-| Gerente | Sim | Gerente responsável (`manager_id`) |
+| Troca obrigatória | Não | Se marcado, parceiro precisa trocar senha no primeiro login |
+| Gerente | Sim | Gerente responsável |
 | Empresa | Não | Nome da empresa do parceiro |
-| CNPJ | Não | CNPJ do parceiro (auto-consulta Receita Federal) |
+| CNPJ | Não | CNPJ do parceiro (auto-consulta Receita Federal ao digitar) |
 | Telefone | Não | Telefone de contato |
 | Comissão | Sim | Modelo: % sobre cashin **ou** R$ por conta ativa |
 | Convênios | Não | Convênios vinculados (multiselect) |
@@ -343,6 +372,7 @@ Clique em **"+ Novo Parceiro"** e preencha:
 
 - Botão **"Resetar Senha"** gera nova senha aleatória.
 - A senha é exibida em modal para o gestor copiar e enviar ao parceiro.
+- Opção de marcar "troca obrigatória" para forçar nova senha no próximo login.
 
 ### Desativar parceiro
 
@@ -375,7 +405,12 @@ Canal de comunicação direta com parceiros, integrado ao WhatsApp.
 4. O sistema detecta a conexão automaticamente (polling a cada 3 segundos).
 5. Após conectar: mensagens do WhatsApp são recebidas no CRM e vice-versa.
 
-Cada gerente possui sua **instância WhatsApp individual**.
+Cada gerente possui sua **instância WhatsApp individual** via Evolution API.
+
+### Desconectar WhatsApp
+
+- Botão **"Desconectar"** encerra a sessão WhatsApp.
+- Mensagens passam a ser salvas apenas no CRM (uso interno).
 
 ### Enviar mensagens
 
@@ -387,10 +422,11 @@ Cada gerente possui sua **instância WhatsApp individual**.
 Botão **"CNPJ"** no cabeçalho do chat:
 
 1. Insira um CNPJ.
-2. O sistema consulta a Receita Federal e verifica duplicatas.
+2. O sistema consulta a Receita Federal e verifica duplicatas (CRM + HubSpot).
 3. O resultado aparece como mensagem de bot no chat:
    - Dados da empresa (razão social, situação, capital, sócios)
-   - Se duplicado: alerta com status e responsável da indicação existente
+   - Se duplicado no CRM: alerta com status e responsável da indicação existente
+   - Se duplicado no HubSpot: alerta com detalhes dos deals
    - Se novo: botão **"+ Criar Indicação"** para criar diretamente do chat
 
 ### Tipos de mensagens no chat
@@ -398,9 +434,9 @@ Botão **"CNPJ"** no cabeçalho do chat:
 | Tipo | Descrição |
 |------|-----------|
 | **Normal** | Texto enviado pelo gerente ou parceiro |
-| **Via WhatsApp** | Mensagem recebida/enviada pelo WhatsApp |
+| **Via WhatsApp** | Mensagem recebida/enviada pelo WhatsApp (badge "WA") |
 | **Bot - CNPJ** | Resultado da consulta de CNPJ |
-| **Bot - Duplicata** | Alerta de CNPJ já existente |
+| **Bot - Duplicata** | Alerta de CNPJ já existente (CRM e/ou HubSpot) |
 | **Bot - Indicação** | Confirmação de indicação criada |
 
 ---
@@ -413,18 +449,18 @@ Painel hierárquico para acompanhar a performance da equipe.
 
 ### Para Executivos
 
-Visão agrupada **por diretor**, cada um mostrando seus gerentes.
+Visão agrupada **por diretor**, cada um com seção expansível mostrando seus gerentes. Inclui totais agregados por diretor.
 
 ### Para Diretores
 
-Lista direta dos **seus gerentes**.
+Lista direta dos **seus gerentes** com totais agregados.
 
 ### Card de Gerente
 
 **Cabeçalho (sempre visível)**:
 - Avatar e nome do gerente
 - Quantidade de parceiros sob gestão
-- Métricas: Total de indicações, Ativas, Pipeline, Taxa de Conversão
+- Métricas: Total de indicações, Ativas, Pipeline, Total de Funcionários, Taxa de Conversão
 - Barra de progresso colorida:
   - Verde: conversão ≥ 30%
   - Amarelo: conversão ≥ 15%
@@ -432,7 +468,12 @@ Lista direta dos **seus gerentes**.
 
 **Expandido (clique no card)**:
 - Tabela detalhada de cada parceiro do gerente:
-  - Nome, empresa, total indicações, ativas, pipeline, taxa de conversão
+  - Nome, empresa, total indicações, ativas, pipeline, funcionários, taxa de conversão
+
+### Totais por Diretor
+
+Quando visualizado pelo Executivo, cada seção de diretor mostra totais:
+- Total de indicações, ativas, pipeline, funcionários e taxa de conversão agregada
 
 ---
 
@@ -466,7 +507,7 @@ Tabela com: parceiro, título, período, valor, status, data.
 
 Tabela com: parceiro, número da NFe, valor, data de envio, status, data de pagamento.
 
-**Pagar NFe** (Diretor+):
+**Pagar NFe** (Diretor+ ou Super Admin):
 1. Clique no botão **"Pagar"** na linha da NFe.
 2. O status muda para "Pago" com a data registrada.
 3. O parceiro é notificado do pagamento.
@@ -557,11 +598,11 @@ Na aba **Configurações > Materiais**:
 
 | Tipo | Ícone | Quando é gerada |
 |------|-------|----------------|
-| **Status** | 📋 | Indicação criada ou status atualizado |
+| **Status** | 📋 | Indicação criada ou status atualizado no Kanban |
 | **Financeiro** | 💰 | Comissão enviada, NFe enviada ou paga |
 | **Liberação** | 🔓 | Indicação liberada, trava expirando ou expirada |
 | **Comunicado** | 📢 | Comunicado enviado pela gestão |
-| **Sistema** | ⚙️ | Eventos do sistema |
+| **Sistema** | ⚙️ | Eventos do sistema (nova indicação para executivo) |
 
 #### Ações
 
@@ -574,14 +615,15 @@ O sistema dispara notificações automaticamente nos seguintes eventos:
 
 | Evento | Destinatário | Tipo |
 |--------|-------------|------|
+| Status alterado (Kanban) | Parceiro | Status |
 | Nova indicação criada | Gerente | Status |
-| Status da indicação atualizado | Parceiro | Status |
 | Relatório de comissão enviado | Parceiro | Financeiro |
 | NFe enviada pelo parceiro | Gerente | Financeiro |
 | NFe marcada como paga | Parceiro | Financeiro |
 | Liberação criada | Parceiro | Liberação |
 | Liberação expirando em breve | Gerente | Liberação |
 | Liberação expirada | Gerente | Liberação |
+| Nova indicação criada | Executivo | Sistema |
 
 ---
 
@@ -589,7 +631,7 @@ O sistema dispara notificações automaticamente nos seguintes eventos:
 
 > Acesso: Super Admin
 
-A página de configurações possui 6 abas:
+A página de configurações possui **6 abas**:
 
 ### Aba "Geral"
 
@@ -612,6 +654,7 @@ Configuração da integração com HubSpot CRM:
 Com a integração ativa:
 - Consulta automática de duplicatas ao criar indicações
 - Deals do HubSpot exibidos no Dashboard
+- Verificação cruzada no Agente CNPJ do chat
 
 ### Aba "Notificações"
 
@@ -619,7 +662,7 @@ Com a integração ativa:
 - Toggle para ativar/desativar envio por e-mail
 
 **Cadência automática**:
-- Tabela com as 8 regras de notificação automática
+- Tabela com as **9 regras** de notificação automática
 - Toggle para ativar/desativar cada regra individualmente
 - Botão de edição para customizar evento, destinatário e tipo
 
@@ -637,11 +680,11 @@ Com a integração ativa:
 
 Gerenciamento de usuários internos (gerentes, diretores, executivos):
 
-- **Criar**: nome, e-mail, senha, perfil, vínculo hierárquico
+- **Criar**: nome, e-mail, senha, perfil, vínculo hierárquico, troca obrigatória de senha
   - Gerente deve ter um Diretor responsável
   - Diretor deve ter um Executivo responsável
 - **Editar**: nome, perfil, status, vínculo
-- **Resetar senha**: gera nova senha aleatória
+- **Resetar senha**: gera nova senha aleatória (opção de troca obrigatória)
 - **Desativar**: soft delete (mantém histórico)
 
 ### Aba "Convênios"
@@ -651,6 +694,7 @@ CRUD completo de convênios:
 - **Criar convênio**: nome + descrição
 - **Editar convênio**: nome, descrição, status (ativo/inativo)
 - **Vincular parceiros**: associar parceiros ao convênio
+- **Criar usuário convênio**: cria login para acompanhamento do convênio
 - **Desvincular parceiros**: remover associação
 - **Desativar convênio**: soft delete
 
@@ -671,7 +715,7 @@ Gerenciamento de materiais de apoio:
 - **Onde aparece**: criação de indicações, cadastro de parceiros, Agente CNPJ no chat
 - **O que faz**: ao inserir um CNPJ, consulta automaticamente dados oficiais:
   - Razão social e nome fantasia
-  - Situação cadastral
+  - Situação cadastral (Ativa, Baixada, Suspensa, etc.)
   - Capital social
   - CNAE principal e secundários
   - Quadro de sócios
@@ -683,16 +727,19 @@ Gerenciamento de materiais de apoio:
 - **Funcionalidades**:
   - Verificação de duplicatas de CNPJ ao criar indicações
   - Exibição de deals ativos no Dashboard
+  - Análise de deals existentes registrada na indicação
   - Verificação cruzada no Agente CNPJ do chat
+- **Nota**: mesmo com deals existentes no HubSpot, o parceiro pode criar a indicação. A análise fica registrada para referência.
 
 ### Evolution API (WhatsApp)
 
-- **Configuração**: cada gerente conecta seu WhatsApp individualmente
+- **Configuração**: cada gerente conecta seu WhatsApp individualmente via QR code
 - **Funcionalidades**:
   - Envio e recebimento de mensagens pelo CRM
   - Sincronização bidirecional de conversas
   - QR code para autenticação
-  - Status em tempo real da conexão
+  - Status em tempo real da conexão (verde/vermelho)
+  - Desconexão manual da instância
 
 ---
 
@@ -706,42 +753,45 @@ Acesso total ao sistema. Responsável por:
 - Enviar comunicados segmentados
 - Adicionar materiais de apoio
 - Monitorar todo o pipeline e performance
+- Aprovar/pagar NFes
 
 ### Executivo
 
 Visão completa sem configurações:
-- Dashboard global com todos os indicadores
+- Dashboard global com todos os indicadores e funcionários
 - Acompanhar todos os diretores, gerentes e parceiros
 - Enviar comunicados
-- Aprovar comissões e NFes
-- Monitorar a Visão Diretoria
+- Monitorar a Visão Diretoria (agrupado por diretor com totais)
 
 ### Diretor
 
 Supervisão da sua equipe:
 - Dashboard filtrado pela sua hierarquia
 - Kanban de indicações dos seus gerentes
-- Visão Diretoria com drill-down por gerente
+- Visão Diretoria com drill-down por gerente e totais
 - Aprovar/pagar NFes
 - Gestão de parceiros da sua equipe
 
 ### Gerente
 
 Operação direta com parceiros:
-- Dashboard dos seus parceiros
-- Kanban com drag-and-drop das indicações
+- Dashboard dos seus parceiros com KPIs e funcionários
+- Kanban com drag-and-drop das indicações (8 estágios)
 - Chat com parceiros (WhatsApp integrado)
-- Conectar instância WhatsApp
+- Conectar/desconectar instância WhatsApp
 - Agente CNPJ no chat
 - Enviar relatórios de comissão
-- Cadastrar e gerenciar parceiros
+- Cadastrar e gerenciar parceiros (com troca obrigatória de senha)
 - Liberar e prorrogar travas de indicações
+- Adicionar observações e notas nas indicações
 
 ### Parceiro
 
 Atuação como indicador:
-- Criar indicações com consulta automática de CNPJ
+- Criar indicações com consulta automática de CNPJ e verificação HubSpot
+- Informar número de funcionários na indicação
 - Acompanhar status das indicações (kanban simplificado ou lista)
+- Ver detalhes e histórico das indicações
 - Receber relatórios de comissão
 - Enviar notas fiscais (NFes)
 - Acessar materiais de apoio
@@ -751,7 +801,7 @@ Atuação como indicador:
 
 Acompanhamento do programa:
 - Dashboard exclusivo com parceiros vinculados
-- KPIs de indicações do convênio
+- KPIs de indicações e funcionários do convênio
 - Lista de parceiros com métricas individuais
 - Distribuição de indicações por status
 
@@ -763,12 +813,14 @@ Acompanhamento do programa:
 |------|-----------|
 | **Sidebar colapsável** | Clique em ◀ para minimizar o menu lateral e ganhar espaço |
 | **Tema** | Alterne entre claro e escuro a qualquer momento pelo menu |
-| **Filtros** | Use combinações de filtros para encontrar indicações específicas |
+| **Filtros** | Use combinações de filtros + "Limpar Filtros" para buscas rápidas |
 | **CNPJ no chat** | Consulte CNPJs diretamente no chat e crie indicações em 1 clique |
 | **Arrastar cards** | No Kanban, arraste cards entre colunas para mover indicações |
-| **Badge de notificação** | O sino pisca quando há notificações novas |
+| **Badge de notificação** | O sino mostra contagem de notificações não lidas |
 | **Responsivo** | O sistema funciona em celular, tablet e desktop |
+| **Primeiro login** | Se a senha foi resetada, o sistema pode pedir troca obrigatória |
+| **Funcionários** | Informe a quantidade de funcionários ao criar indicações para KPIs |
 
 ---
 
-*CRM Somapay — Portal de Parceiros v1.0*
+*CRM Somapay — Portal de Parceiros v2.0*
