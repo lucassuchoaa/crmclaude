@@ -470,6 +470,17 @@ async function createTables(db) {
     await db.exec(indexes);
   }
 
+  // ── PostgreSQL migrations ──
+  if (isPg) {
+    const pgSafeAddColumn = async (table, column, definition) => {
+      try {
+        await db.exec(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${definition}`);
+      } catch { /* column already exists */ }
+    };
+
+    await pgSafeAddColumn('indications', 'hubspot_analysis', 'TEXT');
+  }
+
   // ── SQLite-only migrations ──
   if (!isPg) {
     // Add columns that may not exist in older SQLite databases
