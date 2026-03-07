@@ -275,7 +275,7 @@ router.put('/:id', authenticate, async (req, res) => {
   }
 });
 
-// Delete user (soft delete)
+// Delete user (soft delete) with optional indication transfer
 router.delete('/:id', authenticate, requireMinRole('diretor'), async (req, res) => {
   try {
     const db = getDatabase();
@@ -289,6 +289,39 @@ router.delete('/:id', authenticate, requireMinRole('diretor'), async (req, res) 
       return res.status(403).json({ error: 'Cannot delete user with this role' });
     }
 
+    const { transferTo } = req.body || {};
+
+    // Transfer indications to another user if requested
+    if (transferTo) {
+      const targetUser = await db.prepare('SELECT id, role FROM users WHERE id = ? AND is_active = 1').get(transferTo);
+      if (!targetUser) {
+        return res.status(400).json({ error: 'Transfer target user not found or inactive' });
+      }
+
+      // Get indications that will be transferred
+      const indications = await db.prepare('SELECT id FROM indications WHERE owner_id = ?').all(req.params.id);
+
+      if (indications.length > 0) {
+        // Transfer ownership
+        await db.prepare('UPDATE indications SET owner_id = ?, updated_at = ? WHERE owner_id = ?')
+          .run(transferTo, new Date().toISOString(), req.params.id);
+
+        // Log transfer in indication_history
+        for (const ind of indications) {
+          await db.prepare(
+            `INSERT INTO indication_history (indication_id, user_id, action, old_value, new_value, txt)
+             VALUES (?, ?, 'transfer', ?, ?, ?)`
+          ).run(
+            ind.id,
+            req.user.id,
+            req.params.id,
+            transferTo,
+            `Indicação transferida de ${user.name} (desativado) para ${targetUser.id}`
+          );
+        }
+      }
+    }
+
     // Soft delete
     await db.prepare('UPDATE users SET is_active = 0, updated_at = ? WHERE id = ?')
       .run(new Date().toISOString(), req.params.id);
@@ -296,7 +329,7 @@ router.delete('/:id', authenticate, requireMinRole('diretor'), async (req, res) 
     // Invalidate refresh tokens
     await db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(req.params.id);
 
-    res.json({ message: 'User deactivated successfully' });
+    res.json({ message: 'User deactivated successfully', transferred: transferTo ? true : false });
   } catch (error) {
     console.error('Delete user error:', error);
     res.status(500).json({ error: 'Failed to delete user' });

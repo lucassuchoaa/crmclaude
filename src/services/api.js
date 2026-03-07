@@ -117,8 +117,8 @@ export const usersApi = {
   update: (id, data) =>
     api.put(`/users/${id}`, data),
 
-  delete: (id) =>
-    api.delete(`/users/${id}`),
+  delete: (id, data) =>
+    api.delete(`/users/${id}`, { data }),
 
   getTeam: (id) =>
     api.get(`/users/${id}/team`),
@@ -152,6 +152,9 @@ export const indicationsApi = {
 
   getActivity: (limit = 20) =>
     api.get('/indications/activity/recent', { params: { limit } }),
+
+  getAudit: (params) =>
+    api.get('/indications/audit', { params }),
 };
 
 // Commissions API

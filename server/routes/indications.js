@@ -142,6 +142,66 @@ router.get('/activity/recent', authenticate, async (req, res) => {
   }
 });
 
+// Audit log – executivo+ only
+router.get('/audit', authenticate, async (req, res) => {
+  try {
+    if (!hasPermission(req.user.role, 'executivo')) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const db = getDatabase();
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const offset = parseInt(req.query.offset) || 0;
+    const { user_id, action, date_from, date_to, search } = req.query;
+
+    let where = ' WHERE 1=1';
+    const params = [];
+
+    if (user_id) {
+      where += ' AND h.user_id = ?';
+      params.push(user_id);
+    }
+    if (action) {
+      where += ' AND h.action = ?';
+      params.push(action);
+    }
+    if (date_from) {
+      where += ' AND h.created_at >= ?';
+      params.push(date_from);
+    }
+    if (date_to) {
+      where += ' AND h.created_at <= ?';
+      params.push(date_to + 'T23:59:59');
+    }
+    if (search) {
+      where += ' AND (i.razao_social LIKE ? OR i.nome_fantasia LIKE ? OR i.cnpj LIKE ?)';
+      const s = `%${search}%`;
+      params.push(s, s, s);
+    }
+
+    const countRow = await db.prepare(
+      `SELECT COUNT(*) as total FROM indication_history h
+       LEFT JOIN indications i ON h.indication_id = i.id` + where
+    ).get(...params);
+    const total = countRow?.total || 0;
+
+    const entries = await db.prepare(
+      `SELECT h.id, h.indication_id, h.action, h.old_value, h.new_value, h.txt, h.created_at,
+              u.name as user_name, u.id as user_id,
+              i.nome_fantasia, i.razao_social, i.cnpj
+       FROM indication_history h
+       LEFT JOIN users u ON h.user_id = u.id
+       LEFT JOIN indications i ON h.indication_id = i.id` +
+      where + ' ORDER BY h.created_at DESC LIMIT ? OFFSET ?'
+    ).all(...params, limit, offset);
+
+    res.json({ entries, total, limit, offset });
+  } catch (error) {
+    console.error('Audit log error:', error);
+    res.status(500).json({ error: 'Failed to get audit log' });
+  }
+});
+
 // Get Kanban board data
 router.get('/board/kanban', authenticate, async (req, res) => {
   try {

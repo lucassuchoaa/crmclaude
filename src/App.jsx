@@ -2402,7 +2402,7 @@ function ConveniosTab() {
 }
 
 // ===== CONFIG =====
-function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, notifs, setNotifs, cadenceRules, setCadenceRules }) {
+function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias, notifs, setNotifs, cadenceRules, setCadenceRules }) {
   const { user } = useAuth();
   const { breakpoint } = useBreakpoint();
   const isSA = user.role === "super_admin";
@@ -2444,6 +2444,81 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
   const [euF, setEuF] = useState({ name: "", role: "", managerId: "", isActive: true });
   const [euSaving, setEuSaving] = useState(false);
   const [euResetPw, setEuResetPw] = useState(null);
+  // Parceiros tab state
+  const [pSearch, setPSearch] = useState("");
+  const [pExecFilter, setPExecFilter] = useState("");
+  const [editParcCfg, setEditParcCfg] = useState(null);
+  const [epF, setEpF] = useState({ name: "", email: "", empresa: "", cnpj: "", tel: "", comTipo: "pct", comVal: "", managerId: "" });
+  const [epSaving, setEpSaving] = useState(false);
+  const [epResetPw, setEpResetPw] = useState(null);
+  const [delParcCfg, setDelParcCfg] = useState(null);
+  const [delParcTransfer, setDelParcTransfer] = useState("");
+
+  // Audit tab state
+  const AUDIT_LIMIT = 50;
+  const ACTION_LABELS = { created: "Criação", status_change: "Mudança de Status", obs: "Observação", liberacao: "Liberação", transfer: "Transferência", deleted: "Exclusão" };
+  const ACTION_BADGE = { created: "success", status_change: "warning", obs: "info", liberacao: "info", transfer: "info", deleted: "danger" };
+  const [auditData, setAuditData] = useState([]);
+  const [auditTotal, setAuditTotal] = useState(0);
+  const [auditPage, setAuditPage] = useState(0);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditFilters, setAuditFilters] = useState({ user_id: "", action: "", date_from: "", date_to: "", search: "" });
+
+  const loadAudit = async (page = 0, filters = auditFilters) => {
+    setAuditLoading(true);
+    try {
+      const params = { limit: AUDIT_LIMIT, offset: page * AUDIT_LIMIT };
+      if (filters.user_id) params.user_id = filters.user_id;
+      if (filters.action) params.action = filters.action;
+      if (filters.date_from) params.date_from = filters.date_from;
+      if (filters.date_to) params.date_to = filters.date_to;
+      if (filters.search) params.search = filters.search;
+      const res = await indicationsApi.getAudit(params);
+      setAuditData(res.data.entries);
+      setAuditTotal(res.data.total);
+      setAuditPage(page);
+    } catch (e) { console.error("Audit load error:", e); }
+    setAuditLoading(false);
+  };
+
+  const openEditParcCfg = (p) => {
+    setEpF({ name: p.name, email: p.email || "", empresa: p.empresa || "", cnpj: p.cnpj || "", tel: p.tel || "", comTipo: p.comTipo || "pct", comVal: p.comVal != null ? String(p.comVal) : "", managerId: p.gId || "" });
+    setEditParcCfg(p);
+    setEpResetPw(null);
+  };
+
+  const saveEditParcCfg = async () => {
+    if (!editParcCfg || epSaving) return;
+    setEpSaving(true);
+    try {
+      await usersApi.update(editParcCfg.id, {
+        name: epF.name, empresa: epF.empresa, tel: epF.tel, cnpj: epF.cnpj.replace(/\D/g, '') || null,
+        com_tipo: epF.comTipo, com_val: parseFloat(epF.comVal) || 0, manager_id: epF.managerId || null
+      });
+      setUsers(prev => prev.map(u => u.id === editParcCfg.id ? { ...u, name: epF.name, empresa: epF.empresa, tel: epF.tel, cnpj: epF.cnpj, comTipo: epF.comTipo, comVal: parseFloat(epF.comVal) || 0, gId: epF.managerId } : u));
+      setEditParcCfg(null);
+    } catch (e) { alert(e.response?.data?.error || "Erro ao salvar"); }
+    setEpSaving(false);
+  };
+
+  const resetParcCfgPw = async () => {
+    if (!editParcCfg) return;
+    try {
+      const res = await usersApi.resetPassword(editParcCfg.id);
+      setEpResetPw(res.data.password);
+    } catch (e) { alert(e.response?.data?.error || "Erro ao resetar senha"); }
+  };
+
+  const delParceiro = async () => {
+    if (!delParcCfg) return;
+    try {
+      const body = delParcTransfer ? { transferTo: delParcTransfer } : undefined;
+      await usersApi.delete(delParcCfg.id, body);
+      setUsers(prev => prev.filter(u => u.id !== delParcCfg.id));
+      setDelParcCfg(null);
+      setDelParcTransfer("");
+    } catch (e) { alert(e.response?.data?.error || "Erro ao excluir parceiro"); }
+  };
 
   const openEditUser = (u) => {
     setEuF({ name: u.name, role: u.role, managerId: u.dId || u.eId || "", isActive: true });
@@ -2552,7 +2627,7 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
   return (
     <div>
       <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${T.bor}`, marginBottom: 20 }}>
-        {["geral", "hubspot", "notificações", "usuários", "convênios", "materiais"].map(t => <button key={t} onClick={() => setTab(t)} style={{ padding: "10px 16px", fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: "none", color: tab === t ? T.ac : T.tm, fontFamily: "'DM Sans',sans-serif", borderBottom: `2px solid ${tab === t ? T.ac : "transparent"}`, marginBottom: -1, textTransform: "capitalize" }}>{t}</button>)}
+        {["geral", "hubspot", "notificações", "usuários", "parceiros", "convênios", "materiais", "auditoria"].map(t => <button key={t} onClick={() => { setTab(t); if (t === "auditoria" && auditData.length === 0 && !auditLoading) loadAudit(0, auditFilters); }} style={{ padding: "10px 16px", fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: "none", color: tab === t ? T.ac : T.tm, fontFamily: "'DM Sans',sans-serif", borderBottom: `2px solid ${tab === t ? T.ac : "transparent"}`, marginBottom: -1, textTransform: "capitalize" }}>{t}</button>)}
       </div>
       {tab === "geral" && <div>
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20, marginBottom: 16 }}>
@@ -3065,6 +3140,152 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
         </div>
       )}
 
+      {/* PARCEIROS TAB */}
+      {tab === "parceiros" && (() => {
+        const formatCnpjDisplay = (v) => { if (!v) return "—"; const n = v.replace(/\D/g, ''); if (n.length !== 14) return v; return n.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5'); };
+        const executivos = users.filter(u => u.role === "gerente");
+        const allParcs = users.filter(u => u.role === "parceiro").filter(p => {
+          if (pExecFilter && p.gId !== pExecFilter) return false;
+          if (pSearch) { const s = pSearch.toLowerCase(); return p.name.toLowerCase().includes(s) || (p.empresa || "").toLowerCase().includes(s) || (p.cnpj || "").includes(s); }
+          return true;
+        });
+        return <div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <div style={{ fontSize: 13, color: T.t2 }}>{allParcs.length} parceiro(s)</div>
+          </div>
+          <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+            <input value={pSearch} onChange={e => setPSearch(e.target.value)} placeholder="Buscar por nome, empresa ou CNPJ..." style={{ flex: 1, minWidth: 200, padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }} />
+            <select value={pExecFilter} onChange={e => setPExecFilter(e.target.value)} style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13, minWidth: 160 }}>
+              <option value="">Todos os executivos</option>
+              {executivos.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+            </select>
+            {(pSearch || pExecFilter) && <Btn v="secondary" sm onClick={() => { setPSearch(""); setPExecFilter(""); }}>Limpar</Btn>}
+          </div>
+          <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
+            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 800 }}>
+              <thead><tr>{["Parceiro", "Empresa", "CNPJ", "Telefone", "Comissão", "Executivo", "Indicações", "Ações"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
+              <tbody>{allParcs.length === 0 ? (
+                <tr><td colSpan={8} style={{ ...tdS, textAlign: "center", color: T.tm, padding: 30 }}>Nenhum parceiro encontrado</td></tr>
+              ) : allParcs.map(p => {
+                const indCount = inds.filter(i => i.pId === p.id).length;
+                const exec = users.find(u => u.id === p.gId);
+                return <tr key={p.id}>
+                  <td style={tdS}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ width: 30, height: 30, borderRadius: "50%", background: T.ac + "22", color: T.ac, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700 }}>{p.av || p.name[0]}</div>
+                      <span style={{ fontWeight: 600 }}>{p.name}</span>
+                    </div>
+                  </td>
+                  <td style={{ ...tdS, fontSize: 12, color: T.t2 }}>{p.empresa || "—"}</td>
+                  <td style={{ ...tdS, fontSize: 12, fontFamily: "'Space Mono',monospace" }}>{formatCnpjDisplay(p.cnpj)}</td>
+                  <td style={{ ...tdS, fontSize: 12 }}>{p.tel || "—"}</td>
+                  <td style={tdS}>
+                    <span style={{ fontFamily: "'Space Mono',monospace", fontSize: 12, fontWeight: 700, color: p.comTipo === "pct" ? T.ac : T.inf }}>
+                      {p.comTipo === "valor" ? `R$ ${p.comVal ?? 0}` : `${p.comVal ?? 0}%`}
+                    </span>
+                  </td>
+                  <td style={{ ...tdS, fontSize: 12, color: T.tm }}>{exec?.name || "—"}</td>
+                  <td style={tdS}><Badge type={indCount > 0 ? "info" : "default"}>{indCount}</Badge></td>
+                  <td style={tdS}>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <Btn sm onClick={() => openEditParcCfg(p)}>Editar</Btn>
+                      <Btn v="danger" sm onClick={() => { setDelParcCfg(p); setDelParcTransfer(""); }}>Excluir</Btn>
+                    </div>
+                  </td>
+                </tr>;
+              })}</tbody>
+            </table></div>
+          </div>
+
+          {/* Edit Parceiro Modal */}
+          <Modal open={!!editParcCfg} onClose={() => { setEditParcCfg(null); setEpResetPw(null); }} title="Editar Parceiro"
+            footer={<><Btn v="secondary" onClick={() => { setEditParcCfg(null); setEpResetPw(null); }}>Cancelar</Btn><Btn onClick={saveEditParcCfg} disabled={epSaving}>{epSaving ? "Salvando..." : "Salvar"}</Btn></>}>
+            {editParcCfg && <div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                <Inp label="Nome" value={epF.name} onChange={v => setEpF({ ...epF, name: v })} />
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>E-mail</label>
+                  <input value={editParcCfg.email} disabled style={{ width: "100%", padding: "10px 12px", background: T.bg2, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.tm, fontFamily: "'DM Sans',sans-serif", fontSize: 13, boxSizing: "border-box" }} />
+                </div>
+                <Inp label="Empresa" value={epF.empresa} onChange={v => setEpF({ ...epF, empresa: v })} />
+                <Inp label="CNPJ" value={epF.cnpj} onChange={v => setEpF({ ...epF, cnpj: v })} />
+                <Inp label="Telefone" value={epF.tel} onChange={v => setEpF({ ...epF, tel: v })} />
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Executivo</label>
+                  <select value={epF.managerId} onChange={e => setEpF({ ...epF, managerId: e.target.value })} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+                    <option value="">Sem executivo</option>
+                    {executivos.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div style={{ padding: 14, background: T.ac + "0A", border: `1px solid ${T.ac}25`, borderRadius: 8, marginBottom: 14 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: T.ac, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>Comissão</div>
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <select value={epF.comTipo} onChange={e => setEpF({ ...epF, comTipo: e.target.value })} style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12 }}>
+                    <option value="pct">% Cashin</option>
+                    <option value="valor">R$/Conta</option>
+                  </select>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    {epF.comTipo === "valor" && <span style={{ fontSize: 12, color: T.tm }}>R$</span>}
+                    <input type="number" step={epF.comTipo === "pct" ? "0.1" : "0.5"} value={epF.comVal} onChange={e => setEpF({ ...epF, comVal: e.target.value })} style={{ width: 100, textAlign: "right", padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: epF.comTipo === "pct" ? T.ac : T.inf, fontFamily: "'Space Mono',monospace", fontSize: 13, fontWeight: 700, outline: "none" }} />
+                    {epF.comTipo === "pct" && <span style={{ fontSize: 12, color: T.tm }}>%</span>}
+                  </div>
+                </div>
+              </div>
+              <div style={{ padding: 14, background: T.er + "0A", border: `1px solid ${T.er}25`, borderRadius: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: T.er, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>Senha</div>
+                {epResetPw ? (
+                  <div>
+                    <div style={{ padding: 10, background: T.bg2, borderRadius: 6, fontFamily: "'Space Mono',monospace", fontSize: 14, fontWeight: 600, color: T.ac, marginBottom: 8 }}>{epResetPw}</div>
+                    <Btn sm onClick={() => navigator.clipboard.writeText(epResetPw)}>Copiar senha</Btn>
+                  </div>
+                ) : (
+                  <Btn v="danger" sm onClick={resetParcCfgPw}>Resetar Senha</Btn>
+                )}
+              </div>
+            </div>}
+          </Modal>
+
+          {/* Delete Parceiro Modal */}
+          <Modal open={!!delParcCfg} onClose={() => { setDelParcCfg(null); setDelParcTransfer(""); }} title="Excluir Parceiro"
+            footer={<><Btn v="secondary" onClick={() => { setDelParcCfg(null); setDelParcTransfer(""); }}>Cancelar</Btn><Btn v="danger" onClick={delParceiro}>Confirmar Exclusão</Btn></>}>
+            {delParcCfg && (() => {
+              const parcInds = inds.filter(i => i.pId === delParcCfg.id);
+              const otherParcs = users.filter(u => u.role === "parceiro" && u.id !== delParcCfg.id);
+              return <div>
+                <div style={{ padding: 14, background: T.er + "0A", border: `1px solid ${T.er}25`, borderRadius: 8, marginBottom: 16 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>Desativar "{delParcCfg.name}"</div>
+                  <div style={{ fontSize: 12, color: T.t2 }}>O parceiro será desativado e não poderá mais acessar o sistema.</div>
+                </div>
+                {parcInds.length > 0 ? (
+                  <div style={{ padding: 14, background: T.wn + "0A", border: `1px solid ${T.wn}25`, borderRadius: 8 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: T.wn, marginBottom: 8 }}>Este parceiro possui {parcInds.length} indicação(ões)</div>
+                    <div style={{ marginBottom: 8 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", fontSize: 13, cursor: "pointer" }}>
+                        <input type="radio" name="transfer" checked={!delParcTransfer} onChange={() => setDelParcTransfer("")} style={{ accentColor: T.ac }} />
+                        Excluir sem transferir (indicações permanecem sem dono ativo)
+                      </label>
+                      <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", fontSize: 13, cursor: "pointer" }}>
+                        <input type="radio" name="transfer" checked={!!delParcTransfer} onChange={() => setDelParcTransfer(otherParcs[0]?.id || "")} style={{ accentColor: T.ac }} />
+                        Transferir indicações para outro parceiro
+                      </label>
+                    </div>
+                    {delParcTransfer && (
+                      <select value={delParcTransfer} onChange={e => setDelParcTransfer(e.target.value)} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+                        <option value="">Selecione o parceiro destino...</option>
+                        {otherParcs.map(p => <option key={p.id} value={p.id}>{p.name}{p.empresa ? ` (${p.empresa})` : ""}</option>)}
+                      </select>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 13, color: T.tm }}>Este parceiro não possui indicações.</div>
+                )}
+              </div>;
+            })()}
+          </Modal>
+        </div>;
+      })()}
+
       {/* CONVÊNIOS TAB */}
       {tab === "convênios" && <ConveniosTab />}
 
@@ -3136,7 +3357,80 @@ function CfgPage({ mats, setMats, users, setUsers, travaDias, setTravaDias, noti
         </div>
       )}
 
-      {tab !== "materiais" && <div style={{ marginTop: 16, display: "flex", gap: 12, alignItems: "center" }}>
+      {/* AUDITORIA TAB */}
+      {tab === "auditoria" && (
+        <div>
+          {/* Filters */}
+          <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 16, marginBottom: 16 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
+              <div>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 4, textTransform: "uppercase" }}>Data De</label>
+                <input type="date" value={auditFilters.date_from} onChange={e => setAuditFilters(f => ({ ...f, date_from: e.target.value }))} style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }} />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 4, textTransform: "uppercase" }}>Data Até</label>
+                <input type="date" value={auditFilters.date_to} onChange={e => setAuditFilters(f => ({ ...f, date_to: e.target.value }))} style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }} />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 4, textTransform: "uppercase" }}>Usuário</label>
+                <select value={auditFilters.user_id} onChange={e => setAuditFilters(f => ({ ...f, user_id: e.target.value }))} style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13, minWidth: 150 }}>
+                  <option value="">Todos</option>
+                  {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 4, textTransform: "uppercase" }}>Ação</label>
+                <select value={auditFilters.action} onChange={e => setAuditFilters(f => ({ ...f, action: e.target.value }))} style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13, minWidth: 150 }}>
+                  <option value="">Todas</option>
+                  {Object.entries(ACTION_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 4, textTransform: "uppercase" }}>Empresa</label>
+                <input type="text" value={auditFilters.search} onChange={e => setAuditFilters(f => ({ ...f, search: e.target.value }))} placeholder="Buscar empresa..." style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13, minWidth: 160 }} />
+              </div>
+              <Btn onClick={() => loadAudit(0, auditFilters)}>Filtrar</Btn>
+              <Btn v="secondary" onClick={() => { const empty = { user_id: "", action: "", date_from: "", date_to: "", search: "" }; setAuditFilters(empty); loadAudit(0, empty); }}>Limpar</Btn>
+            </div>
+          </div>
+
+          {/* Table */}
+          <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
+            {auditLoading ? (
+              <div style={{ padding: 40, textAlign: "center", color: T.tm, fontSize: 13 }}>Carregando...</div>
+            ) : (
+              <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 800 }}>
+                <thead><tr>{["Data/Hora", "Usuário", "Ação", "Indicação", "Detalhes", "Valores"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {auditData.map(e => (
+                    <tr key={e.id}>
+                      <td style={{ ...tdS, fontSize: 12, whiteSpace: "nowrap" }}>{new Date(e.created_at).toLocaleString("pt-BR")}</td>
+                      <td style={{ ...tdS, fontWeight: 500 }}>{e.user_name || "—"}</td>
+                      <td style={tdS}><Badge type={ACTION_BADGE[e.action] || "info"}>{ACTION_LABELS[e.action] || e.action}</Badge></td>
+                      <td style={{ ...tdS, fontSize: 13 }}>{e.nome_fantasia || e.razao_social || "—"}</td>
+                      <td style={{ ...tdS, fontSize: 12, color: T.tm, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.txt || "—"}</td>
+                      <td style={{ ...tdS, fontSize: 12, color: T.tm }}>{e.old_value && e.new_value ? `${e.old_value} → ${e.new_value}` : e.new_value || "—"}</td>
+                    </tr>
+                  ))}
+                  {auditData.length === 0 && <tr><td colSpan={6} style={{ padding: 40, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhum registro encontrado.</td></tr>}
+                </tbody>
+              </table></div>
+            )}
+          </div>
+
+          {/* Pagination */}
+          {auditTotal > AUDIT_LIMIT && (
+            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 12, marginTop: 16 }}>
+              <Btn v="secondary" sm disabled={auditPage === 0} onClick={() => loadAudit(auditPage - 1, auditFilters)}>← Anterior</Btn>
+              <span style={{ fontSize: 13, color: T.tm }}>Página {auditPage + 1} de {Math.ceil(auditTotal / AUDIT_LIMIT)}</span>
+              <Btn v="secondary" sm disabled={(auditPage + 1) * AUDIT_LIMIT >= auditTotal} onClick={() => loadAudit(auditPage + 1, auditFilters)}>Próximo →</Btn>
+            </div>
+          )}
+          <div style={{ marginTop: 12, fontSize: 12, color: T.tm, textAlign: "right" }}>{auditTotal} registro(s) encontrado(s)</div>
+        </div>
+      )}
+
+      {tab !== "materiais" && tab !== "auditoria" && <div style={{ marginTop: 16, display: "flex", gap: 12, alignItems: "center" }}>
         <Btn onClick={() => { setSaved(true); setTimeout(() => setSaved(false), 2000); }}>Salvar</Btn>
         {saved && <span style={{ fontSize: 13, color: T.ok }}>✓ Salvo!</span>}
       </div>}
@@ -4501,7 +4795,7 @@ export default function App() {
             {pg === "fin" && <FinPage comms={comms} setComms={setComms} nfes={nfes} setNfes={setNfes} users={users} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} />}
             {pg === "mats" && <MatsPage mats={mats} />}
             {pg === "notifs" && <NotifsPage notifs={notifs} setNotifs={setNotifs} users={users} userId={user.id} />}
-            {pg === "cfg" && <CfgPage mats={mats} setMats={setMats} users={users} setUsers={setUsers} travaDias={travaDias} setTravaDias={setTravaDias} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} setCadenceRules={setCadenceRules} />}
+            {pg === "cfg" && <CfgPage mats={mats} setMats={setMats} users={users} setUsers={setUsers} inds={inds} travaDias={travaDias} setTravaDias={setTravaDias} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} setCadenceRules={setCadenceRules} />}
           </div>
         </main>
       </div>
