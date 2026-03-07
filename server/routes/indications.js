@@ -260,6 +260,7 @@ router.post('/', authenticate, async (req, res) => {
       cnpj, razao_social, nome_fantasia, contato_nome, contato_telefone, contato_email,
       num_funcionarios, hubspot_id, hubspot_status, liberacao_status, liberacao_data,
       liberacao_expiry, capital, abertura, cnae, endereco, value, notes, manager_id,
+      hubspot_analysis,
     } = req.body;
 
     if (!cnpj || !razao_social) {
@@ -289,7 +290,7 @@ router.post('/', authenticate, async (req, res) => {
         hubspot_id, hubspot_status,
         liberacao_status, liberacao_data, liberacao_expiry,
         capital, abertura, cnae, endereco,
-        value, notes
+        value, notes, hubspot_analysis
       ) VALUES (
         ?, ?, ?, ?,
         ?, ?, ?,
@@ -297,7 +298,7 @@ router.post('/', authenticate, async (req, res) => {
         ?, ?,
         ?, ?, ?,
         ?, ?, ?, ?,
-        ?, ?
+        ?, ?, ?
       )
     `).run(
       id, cleanCnpj, razao_social, nome_fantasia || null,
@@ -309,7 +310,7 @@ router.post('/', authenticate, async (req, res) => {
       liberacao_status || null, liberacao_data || null, liberacao_expiry || null,
       capital !== undefined ? capital : null,
       abertura || null, cnae || null, endereco || null,
-      value || 0, notes || null
+      value || 0, notes || null, hubspot_analysis || null
     );
 
     // Log history

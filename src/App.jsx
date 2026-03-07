@@ -60,6 +60,7 @@ const transformIndication = (ind) => {
     abertura: notesData.abertura || ind.abertura,
     cnae: notesData.cnae || ind.cnae,
     endereco: notesData.endereco || ind.endereco,
+    hubspotAnalysis: (() => { try { return ind.hubspot_analysis ? JSON.parse(ind.hubspot_analysis) : null; } catch { return null; } })(),
     hist: [],
   };
 };
@@ -1314,6 +1315,42 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenc
             </div>
           </div>
 
+          {/* Análise CNPJ / HubSpot */}
+          {sel.hubspotAnalysis && (
+            <div style={{ marginTop: 12, padding: 14, background: sel.hubspotAnalysis.found ? T.wa + "0A" : T.ok + "0A", borderRadius: 8, border: `1px solid ${sel.hubspotAnalysis.found ? T.wa : T.ok}25` }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: sel.hubspotAnalysis.found ? T.wa : T.ok, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>🔍 Análise CNPJ / HubSpot</div>
+              <div style={{ display: "flex", padding: "5px 0", borderBottom: `1px solid ${T.bor}22` }}>
+                <div style={{ width: 120, fontSize: 10, color: T.tm, textTransform: "uppercase", flexShrink: 0 }}>Status</div>
+                <div style={{ fontSize: 12, color: T.t2, fontWeight: 600 }}>{sel.hubspotAnalysis.found ? "Oportunidade existente" : "Sem oportunidades"}</div>
+              </div>
+              {sel.hubspotAnalysis.company && (
+                <div style={{ display: "flex", padding: "5px 0", borderBottom: `1px solid ${T.bor}22` }}>
+                  <div style={{ width: 120, fontSize: 10, color: T.tm, textTransform: "uppercase", flexShrink: 0 }}>Empresa HS</div>
+                  <div style={{ fontSize: 12, color: T.t2 }}>{sel.hubspotAnalysis.company.name}</div>
+                </div>
+              )}
+              {sel.hubspotAnalysis.deals && sel.hubspotAnalysis.deals.length > 0 && (
+                <div style={{ marginTop: 8, padding: 8, background: T.bg2, borderRadius: 4 }}>
+                  <div style={{ fontSize: 10, color: T.tm, marginBottom: 6 }}>OPORTUNIDADES:</div>
+                  {sel.hubspotAnalysis.deals.map((deal, i) => (
+                    <div key={i} style={{ fontSize: 11, color: T.t2, padding: "4px 0", borderBottom: i < sel.hubspotAnalysis.deals.length - 1 ? `1px solid ${T.bor}` : 'none' }}>
+                      <strong>{deal.name}</strong> — Etapa: {deal.stage || '—'} {deal.amount && `| R$ ${Number(deal.amount).toLocaleString('pt-BR')}`}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {sel.hubspotAnalysis.lastInteraction && (
+                <div style={{ marginTop: 8, padding: 8, background: T.bg2, borderRadius: 4 }}>
+                  <div style={{ fontSize: 10, color: T.tm, marginBottom: 4 }}>ÚLTIMA INTERAÇÃO:</div>
+                  <div style={{ fontSize: 11, color: T.t2 }}>
+                    <strong>{sel.hubspotAnalysis.lastInteraction.type}</strong> — {sel.hubspotAnalysis.lastInteraction.date ? new Date(sel.hubspotAnalysis.lastInteraction.date).toLocaleDateString('pt-BR') : '—'}
+                  </div>
+                  {sel.hubspotAnalysis.lastInteraction.summary && <div style={{ fontSize: 11, color: T.tm, marginTop: 2 }}>{sel.hubspotAnalysis.lastInteraction.summary.slice(0, 200)}{sel.hubspotAnalysis.lastInteraction.summary.length > 200 ? '...' : ''}</div>}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Editar Limite da Trava */}
           {canEdit && sel.lib === "liberado" && (
             <div style={{ marginTop: 10, padding: 12, background: T.wn + "0A", border: `1px solid ${T.wn}25`, borderRadius: 8 }}>
@@ -1997,6 +2034,7 @@ function MinhasInd({ inds, setInds, notifs, setNotifs, users, cadenceRules }) {
         cnae: cnpjData?.cnae || null,
         endereco: cnpjData?.endereco || null,
         notes: f.obs || null,
+        hubspot_analysis: hr ? JSON.stringify(hr) : null,
       });
       const newInd = transformIndication(res.data.indication);
       setInds(p => [...p, newInd]);
@@ -2127,7 +2165,7 @@ function MinhasInd({ inds, setInds, notifs, setNotifs, users, cadenceRules }) {
       </Modal>
 
       {/* MODAL: Nova Indicação with CNPJ enrichment */}
-      <Modal open={modal} onClose={() => { setModal(false); setHr(null); setCnpjData(null); }} title="Nova Indicação" wide footer={<><Btn v="secondary" onClick={() => { setModal(false); setHr(null); setCnpjData(null); }}>Cancelar</Btn><Btn onClick={submit} disabled={!f.emp || !f.cnpj || !f.cont || hr?.found}>Enviar</Btn></>}>
+      <Modal open={modal} onClose={() => { setModal(false); setHr(null); setCnpjData(null); }} title="Nova Indicação" wide footer={<><Btn v="secondary" onClick={() => { setModal(false); setHr(null); setCnpjData(null); }}>Cancelar</Btn><Btn onClick={submit} disabled={!f.emp || !f.cnpj || !f.cont}>Enviar</Btn></>}>
         <div style={{ marginBottom: 16, padding: 12, background: T.inp, borderRadius: 6, fontSize: 12, color: T.t2 }}>⚠️ Consulte o CNPJ para verificar no HubSpot e preencher dados automaticamente da Receita Federal.</div>
         <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr 1fr", lg: "1fr 1fr" }), gap: 14 }}>
           <div style={{ gridColumn: "1/-1", marginBottom: 14 }}>
@@ -2139,21 +2177,30 @@ function MinhasInd({ inds, setInds, notifs, setNotifs, users, cadenceRules }) {
           </div>
 
           {/* Resultado HubSpot */}
-          {hr && <div style={{ gridColumn: "1/-1", padding: 12, borderRadius: 6, background: hr.error ? T.wa + "11" : hr.found ? T.er + "11" : T.ok + "11", border: `1px solid ${hr.error ? T.wa : hr.found ? T.er : T.ok}33`, fontSize: 12 }}>
+          {hr && <div style={{ gridColumn: "1/-1", padding: 12, borderRadius: 6, background: hr.error ? T.wa + "11" : hr.found ? T.wa + "11" : T.ok + "11", border: `1px solid ${hr.error ? T.wa : hr.found ? T.wa : T.ok}33`, fontSize: 12 }}>
             {hr.error ? (
               <div style={{ color: T.wa }}>⚠️ {hr.message}</div>
             ) : hr.found ? (
               <div>
-                <div style={{ color: T.er, fontWeight: 600 }}>❌ Não é possível indicar!</div>
-                <div style={{ color: T.t2, marginTop: 4 }}>{hr.message || `Empresa já existe: ${hr.d}`}</div>
+                <div style={{ color: T.wa, fontWeight: 600 }}>⚠️ Já existe oportunidade no HubSpot — a análise será enviada para revisão</div>
+                <div style={{ color: T.t2, marginTop: 4 }}>{hr.message}</div>
                 {hr.deals && hr.deals.length > 0 && (
                   <div style={{ marginTop: 8, padding: 8, background: T.bg2, borderRadius: 4 }}>
-                    <div style={{ fontSize: 10, color: T.tm, marginBottom: 6 }}>OPORTUNIDADES ABERTAS:</div>
+                    <div style={{ fontSize: 10, color: T.tm, marginBottom: 6 }}>OPORTUNIDADES ENCONTRADAS:</div>
                     {hr.deals.map((deal, i) => (
                       <div key={i} style={{ fontSize: 11, color: T.t2, padding: "4px 0", borderBottom: i < hr.deals.length - 1 ? `1px solid ${T.bor}` : 'none' }}>
                         <strong>{deal.name}</strong> - {deal.stage} {deal.amount && `(R$ ${Number(deal.amount).toLocaleString('pt-BR')})`}
                       </div>
                     ))}
+                  </div>
+                )}
+                {hr.lastInteraction && (
+                  <div style={{ marginTop: 8, padding: 8, background: T.bg2, borderRadius: 4 }}>
+                    <div style={{ fontSize: 10, color: T.tm, marginBottom: 4 }}>ÚLTIMA INTERAÇÃO:</div>
+                    <div style={{ fontSize: 11, color: T.t2 }}>
+                      <strong>{hr.lastInteraction.type}</strong> — {hr.lastInteraction.date ? new Date(hr.lastInteraction.date).toLocaleDateString('pt-BR') : '—'}
+                    </div>
+                    {hr.lastInteraction.summary && <div style={{ fontSize: 11, color: T.tm, marginTop: 2 }}>{hr.lastInteraction.summary.slice(0, 150)}{hr.lastInteraction.summary.length > 150 ? '...' : ''}</div>}
                   </div>
                 )}
               </div>

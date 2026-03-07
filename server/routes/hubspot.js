@@ -93,10 +93,49 @@ router.post('/search', authenticate, async (req, res) => {
       }
     }
 
+    // Fetch last engagement/interaction for this company
+    let lastInteraction = null;
+    try {
+      const engResponse = await fetch(`${hubspotBaseUrl}/crm/v3/objects/companies/${companyId}/associations/engagements`, {
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' }
+      });
+      if (engResponse.ok) {
+        const engData = await engResponse.json();
+        const engIds = (engData.results || []).map(e => e.id).slice(0, 5);
+        if (engIds.length > 0) {
+          const engDetailsResponse = await fetch(`${hubspotBaseUrl}/crm/v3/objects/engagements/batch/read`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              inputs: engIds.map(id => ({ id })),
+              properties: ['hs_engagement_type', 'hs_timestamp', 'hs_body_preview', 'hs_engagement_source']
+            })
+          });
+          if (engDetailsResponse.ok) {
+            const engDetails = await engDetailsResponse.json();
+            const engagements = (engDetails.results || [])
+              .map(e => ({
+                type: e.properties.hs_engagement_type || 'unknown',
+                date: e.properties.hs_timestamp,
+                summary: e.properties.hs_body_preview || '',
+              }))
+              .filter(e => e.date)
+              .sort((a, b) => new Date(b.date) - new Date(a.date));
+            if (engagements.length > 0) {
+              lastInteraction = engagements[0];
+            }
+          }
+        }
+      }
+    } catch (engError) {
+      console.error('HubSpot engagements fetch error (non-blocking):', engError.message);
+    }
+
     res.json({
       found: true,
       company: { id: companyId, name: company.properties.name, cnpj: company.properties.cnpj, domain: company.properties.domain, phone: company.properties.phone, city: company.properties.city, state: company.properties.state, leadStatus: company.properties.hs_lead_status },
       deals, openDeals, hasOpenDeals: openDeals.length > 0,
+      lastInteraction,
       message: openDeals.length > 0 ? `Empresa já possui ${openDeals.length} oportunidade(s) aberta(s)` : 'Empresa encontrada sem oportunidades abertas'
     });
   } catch (error) {

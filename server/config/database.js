@@ -264,6 +264,7 @@ async function createTables(db) {
       endereco TEXT,
       value REAL DEFAULT 0,
       notes TEXT,
+      hubspot_analysis TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
@@ -491,6 +492,7 @@ async function createTables(db) {
     await safeAddColumn('notifications', 'email_sent', 'INTEGER DEFAULT 0');
     await safeAddColumn('messages', 'source', "TEXT DEFAULT 'crm'");
     await safeAddColumn('messages', 'whatsapp_message_id', 'TEXT');
+    await safeAddColumn('indications', 'hubspot_analysis', 'TEXT');
   }
 }
 
