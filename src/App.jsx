@@ -391,6 +391,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
   const ativas = baseInds.filter(i => i.st === "ativo").length;
   const recusadas = baseInds.filter(i => i.st === "recusado").length;
   const travasVencidas = baseInds.filter(i => i.lib === "liberado" && i.libExp && i.libExp < today).length;
+  const totalFuncionarios = baseInds.reduce((sum, i) => sum + (parseInt(i.nf) || 0), 0);
   const txConversao = total > 0 ? ((ativas / total) * 100).toFixed(1) : "0.0";
   const parcCount = myParceiros.length;
 
@@ -401,7 +402,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
   // Ranking parceiros
   const parcRanking = myParceiros.map(p => {
     const pi = baseInds.filter(i => i.pId === p.id);
-    return { ...p, total: pi.length, ativas: pi.filter(i => i.st === "ativo").length, pipeline: pi.filter(i => ["nova", "analise", "prospeccao", "docs"].includes(i.st)).length, recusadas: pi.filter(i => i.st === "recusado").length, tx: pi.length > 0 ? ((pi.filter(i => i.st === "ativo").length / pi.length) * 100).toFixed(0) : "0" };
+    return { ...p, total: pi.length, ativas: pi.filter(i => i.st === "ativo").length, pipeline: pi.filter(i => ["nova", "analise", "prospeccao", "docs"].includes(i.st)).length, recusadas: pi.filter(i => i.st === "recusado").length, funcionarios: pi.reduce((s, i) => s + (parseInt(i.nf) || 0), 0), tx: pi.length > 0 ? ((pi.filter(i => i.st === "ativo").length / pi.length) * 100).toFixed(0) : "0" };
   }).sort((a, b) => b.ativas - a.ativas);
 
   // Performance por gerente (só diretor)
@@ -462,6 +463,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
     const pRecusadas = all.filter(i => i.st === "recusado").length;
     const pLiberadas = all.filter(i => i.lib === "liberado").length;
     const pVencidas = all.filter(i => i.lib === "liberado" && i.libExp && i.libExp < today).length;
+    const pTotalFunc = all.reduce((sum, i) => sum + (parseInt(i.nf) || 0), 0);
     const pTx = pTotal > 0 ? ((pAtivas / pTotal) * 100).toFixed(1) : "0.0";
 
     // Funnel
@@ -543,7 +545,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
         <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "repeat(2, 1fr)", lg: "repeat(4, 1fr)" }), gap: 12, marginBottom: 20 }}>
           {[
             { l: "Recusadas", v: pRecusadas, co: T.er, ic: "❌" },
-            { l: "Liberadas", v: pLiberadas, co: T.ok, ic: "🔓" },
+            { l: "Total Funcionários", v: pTotalFunc.toLocaleString('pt-BR'), co: T.inf, ic: "👥" },
             { l: "Vencidas", v: pVencidas, co: pVencidas > 0 ? T.er : T.ok, ic: pVencidas > 0 ? "⚠️" : "✓" },
             { l: "Comissão Acum.", v: fmtBRL(totalComm), co: T.ac, ic: "💰" },
           ].map((s, i) => (
@@ -757,7 +759,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
       <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "repeat(2, 1fr)", lg: "repeat(4, 1fr)" }), gap: 12, marginBottom: 20 }}>
         {[
           { l: "Recusadas", v: recusadas, co: T.er, ic: "❌" },
-          { l: "Travas Vencidas", v: travasVencidas, co: travasVencidas > 0 ? T.er : T.ok, ic: travasVencidas > 0 ? "⚠️" : "🔒" },
+          { l: "Total Funcionários", v: totalFuncionarios.toLocaleString('pt-BR'), co: T.inf, ic: "👥" },
           { l: "Taxa Conversão", v: txConversao + "%", co: parseFloat(txConversao) >= 20 ? T.ok : T.wn, ic: "📈" },
           { l: isExec ? "Gerentes" : isDiretor ? "Executivos" : "Liberadas", v: isExec ? myDiretores.length : isDiretor ? myGerentes.length : baseInds.filter(i => i.lib === "liberado").length, co: T.ac, ic: isExec ? "🏛️" : isDiretor ? "👔" : "🔓" },
         ].map((s, i) => (
@@ -932,7 +934,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
           <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>🏆 Ranking de Parceiros</h3>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
             <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
-              <thead><tr>{["#", "Parceiro", "Total", "Ativas", "Pipeline", "Conversão"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
+              <thead><tr>{["#", "Parceiro", "Total", "Ativas", "Pipeline", "Funcionários", "Conversão"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>{parcRanking.map((p, i) => (
                 <tr key={p.id}>
                   <td style={{ ...tdS, fontWeight: 700, color: i === 0 ? "#f59e0b" : i === 1 ? "#94a3b8" : i === 2 ? "#cd7f32" : T.tm, fontSize: 14 }}>{i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}º`}</td>
@@ -945,6 +947,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
                   <td style={{ ...tdS, fontFamily: "'Space Mono',monospace", fontSize: 13, fontWeight: 700 }}>{p.total}</td>
                   <td style={tdS}><Badge type="success">{p.ativas}</Badge></td>
                   <td style={tdS}><Badge type="info">{p.pipeline}</Badge></td>
+                  <td style={{ ...tdS, fontFamily: "'Space Mono',monospace", fontSize: 12, color: T.ac, textAlign: "center" }}>{p.funcionarios.toLocaleString('pt-BR')}</td>
                   <td style={tdS}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <div style={{ width: 50, height: 6, background: T.inp, borderRadius: 3, overflow: "hidden" }}>
@@ -955,7 +958,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
                   </td>
                 </tr>
               ))}</tbody>
-              {parcRanking.length === 0 && <tbody><tr><td colSpan={6} style={{ padding: 20, textAlign: "center", color: T.tm, fontSize: 12 }}>Nenhum parceiro.</td></tr></tbody>}
+              {parcRanking.length === 0 && <tbody><tr><td colSpan={7} style={{ padding: 20, textAlign: "center", color: T.tm, fontSize: 12 }}>Nenhum parceiro.</td></tr></tbody>}
             </table></div>
           </div>
         </div>
@@ -4039,6 +4042,10 @@ function DiretoriaPage() {
               <div style={{ fontSize: 10, color: T.t2 }}>Pipeline</div>
             </div>
             <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: T.ac }}>{(item.total_funcionarios || 0).toLocaleString('pt-BR')}</div>
+              <div style={{ fontSize: 10, color: T.t2 }}>Funcionários</div>
+            </div>
+            <div style={{ textAlign: "center" }}>
               <div style={{ fontSize: 18, fontWeight: 700, color: convColor(item.conversion_rate) }}>{item.conversion_rate}%</div>
               <div style={{ fontSize: 10, color: T.t2 }}>Conversão</div>
             </div>
@@ -4065,6 +4072,7 @@ function DiretoriaPage() {
                     <th style={{ textAlign: "center", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Total</th>
                     <th style={{ textAlign: "center", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Ativas</th>
                     <th style={{ textAlign: "center", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Pipeline</th>
+                    <th style={{ textAlign: "center", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Funcionários</th>
                     <th style={{ textAlign: "center", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Conversão</th>
                   </tr>
                 </thead>
@@ -4076,6 +4084,7 @@ function DiretoriaPage() {
                       <td style={{ padding: "8px 6px", color: T.txt, textAlign: "center" }}>{p.total_indications || 0}</td>
                       <td style={{ padding: "8px 6px", color: T.ok, textAlign: "center" }}>{p.active_count || 0}</td>
                       <td style={{ padding: "8px 6px", color: T.inf, textAlign: "center" }}>{p.pipeline_count || 0}</td>
+                      <td style={{ padding: "8px 6px", color: T.ac, textAlign: "center" }}>{(p.total_funcionarios || 0).toLocaleString('pt-BR')}</td>
                       <td style={{ padding: "8px 6px", textAlign: "center" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "center" }}>
                           <div style={{ width: 40, height: 4, background: T.bor, borderRadius: 2, overflow: "hidden" }}>

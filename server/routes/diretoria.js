@@ -36,7 +36,8 @@ router.get('/summary', authenticate, async (req, res) => {
                COUNT(i.id) as total_indications,
                SUM(CASE WHEN i.status NOT IN ('fechado','perdido') THEN 1 ELSE 0 END) as active_count,
                SUM(CASE WHEN i.status IN ('em_contato','proposta','negociacao') THEN 1 ELSE 0 END) as pipeline_count,
-               SUM(CASE WHEN i.status = 'fechado' THEN 1 ELSE 0 END) as closed_count
+               SUM(CASE WHEN i.status = 'fechado' THEN 1 ELSE 0 END) as closed_count,
+               COALESCE(SUM(i.num_funcionarios), 0) as total_funcionarios
         FROM users u
         LEFT JOIN indications i ON i.owner_id = u.id
         WHERE u.manager_id = ? AND u.role = 'parceiro' AND u.is_active = 1
@@ -48,7 +49,8 @@ router.get('/summary', authenticate, async (req, res) => {
         active_count: acc.active_count + (p.active_count || 0),
         pipeline_count: acc.pipeline_count + (p.pipeline_count || 0),
         closed_count: acc.closed_count + (p.closed_count || 0),
-      }), { total_indications: 0, active_count: 0, pipeline_count: 0, closed_count: 0 });
+        total_funcionarios: acc.total_funcionarios + (p.total_funcionarios || 0),
+      }), { total_indications: 0, active_count: 0, pipeline_count: 0, closed_count: 0, total_funcionarios: 0 });
 
       const conversion_rate = totals.total_indications > 0
         ? ((totals.closed_count / totals.total_indications) * 100).toFixed(1) : '0.0';
