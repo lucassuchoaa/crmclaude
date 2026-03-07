@@ -269,8 +269,8 @@ router.post('/', authenticate, async (req, res) => {
 
     const db = getDatabase();
 
-    // Check for duplicate CNPJ
-    const existing = await db.prepare('SELECT id FROM indications WHERE cnpj = ?').get(cnpj.replace(/\D/g, ''));
+    // Check for duplicate CNPJ (ignore soft-deleted indications with status 'perdido')
+    const existing = await db.prepare("SELECT id FROM indications WHERE cnpj = ? AND status != 'perdido'").get(cnpj.replace(/\D/g, ''));
     if (existing) {
       return res.status(409).json({ error: 'CNPJ already registered', existingId: existing.id });
     }
