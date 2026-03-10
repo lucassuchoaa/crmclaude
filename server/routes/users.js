@@ -48,9 +48,9 @@ router.get('/', authenticate, async (req, res) => {
         query += ` AND (u.manager_id = ? OR u.id = ?)`;
         params.push(req.user.id, req.user.id);
       } else {
-        // Parceiros see only themselves
-        query += ` AND u.id = ?`;
-        params.push(req.user.id);
+        // Parceiros see themselves + their manager (executivo)
+        query += ` AND (u.id = ? OR u.id = (SELECT manager_id FROM users WHERE id = ?))`;
+        params.push(req.user.id, req.user.id);
       }
     }
 

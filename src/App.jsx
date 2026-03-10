@@ -604,7 +604,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
         <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "repeat(2, 1fr)", lg: "repeat(4, 1fr)" }), gap: 12, marginBottom: 12 }}>
           {[
             { l: "Total", v: pTotal, co: T.ac, ic: "📋" },
-            { l: "Pipeline", v: pPipeline, co: T.inf, ic: "🔄" },
+            { l: "Em Andamento", v: pPipeline, co: T.inf, ic: "🔄" },
             { l: "Aprovadas", v: pAprov, co: T.ok, ic: "✅" },
             { l: "Ativas", v: pAtivas, co: T.wn, ic: "🏢" },
           ].map((s, i) => (
@@ -818,7 +818,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
       <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "repeat(2, 1fr)", lg: "repeat(4, 1fr)" }), gap: 12, marginBottom: 12 }}>
         {[
           { l: "Total Indicações", v: total, co: T.ac, ic: "📋" },
-          { l: "Pipeline", v: pipeline, co: T.inf, ic: "🔄" },
+          { l: "Em Andamento", v: pipeline, co: T.inf, ic: "🔄" },
           { l: "Aprovadas/Ativas", v: `${aprovadas}/${ativas}`, co: T.ok, ic: "✅" },
           { l: "Parceiros", v: parcCount, co: T.wn, ic: "👥" },
         ].map((s, i) => (
@@ -854,7 +854,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
 
       {/* ROW 2: Funil Visual */}
       <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 18, marginBottom: 16 }}>
-        <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>📊 Funil do Pipeline</h3>
+        <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>📊 Funil de Indicações</h3>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {funnelData.map(f => (
             <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -1015,7 +1015,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
           <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>🏆 Ranking de Parceiros</h3>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
             <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
-              <thead><tr>{["#", "Parceiro", "Total", "Ativas", "Pipeline", "Funcionários", "Conversão"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
+              <thead><tr>{["#", "Parceiro", "Total", "Ativas", "Em Andamento", "Funcionários", "Conversão"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>{parcRanking.map((p, i) => (
                 <tr key={p.id}>
                   <td style={{ ...tdS, fontWeight: 700, color: i === 0 ? "#f59e0b" : i === 1 ? "#94a3b8" : i === 2 ? "#cd7f32" : T.tm, fontSize: 14 }}>{i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}º`}</td>
@@ -1716,7 +1716,7 @@ function ParcPage({ users, setUsers, inds }) {
                   {[
                     { l: "Total", v: pi.length, co: T.txt },
                     { l: "Ativas", v: pActive, co: T.ok },
-                    { l: "Pipeline", v: pPipeline, co: T.inf },
+                    { l: "Em Andamento", v: pPipeline, co: T.inf },
                     { l: "Func.", v: pFunc.toLocaleString("pt-BR"), co: T.ac },
                     { l: "Conversão", v: `${pConv}%`, co: convColor(parseFloat(pConv)) },
                   ].map((s, i) => (
@@ -2070,8 +2070,29 @@ function MinhasInd({ inds, setInds, notifs, setNotifs, users, cadenceRules }) {
   const [hr, setHr] = useState(null);
   const [cnpjData, setCnpjData] = useState(null);
   const [f, setF] = useState({ emp: "", cnpj: "", cont: "", tel: "", em: "", nf: "", obs: "" });
-  const my = inds.filter(i => i.pId === user.id);
+  const myAll = inds.filter(i => i.pId === user.id);
   const today = new Date().toISOString().split("T")[0];
+
+  // Filters
+  const [mfSt, setMfSt] = useState("todos");
+  const [mfLib, setMfLib] = useState("todos");
+  const [mfDtDe, setMfDtDe] = useState("");
+  const [mfDtAte, setMfDtAte] = useState("");
+  const [mfQ, setMfQ] = useState("");
+
+  const my = myAll.filter(i => {
+    if (mfSt !== "todos" && i.st !== mfSt) return false;
+    if (mfLib === "liberado" && i.lib !== "liberado") return false;
+    if (mfLib === "bloqueado" && i.lib !== "bloqueado") return false;
+    if (mfLib === "pendente" && i.lib !== null) return false;
+    if (mfLib === "vencido" && !(i.lib === "liberado" && i.libExp && i.libExp < today)) return false;
+    if (mfDtDe && i.dt < mfDtDe) return false;
+    if (mfDtAte && i.dt > mfDtAte) return false;
+    if (mfQ && !(i.emp || "").toLowerCase().includes(mfQ.toLowerCase()) && !(i.cnpj || "").includes(mfQ)) return false;
+    return true;
+  });
+  const mHasFilters = mfSt !== "todos" || mfLib !== "todos" || mfDtDe || mfDtAte || mfQ;
+  const mClearFilters = () => { setMfSt("todos"); setMfLib("todos"); setMfDtDe(""); setMfDtAte(""); setMfQ(""); };
 
   const selectInd = async (ind) => {
     setSel(ind);
@@ -2225,6 +2246,34 @@ function MinhasInd({ inds, setInds, notifs, setNotifs, users, cadenceRules }) {
           <button onClick={() => setView("kanban")} style={{ padding: "6px 14px", borderRadius: 4, border: "none", fontFamily: "'DM Sans',sans-serif", fontSize: 12, fontWeight: 600, cursor: "pointer", background: view === "kanban" ? T.ac : "transparent", color: view === "kanban" ? "#fff" : T.tm }}>📊 Kanban</button>
         </div>
         <Btn onClick={() => setModal(true)}>＋ Nova Indicação</Btn>
+      </div>
+
+      {/* FILTERS */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, flexWrap: "wrap", padding: "10px 14px", background: T.card, border: `1px solid ${T.bor}`, borderRadius: 8 }}>
+        <span style={{ fontSize: 11, color: T.tm, fontWeight: 600 }}>🔍 Filtros:</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, padding: "5px 10px" }}>
+          <input value={mfQ} onChange={e => setMfQ(e.target.value)} placeholder="Buscar empresa/CNPJ..." style={{ background: "none", border: "none", color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12, outline: "none", width: 150 }} />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", fontWeight: 600 }}>Status:</span>
+          <select value={mfSt} onChange={e => setMfSt(e.target.value)} style={{ padding: "7px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12, outline: "none" }}><option value="todos">Todos</option>{KCOLS.map(k => <option key={k.id} value={k.id}>{k.label}</option>)}</select>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", fontWeight: 600 }}>Liberação:</span>
+          <select value={mfLib} onChange={e => setMfLib(e.target.value)} style={{ padding: "7px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12, outline: "none" }}><option value="todos">Todos</option><option value="liberado">🔓 Liberado</option><option value="bloqueado">🔒 Bloqueado</option><option value="pendente">⏳ Pendente</option><option value="vencido">⚠️ Vencido</option></select>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", fontWeight: 600 }}>De:</span>
+          <input type="date" value={mfDtDe} onChange={e => setMfDtDe(e.target.value)} style={{ padding: "7px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12, outline: "none" }} />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", fontWeight: 600 }}>Até:</span>
+          <input type="date" value={mfDtAte} onChange={e => setMfDtAte(e.target.value)} style={{ padding: "7px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12, outline: "none" }} />
+        </div>
+        {mHasFilters && <>
+          <button onClick={mClearFilters} style={{ padding: "5px 10px", borderRadius: 6, border: `1px solid ${T.er}44`, background: T.er + "11", color: T.er, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>✕ Limpar</button>
+          <span style={{ fontSize: 11, color: T.t2 }}>{my.length} de {myAll.length}</span>
+        </>}
       </div>
 
       {/* LIST VIEW */}
@@ -4503,7 +4552,7 @@ function DiretoriaPage() {
             </div>
             <div style={{ textAlign: "center" }}>
               <div style={{ fontSize: 18, fontWeight: 700, color: T.inf }}>{item.pipeline_count}</div>
-              <div style={{ fontSize: 10, color: T.t2 }}>Pipeline</div>
+              <div style={{ fontSize: 10, color: T.t2 }}>Em Andamento</div>
             </div>
             <div style={{ textAlign: "center" }}>
               <div style={{ fontSize: 18, fontWeight: 700, color: T.ac }}>{(item.total_funcionarios || 0).toLocaleString('pt-BR')}</div>
@@ -4535,7 +4584,7 @@ function DiretoriaPage() {
                     <th style={{ textAlign: "left", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Empresa</th>
                     <th style={{ textAlign: "center", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Total</th>
                     <th style={{ textAlign: "center", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Ativas</th>
-                    <th style={{ textAlign: "center", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Pipeline</th>
+                    <th style={{ textAlign: "center", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Em Andamento</th>
                     <th style={{ textAlign: "center", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Funcionários</th>
                     <th style={{ textAlign: "center", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Última Indicação</th>
                     <th style={{ textAlign: "center", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Conversão</th>
@@ -4595,7 +4644,7 @@ function DiretoriaPage() {
                   {[
                     { l: "Total", v: dir.total_indications || 0, co: T.txt },
                     { l: "Ativas", v: dir.active_count || 0, co: T.ok },
-                    { l: "Pipeline", v: dir.pipeline_count || 0, co: T.inf },
+                    { l: "Em Andamento", v: dir.pipeline_count || 0, co: T.inf },
                     { l: "Funcionários", v: (dir.total_funcionarios || 0).toLocaleString('pt-BR'), co: T.ac },
                     { l: "Conversão", v: `${dir.conversion_rate || 0}%`, co: convColor(dir.conversion_rate || 0) },
                   ].map((s, i) => (
