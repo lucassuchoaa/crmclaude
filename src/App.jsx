@@ -2530,7 +2530,7 @@ function MatsPage({ mats }) {
             <div style={{ width: 40, height: 40, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, fontFamily: "'Space Mono',monospace", textTransform: "uppercase", background: (tc[m.tipo] || T.tm) + "22", color: tc[m.tipo] || T.tm, marginBottom: 12 }}>{m.tipo}</div>
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6, lineHeight: 1.4 }}>{m.t}</div>
             <div style={{ fontSize: 11, color: T.tm }}>{m.sz} · {m.dt}</div>
-            <div style={{ marginTop: 12 }}><Btn v="secondary" sm onClick={async () => { try { const res = await materialsApi.download(m.id); const url = window.URL.createObjectURL(new Blob([res.data])); const a = document.createElement('a'); a.href = url; a.download = `${m.t}.${m.tipo || 'bin'}`; document.body.appendChild(a); a.click(); a.remove(); window.URL.revokeObjectURL(url); } catch (e) { console.error("Erro no download:", e); alert("Erro ao baixar arquivo"); } }}>⬇ Download</Btn></div>
+            <div style={{ marginTop: 12 }}><Btn v="secondary" sm onClick={async () => { try { const res = await materialsApi.download(m.id); if (res.data.type === 'application/json') { const text = await res.data.text(); const err = JSON.parse(text); alert(err.error || "Erro ao baixar arquivo"); return; } const url = window.URL.createObjectURL(new Blob([res.data])); const a = document.createElement('a'); a.href = url; a.download = `${m.t}.${m.tipo || 'bin'}`; document.body.appendChild(a); a.click(); a.remove(); window.URL.revokeObjectURL(url); } catch (e) { console.error("Erro no download:", e); alert("Erro ao baixar arquivo"); } }}>⬇ Download</Btn></div>
           </div>
         ))}
       </div>

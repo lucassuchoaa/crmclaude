@@ -13,7 +13,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadsDir = path.join(__dirname, '..', 'data', 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
-const storage = multer.diskStorage({
+const isPg = !!process.env.DATABASE_URL;
+
+const diskStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname);
@@ -22,7 +24,7 @@ const storage = multer.diskStorage({
 });
 
 const upload = multer({
-  storage,
+  storage: isPg ? multer.memoryStorage() : diskStorage,
   limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowed = ['.pdf', '.xlsx', '.xls', '.docx', '.doc', '.mp4', '.pptx', '.ppt', '.png', '.jpg', '.jpeg', '.zip'];
@@ -34,6 +36,20 @@ const upload = multer({
 
 const router = express.Router();
 
+// Get categories (must be before /:id to avoid conflict)
+router.get('/meta/categories', authenticate, async (req, res) => {
+  try {
+    const db = getDatabase();
+    const categories = await db.prepare(`
+      SELECT DISTINCT category, COUNT(*) as count FROM materials GROUP BY category ORDER BY count DESC
+    `).all();
+    res.json({ categories });
+  } catch (error) {
+    console.error('Get categories error:', error);
+    res.status(500).json({ error: 'Failed to get categories' });
+  }
+});
+
 // Get materials
 router.get('/', authenticate, async (req, res) => {
   try {
@@ -41,7 +57,9 @@ router.get('/', authenticate, async (req, res) => {
     const { category, search } = req.query;
 
     let query = `
-      SELECT m.*, u.name as created_by_name
+      SELECT m.id, m.title, m.description, m.category, m.file_path, m.file_type,
+             m.roles_allowed, m.created_by, m.created_at, m.updated_at,
+             m.file_original_name, u.name as created_by_name
       FROM materials m LEFT JOIN users u ON m.created_by = u.id WHERE 1=1
     `;
     const params = [];
@@ -71,7 +89,9 @@ router.get('/:id', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
     const material = await db.prepare(`
-      SELECT m.*, u.name as created_by_name
+      SELECT m.id, m.title, m.description, m.category, m.file_path, m.file_type,
+             m.roles_allowed, m.created_by, m.created_at, m.updated_at,
+             m.file_original_name, u.name as created_by_name
       FROM materials m LEFT JOIN users u ON m.created_by = u.id WHERE m.id = ?
     `).get(req.params.id);
 
@@ -100,17 +120,28 @@ router.post('/', authenticate, requireMinRole('gerente'), upload.single('file'),
     const validRoles = ['all', 'super_admin', 'executivo', 'diretor', 'gerente', 'parceiro'];
     const roles = roles_allowed ? roles_allowed.split(',').filter(r => validRoles.includes(r.trim())) : ['all'];
 
-    const filePath = req.file ? req.file.filename : null;
     const detectedType = req.file ? path.extname(req.file.originalname).replace('.', '').toLowerCase() : (file_type || null);
     const fileSize = req.file ? req.file.size : null;
     const fileDesc = fileSize ? `${description || ''} | Tamanho: ${(fileSize / (1024 * 1024)).toFixed(1)} MB`.trim() : (description || null);
 
-    await db.prepare(`
-      INSERT INTO materials (id, title, description, category, file_path, file_type, roles_allowed, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, title, fileDesc, category, filePath, detectedType, roles.join(','), req.user.id);
+    if (isPg) {
+      // PG: save file content in DB as BYTEA
+      const fileData = req.file ? req.file.buffer : null;
+      const fileOriginalName = req.file ? req.file.originalname : null;
+      await db.prepare(`
+        INSERT INTO materials (id, title, description, category, file_path, file_type, roles_allowed, created_by, file_data, file_original_name)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, title, fileDesc, category, null, detectedType, roles.join(','), req.user.id, fileData, fileOriginalName);
+    } else {
+      // SQLite: save file to disk
+      const filePath = req.file ? req.file.filename : null;
+      await db.prepare(`
+        INSERT INTO materials (id, title, description, category, file_path, file_type, roles_allowed, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, title, fileDesc, category, filePath, detectedType, roles.join(','), req.user.id);
+    }
 
-    const material = await db.prepare('SELECT * FROM materials WHERE id = ?').get(id);
+    const material = await db.prepare('SELECT id, title, description, category, file_path, file_type, roles_allowed, created_by, created_at, updated_at, file_original_name FROM materials WHERE id = ?').get(id);
     res.status(201).json({ material });
   } catch (error) {
     console.error('Create material error:', error);
@@ -129,6 +160,22 @@ router.get('/:id/download', authenticate, async (req, res) => {
     if (!rolesAllowed.includes('all') && !rolesAllowed.includes(req.user.role)) {
       return res.status(403).json({ error: 'Access denied' });
     }
+    // Try DB-stored file first (PG BYTEA)
+    if (material.file_data) {
+      const filename = material.file_original_name || `${material.title}.${material.file_type || 'bin'}`;
+      const mimeTypes = {
+        pdf: 'application/pdf', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        xls: 'application/vnd.ms-excel', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        doc: 'application/msword', mp4: 'video/mp4', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        ppt: 'application/vnd.ms-powerpoint', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', zip: 'application/zip'
+      };
+      const contentType = mimeTypes[material.file_type] || 'application/octet-stream';
+      res.set('Content-Type', contentType);
+      res.set('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+      return res.send(Buffer.from(material.file_data));
+    }
+
+    // Fallback: disk-based file (SQLite or old uploads)
     if (!material.file_path) return res.status(404).json({ error: 'No file attached' });
 
     const filePath = path.join(uploadsDir, material.file_path);
@@ -173,7 +220,7 @@ router.put('/:id', authenticate, requireMinRole('gerente'), async (req, res) => 
       req.params.id
     );
 
-    const updated = await db.prepare('SELECT * FROM materials WHERE id = ?').get(req.params.id);
+    const updated = await db.prepare('SELECT id, title, description, category, file_path, file_type, roles_allowed, created_by, created_at, updated_at, file_original_name FROM materials WHERE id = ?').get(req.params.id);
     res.json({ material: updated });
   } catch (error) {
     console.error('Update material error:', error);
@@ -193,20 +240,6 @@ router.delete('/:id', authenticate, requireMinRole('diretor'), async (req, res) 
   } catch (error) {
     console.error('Delete material error:', error);
     res.status(500).json({ error: 'Failed to delete material' });
-  }
-});
-
-// Get categories
-router.get('/meta/categories', authenticate, async (req, res) => {
-  try {
-    const db = getDatabase();
-    const categories = await db.prepare(`
-      SELECT DISTINCT category, COUNT(*) as count FROM materials GROUP BY category ORDER BY count DESC
-    `).all();
-    res.json({ categories });
-  } catch (error) {
-    console.error('Get categories error:', error);
-    res.status(500).json({ error: 'Failed to get categories' });
   }
 });
 

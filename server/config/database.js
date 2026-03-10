@@ -479,6 +479,8 @@ async function createTables(db) {
     };
 
     await pgSafeAddColumn('indications', 'hubspot_analysis', 'TEXT');
+    await pgSafeAddColumn('materials', 'file_data', 'BYTEA');
+    await pgSafeAddColumn('materials', 'file_original_name', 'TEXT');
   }
 
   // ── SQLite-only migrations ──
@@ -504,6 +506,8 @@ async function createTables(db) {
     await safeAddColumn('messages', 'source', "TEXT DEFAULT 'crm'");
     await safeAddColumn('messages', 'whatsapp_message_id', 'TEXT');
     await safeAddColumn('indications', 'hubspot_analysis', 'TEXT');
+    await safeAddColumn('materials', 'file_data', 'BLOB');
+    await safeAddColumn('materials', 'file_original_name', 'TEXT');
   }
 }
 
