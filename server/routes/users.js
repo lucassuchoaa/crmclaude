@@ -22,7 +22,7 @@ router.get('/', authenticate, async (req, res) => {
     let query = `
       SELECT u.id, u.email, u.name, u.role, u.avatar, u.manager_id, u.is_active,
              u.empresa, u.tel, u.com_tipo, u.com_val, u.cnpj, u.created_at,
-             m.name as manager_name
+             u.last_login_at, m.name as manager_name
       FROM users u
       LEFT JOIN users m ON u.manager_id = m.id
       WHERE 1=1
@@ -90,7 +90,7 @@ router.get('/:id', authenticate, async (req, res) => {
     const user = await db.prepare(`
       SELECT u.id, u.email, u.name, u.role, u.avatar, u.manager_id, u.is_active,
              u.empresa, u.tel, u.com_tipo, u.com_val, u.cnpj, u.created_at,
-             m.name as manager_name
+             u.last_login_at, m.name as manager_name
       FROM users u
       LEFT JOIN users m ON u.manager_id = m.id
       WHERE u.id = ?

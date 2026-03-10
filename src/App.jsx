@@ -24,6 +24,7 @@ const transformUser = (u) => ({
   dId: u.role === 'gerente' ? u.manager_id : undefined,
   gId: u.role === 'parceiro' ? u.manager_id : undefined,
   mustChangePassword: !!u.must_change_password,
+  lastLogin: u.last_login_at,
 });
 
 // Transform API indication data to match frontend structure
@@ -3275,7 +3276,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
           </div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
             <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
-              <thead><tr>{["Usuário", "E-mail", "Perfil", "Vínculo", "Status", "Ações"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
+              <thead><tr>{["Usuário", "E-mail", "Perfil", "Vínculo", "Status", "Último Acesso", "Ações"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>{users.filter(u => u.role !== "parceiro").filter(u => { if (uRoleFilter && u.role !== uRoleFilter) return false; if (uSearch) { const s = uSearch.toLowerCase(); return u.name.toLowerCase().includes(s) || u.email.toLowerCase().includes(s); } return true; }).map(u => (
                 <tr key={u.id}>
                   <td style={tdS}>
@@ -3288,6 +3289,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
                   <td style={tdS}><Badge type={u.role === "super_admin" ? "accent" : u.role === "executivo" ? "accent" : u.role === "diretor" ? "warning" : "info"}>{RL[u.role]}</Badge></td>
                   <td style={{ ...tdS, fontSize: 12 }}>{u.role === "gerente" ? (users.find(d => d.id === u.dId)?.name || <span style={{ color: T.er, fontSize: 11 }}>⚠ Sem gerente</span>) : u.role === "diretor" ? (users.find(e => e.id === u.eId)?.name || <span style={{ color: T.er, fontSize: 11 }}>⚠ Sem diretor</span>) : <span style={{ color: T.tm }}>—</span>}</td>
                   <td style={tdS}><Badge type="success">Ativo</Badge></td>
+                  <td style={{ ...tdS, fontSize: 12, color: T.t2 }}>{u.lastLogin ? new Date(u.lastLogin).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : <span style={{ color: T.tm }}>—</span>}</td>
                   <td style={tdS}>
                     {u.id === "sa1" ? <span style={{ fontSize: 11, color: T.tm }}>—</span> :
                       delUserConf === u.id ? (

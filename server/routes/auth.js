@@ -32,6 +32,10 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
+    // Update last login timestamp
+    await db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?')
+      .run(new Date().toISOString(), user.id);
+
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken(user);
 
