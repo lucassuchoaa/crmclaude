@@ -40,7 +40,7 @@ O sistema permite que parceiros indiquem empresas, gerentes acompanhem o pipelin
 
 - Pipeline visual (Kanban) com **8 estágios** (incluindo Prospecção)
 - Consulta automática de CNPJ na Receita Federal (BrasilAPI)
-- Integração com HubSpot CRM (verificação de duplicatas, deals)
+- Integração com HubSpot CRM (verificação de duplicatas, deals, sync automático 3x/dia, auto-criação de empresa/deal)
 - Chat com integração WhatsApp (Evolution API) — envio e recebimento bidirecional
 - Agente CNPJ no chat — consulta e criação de indicações diretamente na conversa
 - Gestão de comissões e NFes com KPIs financeiros
@@ -243,6 +243,15 @@ Ao clicar em um card, abre-se o painel de detalhes com:
 - **Notas internas**: adicionar anotações visíveis apenas para gestores
 - **Histórico**: lista cronológica de todas as movimentações com data, autor e ação
 - **Status de liberação**: informação sobre trava e prazo
+
+### Auto-criação no HubSpot ao Liberar
+
+Quando uma indicação é **liberada**, o sistema verifica automaticamente se a empresa já existe no HubSpot:
+
+- **Se a empresa não existe**: cria automaticamente uma **Company** (com CNPJ e razão social) e um **Deal** (oportunidade) no HubSpot, vinculando ao pipeline configurado.
+- **Se a empresa já existe**: apenas vincula o deal existente, sem duplicar.
+
+Isso garante que toda indicação liberada tenha representação no HubSpot para acompanhamento comercial.
 
 ### Sistema de Liberação / Trava
 
@@ -631,7 +640,7 @@ O sistema dispara notificações automaticamente nos seguintes eventos:
 
 > Acesso: Super Admin
 
-A página de configurações possui **6 abas**:
+A página de configurações possui **7 abas**:
 
 ### Aba "Geral"
 
@@ -706,6 +715,14 @@ Gerenciamento de materiais de apoio:
 - **Excluir material**: remove o material da biblioteca
 - Tabela com: tipo (extensão), título, categoria, tamanho, data
 
+### Aba "Auditoria"
+
+Registro de ações críticas do sistema para rastreabilidade e compliance:
+
+- Log de sincronizações HubSpot (automáticas e manuais)
+- Registro de auto-criações de empresa/deal no HubSpot
+- Histórico de movimentações automáticas de indicações (ex: deal "ganho" → aprovado)
+
 ---
 
 ## 15. Integrações Externas
@@ -729,6 +746,9 @@ Gerenciamento de materiais de apoio:
   - Exibição de deals ativos no Dashboard
   - Análise de deals existentes registrada na indicação
   - Verificação cruzada no Agente CNPJ do chat
+  - **Sincronização automática 3x/dia** (8h, 12h, 17h): verifica os estágios dos deals no HubSpot e atualiza o status das indicações correspondentes no CRM
+  - **Auto-criação de Company + Deal**: ao liberar uma indicação, se a empresa não existir no HubSpot, o sistema cria automaticamente a Company e o Deal no pipeline configurado
+  - **Atualização automática por deal ganho**: quando um deal é marcado como "closedwon" (ganho) no HubSpot, a indicação correspondente é automaticamente movida para o status "aprovado" no CRM
 - **Nota**: mesmo com deals existentes no HubSpot, o parceiro pode criar a indicação. A análise fica registrada para referência.
 
 ### Evolution API (WhatsApp)

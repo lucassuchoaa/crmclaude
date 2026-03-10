@@ -2,8 +2,10 @@ import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { getDatabase } from '../config/database.js';
 import { validateCnpj } from '../utils/validators.js';
+import { runHubSpotSync } from '../services/hubspotSync.js';
 
 const router = express.Router();
+const HUBSPOT_BASE_URL = 'https://api.hubapi.com';
 
 router.post('/search', authenticate, async (req, res) => {
   try {
@@ -240,6 +242,173 @@ router.get('/pipelines', authenticate, async (req, res) => {
   } catch (error) {
     console.error('HubSpot pipelines error:', error);
     res.status(500).json({ error: 'Erro ao buscar pipelines' });
+  }
+});
+
+// Auto-create Company + Deal in HubSpot when indication is liberated
+router.post('/create-company-deal', authenticate, async (req, res) => {
+  try {
+    if (!['super_admin', 'executivo'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Sem permissão' });
+    }
+
+    const { indication_id } = req.body;
+    if (!indication_id) return res.status(400).json({ error: 'indication_id é obrigatório' });
+
+    const db = getDatabase();
+    const config = await db.prepare('SELECT value FROM settings WHERE key = ?').get('hubspot_api_key');
+    if (!config?.value) return res.status(400).json({ error: 'HubSpot não configurado' });
+
+    const pipelineConfig = await db.prepare('SELECT value FROM settings WHERE key = ?').get('hubspot_pipeline_id');
+    const apiKey = config.value;
+    const headers = { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
+
+    // Fetch indication with owner/partner info
+    const indication = await db.prepare(`
+      SELECT i.*, u.name as partner_name, u.email as partner_email
+      FROM indications i
+      LEFT JOIN users u ON i.owner_id = u.id
+      WHERE i.id = ?
+    `).get(indication_id);
+
+    if (!indication) return res.status(404).json({ error: 'Indicação não encontrada' });
+
+    // Already has hubspot_id → skip
+    if (indication.hubspot_id) {
+      return res.json({ company_id: null, deal_id: indication.hubspot_id, stage: indication.hubspot_status, message: 'Indicação já vinculada ao HubSpot' });
+    }
+
+    const cleanCnpj = indication.cnpj.replace(/\D/g, '');
+
+    // Check if company already exists in HubSpot
+    let companyId = null;
+    const searchRes = await fetch(`${HUBSPOT_BASE_URL}/crm/v3/objects/companies/search`, {
+      method: 'POST', headers,
+      body: JSON.stringify({
+        filterGroups: [
+          { filters: [{ propertyName: 'cnpj', operator: 'EQ', value: cleanCnpj }] },
+          { filters: [{ propertyName: 'cnpj', operator: 'EQ', value: indication.cnpj }] }
+        ],
+        properties: ['name', 'cnpj']
+      })
+    });
+
+    if (searchRes.ok) {
+      const searchData = await searchRes.json();
+      if (searchData.results?.length > 0) {
+        companyId = searchData.results[0].id;
+        console.log(`[HubSpot] Company already exists: ${companyId}`);
+      }
+    }
+
+    // Create company if not found
+    if (!companyId) {
+      const descParts = [
+        indication.cnae ? `CNAE: ${indication.cnae}` : null,
+        indication.capital ? `Capital: R$ ${Number(indication.capital).toLocaleString('pt-BR')}` : null,
+        indication.abertura ? `Abertura: ${indication.abertura}` : null,
+        indication.nome_fantasia ? `Nome Fantasia: ${indication.nome_fantasia}` : null,
+      ].filter(Boolean).join(' | ');
+
+      const companyProps = {
+        name: indication.razao_social,
+        cnpj: cleanCnpj,
+      };
+      if (indication.contato_telefone) companyProps.phone = indication.contato_telefone;
+      if (indication.endereco) companyProps.address = indication.endereco;
+      if (indication.num_funcionarios) companyProps.numberofemployees = String(indication.num_funcionarios);
+      if (descParts) companyProps.description = descParts;
+
+      const createCompanyRes = await fetch(`${HUBSPOT_BASE_URL}/crm/v3/objects/companies`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ properties: companyProps })
+      });
+
+      if (!createCompanyRes.ok) {
+        const err = await createCompanyRes.json();
+        console.error('[HubSpot] Create company error:', err);
+        return res.status(500).json({ error: 'Erro ao criar empresa no HubSpot', details: err.message });
+      }
+
+      const companyData = await createCompanyRes.json();
+      companyId = companyData.id;
+      console.log(`[HubSpot] Company created: ${companyId} (${indication.razao_social})`);
+    }
+
+    // Get first stage of configured pipeline
+    let dealstage = null;
+    const pipelineId = pipelineConfig?.value || null;
+
+    if (pipelineId) {
+      const pipelinesRes = await fetch(`${HUBSPOT_BASE_URL}/crm/v3/pipelines/deals`, { headers });
+      if (pipelinesRes.ok) {
+        const pipelinesData = await pipelinesRes.json();
+        const pipeline = pipelinesData.results?.find(p => p.id === pipelineId);
+        if (pipeline?.stages?.length) {
+          const sorted = pipeline.stages.sort((a, b) => a.displayOrder - b.displayOrder);
+          dealstage = sorted[0].id;
+        }
+      }
+    }
+
+    // Create Deal
+    const dealProps = {
+      dealname: indication.nome_fantasia || indication.razao_social,
+    };
+    if (indication.value) dealProps.amount = String(indication.value);
+    if (pipelineId) dealProps.pipeline = pipelineId;
+    if (dealstage) dealProps.dealstage = dealstage;
+
+    const createDealRes = await fetch(`${HUBSPOT_BASE_URL}/crm/v3/objects/deals`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ properties: dealProps })
+    });
+
+    if (!createDealRes.ok) {
+      const err = await createDealRes.json();
+      console.error('[HubSpot] Create deal error:', err);
+      return res.status(500).json({ error: 'Erro ao criar oportunidade no HubSpot', details: err.message });
+    }
+
+    const dealData = await createDealRes.json();
+    const dealId = dealData.id;
+    console.log(`[HubSpot] Deal created: ${dealId} for company ${companyId}`);
+
+    // Associate Deal → Company
+    await fetch(`${HUBSPOT_BASE_URL}/crm/v3/objects/deals/${dealId}/associations/companies/${companyId}/deal_to_company`, {
+      method: 'PUT', headers
+    });
+
+    // Update indication with hubspot_id
+    const now = new Date().toISOString();
+    await db.prepare('UPDATE indications SET hubspot_id = ?, hubspot_status = ?, updated_at = ? WHERE id = ?')
+      .run(dealId, dealstage || 'created', now, indication_id);
+
+    // Add history
+    await db.prepare(
+      'INSERT INTO indication_history (indication_id, user_id, action, txt, created_at) VALUES (?, ?, ?, ?, ?)'
+    ).run(indication_id, req.user.id, 'hubspot_create', `Empresa e oportunidade criadas automaticamente no HubSpot (Deal ID: ${dealId}).`, now);
+
+    res.json({ company_id: companyId, deal_id: dealId, stage: dealstage || 'created' });
+  } catch (error) {
+    console.error('[HubSpot] Create company-deal error:', error);
+    res.status(500).json({ error: 'Erro ao criar empresa/oportunidade no HubSpot' });
+  }
+});
+
+// Manual sync trigger (executivo+ only)
+router.post('/sync', authenticate, async (req, res) => {
+  try {
+    if (!['super_admin', 'executivo'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Sem permissão' });
+    }
+
+    const db = getDatabase();
+    const result = await runHubSpotSync(db);
+    res.json(result);
+  } catch (error) {
+    console.error('[HubSpot] Manual sync error:', error);
+    res.status(500).json({ error: 'Erro ao sincronizar com HubSpot' });
   }
 });
 

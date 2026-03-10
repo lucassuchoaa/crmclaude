@@ -271,6 +271,12 @@ export const hubspotApi = {
 
   getPipelines: () =>
     api.get('/hubspot/pipelines'),
+
+  createCompanyDeal: (indicationId) =>
+    api.post('/hubspot/create-company-deal', { indication_id: indicationId }),
+
+  sync: () =>
+    api.post('/hubspot/sync'),
 };
 
 // Groups API (Chat Gerente-Parceiro)

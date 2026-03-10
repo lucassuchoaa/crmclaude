@@ -37,19 +37,23 @@ router.get('/summary', authenticate, async (req, res) => {
                SUM(CASE WHEN i.status NOT IN ('fechado','perdido') THEN 1 ELSE 0 END) as active_count,
                SUM(CASE WHEN i.status IN ('em_contato','proposta','negociacao') THEN 1 ELSE 0 END) as pipeline_count,
                SUM(CASE WHEN i.status = 'fechado' THEN 1 ELSE 0 END) as closed_count,
-               COALESCE(SUM(i.num_funcionarios), 0) as total_funcionarios
+               COALESCE(SUM(i.num_funcionarios), 0) as total_funcionarios,
+               MAX(i.created_at) as last_indication_date
         FROM users u
         LEFT JOIN indications i ON i.owner_id = u.id
         WHERE u.manager_id = ? AND u.role = 'parceiro' AND u.is_active = 1
         GROUP BY u.id, u.name, u.empresa, u.avatar ORDER BY total_indications DESC
       `).all(g.id);
 
+      // Ensure numeric values (SQLite may return strings for aggregates)
+      const num = (v) => Number(v) || 0;
+
       const totals = parceiros.reduce((acc, p) => ({
-        total_indications: acc.total_indications + (p.total_indications || 0),
-        active_count: acc.active_count + (p.active_count || 0),
-        pipeline_count: acc.pipeline_count + (p.pipeline_count || 0),
-        closed_count: acc.closed_count + (p.closed_count || 0),
-        total_funcionarios: acc.total_funcionarios + (p.total_funcionarios || 0),
+        total_indications: acc.total_indications + num(p.total_indications),
+        active_count: acc.active_count + num(p.active_count),
+        pipeline_count: acc.pipeline_count + num(p.pipeline_count),
+        closed_count: acc.closed_count + num(p.closed_count),
+        total_funcionarios: acc.total_funcionarios + num(p.total_funcionarios),
       }), { total_indications: 0, active_count: 0, pipeline_count: 0, closed_count: 0, total_funcionarios: 0 });
 
       const conversion_rate = totals.total_indications > 0
@@ -60,10 +64,20 @@ router.get('/summary', authenticate, async (req, res) => {
         parceiro_count: parceiros.length,
         ...totals,
         conversion_rate: parseFloat(conversion_rate),
-        parceiros: parceiros.map(p => ({
-          ...p,
-          conversion_rate: p.total_indications > 0 ? parseFloat(((p.closed_count / p.total_indications) * 100).toFixed(1)) : 0
-        }))
+        parceiros: parceiros.map(p => {
+          const ti = num(p.total_indications);
+          const cc = num(p.closed_count);
+          return {
+            ...p,
+            total_indications: ti,
+            active_count: num(p.active_count),
+            pipeline_count: num(p.pipeline_count),
+            closed_count: cc,
+            total_funcionarios: num(p.total_funcionarios),
+            last_indication_date: p.last_indication_date || null,
+            conversion_rate: ti > 0 ? parseFloat(((cc / ti) * 100).toFixed(1)) : 0
+          };
+        })
       });
     }
 
@@ -74,12 +88,12 @@ router.get('/summary', authenticate, async (req, res) => {
         const dirName = item.gerente.diretor_name || 'Sem Diretor';
         if (!byDiretor[dirKey]) byDiretor[dirKey] = { diretor_id: dirKey, diretor_name: dirName, gerentes: [], total_indications: 0, active_count: 0, pipeline_count: 0, closed_count: 0, total_funcionarios: 0, parceiro_count: 0 };
         byDiretor[dirKey].gerentes.push(item);
-        byDiretor[dirKey].total_indications += item.total_indications || 0;
-        byDiretor[dirKey].active_count += item.active_count || 0;
-        byDiretor[dirKey].pipeline_count += item.pipeline_count || 0;
-        byDiretor[dirKey].closed_count += item.closed_count || 0;
-        byDiretor[dirKey].total_funcionarios += item.total_funcionarios || 0;
-        byDiretor[dirKey].parceiro_count += item.parceiro_count || 0;
+        byDiretor[dirKey].total_indications += Number(item.total_indications) || 0;
+        byDiretor[dirKey].active_count += Number(item.active_count) || 0;
+        byDiretor[dirKey].pipeline_count += Number(item.pipeline_count) || 0;
+        byDiretor[dirKey].closed_count += Number(item.closed_count) || 0;
+        byDiretor[dirKey].total_funcionarios += Number(item.total_funcionarios) || 0;
+        byDiretor[dirKey].parceiro_count += Number(item.parceiro_count) || 0;
       }
       // Calculate conversion rate per director
       for (const dir of Object.values(byDiretor)) {

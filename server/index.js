@@ -23,6 +23,7 @@ import cnpjAgentRoutes from './routes/cnpjAgent.js';
 import diretoriaRoutes from './routes/diretoria.js';
 import whatsappRoutes from './routes/whatsapp.js';
 import conveniosRoutes from './routes/convenios.js';
+import { startHubSpotScheduler } from './services/hubspotSync.js';
 
 dotenv.config();
 
@@ -124,6 +125,7 @@ app.use((req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   seedIfEmpty(getDatabase()).catch(e => console.error('Seed error:', e.message));
+  startHubSpotScheduler(getDatabase());
 });
 
 export default app;

@@ -325,6 +325,57 @@ function comLabel(tipo, val) {
   return tipo === "pct" ? `${val}% cashin` : `R$ ${parseFloat(val).toFixed(2)}/conta`;
 }
 
+// Multi-select dropdown for parceiros
+function MultiSelectParceiro({ parceiros, selected, onToggle, selS }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ref = useCallback(node => {
+    if (!node) return;
+    const handler = (e) => { if (!node.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const filtered = parceiros.filter(p => !search || p.name.toLowerCase().includes(search.toLowerCase()));
+  const label = selected.length === 0 ? "Todos" : selected.length === 1 ? parceiros.find(p => p.id === selected[0])?.name || "1 selecionado" : `${selected.length} selecionados`;
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button onClick={() => setOpen(!open)} style={{ ...selS, cursor: "pointer", minWidth: 130, textAlign: "left", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 140 }}>{label}</span>
+        <span style={{ fontSize: 8, color: T.tm }}>▼</span>
+      </button>
+      {open && (
+        <div style={{ position: "absolute", top: "100%", left: 0, marginTop: 4, background: T.card, border: `1px solid ${T.bor}`, borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.3)", zIndex: 999, minWidth: 220, maxHeight: 280, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+          <div style={{ padding: "8px 10px", borderBottom: `1px solid ${T.bor}` }}>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar parceiro..." autoFocus
+              style={{ width: "100%", padding: "6px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 4, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 11, outline: "none" }} />
+          </div>
+          <div style={{ overflowY: "auto", maxHeight: 220 }}>
+            {selected.length > 0 && (
+              <div onClick={() => { selected.forEach(id => onToggle(id)); }} style={{ padding: "7px 12px", fontSize: 11, color: T.er, cursor: "pointer", borderBottom: `1px solid ${T.bor}22`, fontWeight: 600 }}
+                onMouseEnter={e => e.currentTarget.style.background = T.er + "11"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                ✕ Limpar seleção
+              </div>
+            )}
+            {filtered.map(p => (
+              <div key={p.id} onClick={() => onToggle(p.id)} style={{ padding: "7px 12px", fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, color: T.txt }}
+                onMouseEnter={e => e.currentTarget.style.background = T.ac + "11"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                <span style={{ width: 16, height: 16, borderRadius: 3, border: `1.5px solid ${selected.includes(p.id) ? T.ac : T.bor}`, background: selected.includes(p.id) ? T.ac : "transparent", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#fff", flexShrink: 0 }}>
+                  {selected.includes(p.id) && "✓"}
+                </span>
+                <span>{p.name}</span>
+                {p.empresa && <span style={{ fontSize: 10, color: T.tm, marginLeft: "auto" }}>{p.empresa}</span>}
+              </div>
+            ))}
+            {filtered.length === 0 && <div style={{ padding: 12, fontSize: 11, color: T.tm, textAlign: "center" }}>Nenhum parceiro</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ===== DASHBOARD =====
 function Dash({ inds, users, comms, nfes, activity = [] }) {
   const { user } = useAuth();
@@ -351,10 +402,28 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
   const [fSt, setFSt] = useState("todos");
   const [fDtDe, setFDtDe] = useState("");
   const [fDtAte, setFDtAte] = useState("");
-  const [fPar, setFPar] = useState("todos");
+  const [fPar, setFPar] = useState([]); // multi-select parceiro ids
   const [fLib, setFLib] = useState("todos");
   const [fGer, setFGer] = useState("todos");
   const [fDir, setFDir] = useState("todos");
+  const [fConv, setFConv] = useState("todos");
+  const [dashConvenios, setDashConvenios] = useState([]);
+  const [dashConvParMap, setDashConvParMap] = useState({}); // convenio_id -> Set of parceiro ids
+
+  useEffect(() => {
+    conveniosApi.getAll().then(async r => {
+      const convs = (r.data.convenios || []).filter(c => c.is_active);
+      setDashConvenios(convs);
+      const map = {};
+      for (const c of convs) {
+        try {
+          const pr = await conveniosApi.getParceiros(c.id);
+          map[c.id] = new Set((pr.data.parceiros || []).map(p => p.id));
+        } catch { map[c.id] = new Set(); }
+      }
+      setDashConvParMap(map);
+    }).catch(() => {});
+  }, []);
 
   const myParceiros = isGerente ? users.filter(u => u.role === "parceiro" && u.gId === user.id)
     : user.role === "diretor" ? users.filter(u => u.role === "parceiro" && users.find(g => g.id === u.gId && g.dId === user.id))
@@ -365,11 +434,13 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
       : isExec ? users.filter(u => u.role === "gerente" && myDiretorIds.includes(u.dId))
         : users.filter(u => u.role === "gerente");
 
+  const toggleFPar = (id) => setFPar(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+
   const filtered = baseInds.filter(i => {
     if (fSt !== "todos" && i.st !== fSt) return false;
     if (fDtDe && i.dt < fDtDe) return false;
     if (fDtAte && i.dt > fDtAte) return false;
-    if (fPar !== "todos" && i.pId !== fPar) return false;
+    if (fPar.length > 0 && !fPar.includes(i.pId)) return false;
     if (fLib === "liberado" && i.lib !== "liberado") return false;
     if (fLib === "bloqueado" && i.lib !== "bloqueado") return false;
     if (fLib === "pendente" && i.lib !== null) return false;
@@ -379,10 +450,14 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
       const g = users.find(u => u.id === i.gId);
       if (!g || g.dId !== fDir) return false;
     }
+    if (fConv !== "todos") {
+      const convParceiros = dashConvParMap[fConv];
+      if (!convParceiros || !convParceiros.has(i.pId)) return false;
+    }
     return true;
   });
-  const hasFilters = fSt !== "todos" || fDtDe || fDtAte || fPar !== "todos" || fLib !== "todos" || fGer !== "todos" || fDir !== "todos";
-  const clearFilters = () => { setFSt("todos"); setFDtDe(""); setFDtAte(""); setFPar("todos"); setFLib("todos"); setFGer("todos"); setFDir("todos"); };
+  const hasFilters = fSt !== "todos" || fDtDe || fDtAte || fPar.length > 0 || fLib !== "todos" || fGer !== "todos" || fDir !== "todos" || fConv !== "todos";
+  const clearFilters = () => { setFSt("todos"); setFDtDe(""); setFDtAte(""); setFPar([]); setFLib("todos"); setFGer("todos"); setFDir("todos"); setFConv("todos"); };
 
   // Stats — use filtered data when filters are active, baseInds otherwise
   const statsSource = hasFilters ? filtered : baseInds;
@@ -806,9 +881,13 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
           <span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", fontWeight: 600 }}>Executivo:</span>
           <select value={fGer} onChange={e => setFGer(e.target.value)} style={selS}><option value="todos">Todos</option>{myGerentes.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select>
         </div>}
-        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+        {dashConvenios.length > 0 && <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", fontWeight: 600 }}>Convênio:</span>
+          <select value={fConv} onChange={e => setFConv(e.target.value)} style={selS}><option value="todos">Todos</option>{dashConvenios.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+        </div>}
+        <div style={{ display: "flex", alignItems: "center", gap: 5, position: "relative" }}>
           <span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", fontWeight: 600 }}>Parceiro:</span>
-          <select value={fPar} onChange={e => setFPar(e.target.value)} style={selS}><option value="todos">Todos</option>{myParceiros.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+          <MultiSelectParceiro parceiros={myParceiros} selected={fPar} onToggle={toggleFPar} selS={selS} />
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
           <span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", fontWeight: 600 }}>Status:</span>
@@ -1040,25 +1119,49 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenc
           : inds;
 
   // Filters (gerente/admin)
-  const [fPar, setFPar] = useState("todos");
+  const [fPar, setFPar] = useState([]);
   const [fDtDe, setFDtDe] = useState("");
   const [fDtAte, setFDtAte] = useState("");
   const [fLib, setFLib] = useState("todos"); // todos, liberado, bloqueado, pendente, vencido
+  const [kFConv, setKFConv] = useState("todos");
+  const [kConvenios, setKConvenios] = useState([]);
+  const [kConvParMap, setKConvParMap] = useState({});
+
+  useEffect(() => {
+    conveniosApi.getAll().then(async r => {
+      const convs = (r.data.convenios || []).filter(c => c.is_active);
+      setKConvenios(convs);
+      const map = {};
+      for (const c of convs) {
+        try {
+          const pr = await conveniosApi.getParceiros(c.id);
+          map[c.id] = new Set((pr.data.parceiros || []).map(p => p.id));
+        } catch { map[c.id] = new Set(); }
+      }
+      setKConvParMap(map);
+    }).catch(() => {});
+  }, []);
+
+  const toggleFPar = (id) => setFPar(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
   const today = new Date().toISOString().split("T")[0];
   const fl = base.filter(i => {
-    if (fPar !== "todos" && i.pId !== fPar) return false;
+    if (fPar.length > 0 && !fPar.includes(i.pId)) return false;
     if (fDtDe && i.dt < fDtDe) return false;
     if (fDtAte && i.dt > fDtAte) return false;
     if (fLib === "liberado" && i.lib !== "liberado") return false;
     if (fLib === "bloqueado" && i.lib !== "bloqueado") return false;
     if (fLib === "pendente" && i.lib !== null) return false;
     if (fLib === "vencido" && !(i.lib === "liberado" && i.libExp && i.libExp < today)) return false;
+    if (kFConv !== "todos") {
+      const convParceiros = kConvParMap[kFConv];
+      if (!convParceiros || !convParceiros.has(i.pId)) return false;
+    }
     return true;
   });
 
-  const hasFilters = fPar !== "todos" || fDtDe || fDtAte || fLib !== "todos";
-  const clearFilters = () => { setFPar("todos"); setFDtDe(""); setFDtAte(""); setFLib("todos"); };
+  const hasFilters = fPar.length > 0 || fDtDe || fDtAte || fLib !== "todos" || kFConv !== "todos";
+  const clearFilters = () => { setFPar([]); setFDtDe(""); setFDtAte(""); setFLib("todos"); setKFConv("todos"); };
 
   // Parceiros deste gerente/cadeia
   const myParceiros = isGerente ? users.filter(u => u.role === "parceiro" && u.gId === user.id)
@@ -1079,6 +1182,16 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenc
     // API call - persist trava state and save history
     updateIndApi(id, { liberacao_status: next, liberacao_data: next === "liberado" ? addDays(0) : undefined, liberacao_expiry: expDate });
     indicationsApi.addHistory(id, hEntry.txt, 'liberacao').catch(e => console.error("Erro ao salvar histórico:", e));
+    // Auto-create company + deal in HubSpot when liberating
+    if (next === "liberado") {
+      hubspotApi.createCompanyDeal(id).then(r => {
+        if (r.data?.deal_id) {
+          setInds(p => p.map(x => x.id === id ? { ...x, hsId: r.data.deal_id, hsSt: r.data.stage } : x));
+          if (sel && sel.id === id) setSel(prev => ({ ...prev, hsId: r.data.deal_id, hsSt: r.data.stage }));
+          console.log(`[HubSpot] Auto-created deal ${r.data.deal_id} for indication ${id}`);
+        }
+      }).catch(e => console.warn("[HubSpot] Auto-create skipped:", e.response?.data?.error || e.message));
+    }
     // Notify parceiro about liberation/block
     const ind = inds.find(x => x.id === id);
     if (ind?.pId && (next === "liberado" || next === "bloqueado") && isCadenceActive(cadenceRules, "cad_liberacao")) {
@@ -1165,12 +1278,13 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenc
       {canMove && (
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, flexWrap: "wrap", padding: "10px 14px", background: T.card, border: `1px solid ${T.bor}`, borderRadius: 8 }}>
           <span style={{ fontSize: 11, color: T.tm, fontWeight: 600 }}>🔍 Filtros:</span>
+          {kConvenios.length > 0 && <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", fontWeight: 600 }}>Convênio:</span>
+            <select value={kFConv} onChange={e => setKFConv(e.target.value)} style={selS}><option value="todos">Todos</option>{kConvenios.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+          </div>}
           <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
             <span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", fontWeight: 600 }}>Parceiro:</span>
-            <select value={fPar} onChange={e => setFPar(e.target.value)} style={selS}>
-              <option value="todos">Todos</option>
-              {myParceiros.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
+            <MultiSelectParceiro parceiros={myParceiros} selected={fPar} onToggle={toggleFPar} selS={selS} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
             <span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", fontWeight: 600 }}>De:</span>
@@ -1431,9 +1545,25 @@ function ParcPage({ users, setUsers, inds }) {
   const [allConvenios, setAllConvenios] = useState([]);
   const [selConvIds, setSelConvIds] = useState([]);
   const [editConvIds, setEditConvIds] = useState([]);
+  const [parceiroConvMap, setParceiroConvMap] = useState({}); // parceiro_id -> [convenio names]
 
   useEffect(() => {
-    conveniosApi.getAll().then(r => setAllConvenios((r.data.convenios || []).filter(c => c.is_active))).catch(() => {});
+    conveniosApi.getAll().then(async r => {
+      const convs = (r.data.convenios || []).filter(c => c.is_active);
+      setAllConvenios(convs);
+      // Build parceiro -> convenio name map
+      const map = {};
+      for (const c of convs) {
+        try {
+          const pr = await conveniosApi.getParceiros(c.id);
+          for (const p of (pr.data.parceiros || [])) {
+            if (!map[p.id]) map[p.id] = [];
+            map[p.id].push(c.name);
+          }
+        } catch {}
+      }
+      setParceiroConvMap(map);
+    }).catch(() => {});
   }, []);
 
   const genPw = () => { const c = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789"; let p = ""; for (let i = 0; i < 8; i++) p += c[Math.floor(Math.random() * c.length)]; return p; };
@@ -1548,33 +1678,64 @@ function ParcPage({ users, setUsers, inds }) {
         <div style={{ flex: 1 }} />
         <Btn onClick={() => setModal(true)}>＋ Cadastrar Parceiro</Btn>
       </div>
-      <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-        <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
-          <thead><tr>{["Parceiro", "Empresa", "Condição Comercial", "Executivo", "Ind.", "Ativas", "Ações"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
-          <tbody>{parcs.map(p => {
-            const pi = inds.filter(i => i.pId === p.id);
-            return (
-              <tr key={p.id} onClick={() => setDetail(p)} style={{ cursor: "pointer" }}>
-                <td style={tdS}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ width: 32, height: 32, borderRadius: "50%", background: T.ac + "22", color: T.ac, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700 }}>{p.av || p.name[0]}</div>
-                    <div><div style={{ fontSize: 13, fontWeight: 600 }}>{p.name}</div><div style={{ fontSize: 10, color: T.tm }}>{p.email}</div></div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {parcs.map(p => {
+          const pi = inds.filter(i => i.pId === p.id);
+          const pActive = pi.filter(i => i.st === "ativo").length;
+          const pPipeline = pi.filter(i => ["em_contato", "proposta", "negociacao"].includes(i.st)).length;
+          const pClosed = pi.filter(i => i.st === "fechado").length;
+          const pFunc = pi.reduce((s, i) => s + (Number(i.nf) || 0), 0);
+          const pConv = pi.length > 0 ? ((pClosed / pi.length) * 100).toFixed(1) : "0.0";
+          const lastInd = pi.length > 0 ? pi.reduce((max, i) => (i.dt > max ? i.dt : max), pi[0].dt) : null;
+          const convColor = (r) => r >= 30 ? T.ok : r >= 15 ? T.wn : T.er;
+          const gerente = users.find(u => u.id === p.gId);
+          // Find convênios for this parceiro (from allConvenios which have parceiro lists, or show from user data)
+          return (
+            <div key={p.id} style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
+              <div onClick={() => setDetail(p)} style={{ padding: "14px 18px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}
+                onMouseEnter={e => e.currentTarget.style.background = T.ac + "06"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 220 }}>
+                  <div style={{ width: 38, height: 38, borderRadius: "50%", background: T.ac + "22", color: T.ac, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, flexShrink: 0 }}>{p.av || p.name[0]}</div>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: T.txt }}>{p.name}</div>
+                    <div style={{ fontSize: 11, color: T.tm }}>{p.empresa || "Sem empresa"}</div>
+                    <div style={{ display: "flex", gap: 10, marginTop: 2, flexWrap: "wrap" }}>
+                      {p.email && <span style={{ fontSize: 10, color: T.t2 }}>✉ {p.email}</span>}
+                      {p.tel && <span style={{ fontSize: 10, color: T.t2 }}>📞 {p.tel}</span>}
+                    </div>
                   </div>
-                </td>
-                <td style={tdS}>{p.empresa || "—"}</td>
-                <td style={tdS}>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    <ComBadge tipo={p.comTipo} val={p.comVal} />
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <ComBadge tipo={p.comTipo} val={p.comVal} />
+                  {gerente && <span style={{ fontSize: 10, color: T.t2, background: T.bg2, padding: "3px 8px", borderRadius: 4 }}>👤 {gerente.name}</span>}
+                  {parceiroConvMap[p.id]?.length > 0 && parceiroConvMap[p.id].map((cn, ci) => (
+                    <span key={ci} style={{ fontSize: 10, color: T.inf, background: T.inf + "15", padding: "3px 8px", borderRadius: 4 }}>🤝 {cn}</span>
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+                  {[
+                    { l: "Total", v: pi.length, co: T.txt },
+                    { l: "Ativas", v: pActive, co: T.ok },
+                    { l: "Pipeline", v: pPipeline, co: T.inf },
+                    { l: "Func.", v: pFunc.toLocaleString("pt-BR"), co: T.ac },
+                    { l: "Conversão", v: `${pConv}%`, co: convColor(parseFloat(pConv)) },
+                  ].map((s, i) => (
+                    <div key={i} style={{ textAlign: "center", minWidth: 44 }}>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: s.co }}>{s.v}</div>
+                      <div style={{ fontSize: 9, color: T.t2 }}>{s.l}</div>
+                    </div>
+                  ))}
+                  <div style={{ textAlign: "center", minWidth: 60 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: T.t2 }}>{lastInd ? new Date(lastInd).toLocaleDateString("pt-BR") : "—"}</div>
+                    <div style={{ fontSize: 9, color: T.t2 }}>Últ. Ind.</div>
                   </div>
-                </td>
-                <td style={tdS}>{users.find(u => u.id === p.gId)?.name || "—"}</td>
-                <td style={tdS}><Badge type="info">{pi.length}</Badge></td>
-                <td style={tdS}><Badge type="success">{pi.filter(i => i.st === "ativo").length}</Badge></td>
-                <td style={tdS}><Btn sm onClick={(e) => { e.stopPropagation(); openEditParc(p); }}>Editar</Btn></td>
-              </tr>
-            );
-          })}</tbody>
-        </table></div>
+                  <Btn sm onClick={(e) => { e.stopPropagation(); openEditParc(p); }}>Editar</Btn>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        {parcs.length === 0 && <div style={{ padding: 40, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhum parceiro encontrado.</div>}
       </div>
 
       {/* Detail Modal */}
@@ -4304,9 +4465,16 @@ function DiretoriaPage() {
     })();
   }, []);
 
+  const [dirExpanded, setDirExpanded] = useState({});
   const toggleExpand = (id) => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
+  const toggleDirExpand = (id) => setDirExpanded(prev => ({ ...prev, [id]: !prev[id] }));
 
   const convColor = (rate) => rate >= 30 ? T.ok : rate >= 15 ? T.wn : T.er;
+
+  const fmtDate = (d) => {
+    if (!d) return "—";
+    try { const dt = new Date(d); return dt.toLocaleDateString("pt-BR"); } catch { return "—"; }
+  };
 
   const renderGerenteCard = (item) => {
     const g = item.gerente;
@@ -4369,6 +4537,7 @@ function DiretoriaPage() {
                     <th style={{ textAlign: "center", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Ativas</th>
                     <th style={{ textAlign: "center", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Pipeline</th>
                     <th style={{ textAlign: "center", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Funcionários</th>
+                    <th style={{ textAlign: "center", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Última Indicação</th>
                     <th style={{ textAlign: "center", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Conversão</th>
                   </tr>
                 </thead>
@@ -4381,6 +4550,7 @@ function DiretoriaPage() {
                       <td style={{ padding: "8px 6px", color: T.ok, textAlign: "center" }}>{p.active_count || 0}</td>
                       <td style={{ padding: "8px 6px", color: T.inf, textAlign: "center" }}>{p.pipeline_count || 0}</td>
                       <td style={{ padding: "8px 6px", color: T.ac, textAlign: "center" }}>{(p.total_funcionarios || 0).toLocaleString('pt-BR')}</td>
+                      <td style={{ padding: "8px 6px", color: T.t2, textAlign: "center", fontSize: 11 }}>{fmtDate(p.last_indication_date)}</td>
                       <td style={{ padding: "8px 6px", textAlign: "center" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "center" }}>
                           <div style={{ width: 40, height: 4, background: T.bor, borderRadius: 2, overflow: "hidden" }}>
@@ -4407,9 +4577,12 @@ function DiretoriaPage() {
     <div>
       {data.grouped ? (
         // Executivo view: grouped by director
-        (data.summary || []).map(dir => (
+        (data.summary || []).map(dir => {
+          const isDirExp = dirExpanded[dir.diretor_id] !== false; // default expanded
+          return (
           <div key={dir.diretor_id} style={{ marginBottom: 24 }}>
-            <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 16, marginBottom: 12 }}>
+            <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 16, marginBottom: isDirExp ? 12 : 0, cursor: "pointer" }}
+              onClick={() => setDirExpanded(prev => ({ ...prev, [dir.diretor_id]: !isDirExp }))}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <span style={{ width: 36, height: 36, borderRadius: 10, background: T.inf + "22", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: T.inf }}>👔</span>
@@ -4431,12 +4604,13 @@ function DiretoriaPage() {
                       <div style={{ fontSize: 10, color: T.t2 }}>{s.l}</div>
                     </div>
                   ))}
+                  <span style={{ fontSize: 14, color: T.t2, transition: "transform 0.2s", transform: isDirExp ? "rotate(180deg)" : "rotate(0)" }}>▼</span>
                 </div>
               </div>
             </div>
-            {dir.gerentes.map(renderGerenteCard)}
+            {isDirExp && dir.gerentes.map(renderGerenteCard)}
           </div>
-        ))
+        );})
       ) : (
         // Diretor view: flat list
         (data.summary || []).map(renderGerenteCard)

@@ -19,13 +19,15 @@ Backend em **Node.js/Express** com banco **SQLite** (local) ou **PostgreSQL** (c
 | **Financeiro**      | Relatórios de comissão, envio/pagamento de NFes, KPIs financeiros               |
 | **Material de Apoio**| Biblioteca categorizada com upload de documentos (PDF, XLSX, MP4, etc.)         |
 | **Notificações**    | Central de notificações, sino com badge, cadências automáticas, comunicados segmentados |
-| **Configurações**   | Geral, HubSpot, Notificações, Usuários, Convênios, Materiais (Super Admin)      |
+| **Sync HubSpot**    | Sincronização automática HubSpot 3x/dia (8h, 12h, 17h)                          |
+| **Auto-criação HubSpot** | Auto-criação de empresa/oportunidade no HubSpot ao liberar indicação        |
+| **Configurações**   | 7 abas: Geral, HubSpot, Notificações, Usuários, Convênios, Materiais, Auditoria (Super Admin) |
 
 ### Recursos Adicionais
 
 - 🔐 Autenticação JWT com refresh tokens e troca obrigatória de senha no primeiro login
 - 🏢 Consulta automática de CNPJ na Receita Federal (BrasilAPI)
-- 🔗 Integração com HubSpot CRM (verificação de duplicatas, deals)
+- 🔗 Integração com HubSpot CRM (verificação de duplicatas, deals, sync automático 3x/dia)
 - 📱 Integração WhatsApp via Evolution API (QR code, envio/recebimento bidirecional)
 - 🔔 Sistema de notificações com 8 cadências automáticas configuráveis
 - 📢 Comunicação segmentada por perfil de usuário
@@ -144,6 +146,7 @@ O sistema possui **modo escuro** e **modo claro**, selecionável após o login e
 - **JWT** — Autenticação com access + refresh tokens
 - **bcrypt** — Hash de senhas
 - **multer** — Upload de arquivos
+- **node-cron** — Agendamento de tarefas (sync HubSpot 3x/dia)
 
 ### Infraestrutura
 - **Docker** + **Docker Compose** — Containerização
