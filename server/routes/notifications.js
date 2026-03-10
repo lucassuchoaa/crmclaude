@@ -132,15 +132,21 @@ router.post('/send', authenticate, requireMinRole('diretor'), async (req, res) =
 // Broadcast notification to role
 router.post('/broadcast', authenticate, requireMinRole('executivo'), async (req, res) => {
   try {
-    const { roles, title, message, type = 'info', link } = req.body;
+    const { roles, title, message, type = 'info', link, user_ids } = req.body;
     if (!title || !message || !roles) return res.status(400).json({ error: 'Title, message and roles required' });
 
     const db = getDatabase();
 
-    const placeholders = roles.map(() => '?').join(',');
-    const users = await db.prepare(`
-      SELECT id FROM users WHERE role IN (${placeholders}) AND is_active = 1
-    `).all(...roles);
+    let users;
+    if (user_ids && Array.isArray(user_ids) && user_ids.length > 0) {
+      const ph = user_ids.map(() => '?').join(',');
+      users = await db.prepare(`SELECT id FROM users WHERE id IN (${ph}) AND is_active = 1`).all(...user_ids);
+    } else {
+      const placeholders = roles.map(() => '?').join(',');
+      users = await db.prepare(`
+        SELECT id FROM users WHERE role IN (${placeholders}) AND is_active = 1
+      `).all(...roles);
+    }
 
     const notifications = [];
 

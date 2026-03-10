@@ -2676,7 +2676,18 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
         }
       }).catch(() => {});
     }
-    conveniosApi.getAll().then(r => setCfgConvenios((r.data.convenios || []).filter(c => c.is_active))).catch(() => {});
+    conveniosApi.getAll().then(async r => {
+      const convs = (r.data.convenios || []).filter(c => c.is_active);
+      setCfgConvenios(convs);
+      const cmap = {};
+      for (const c of convs) {
+        try {
+          const pr = await conveniosApi.getParceiros(c.id);
+          cmap[c.id] = new Set((pr.data.parceiros || []).map(p => p.id));
+        } catch { cmap[c.id] = new Set(); }
+      }
+      setCfgConvParMap(cmap);
+    }).catch(() => {});
   }, []);
   const [matModal, setMatModal] = useState(false);
   const [mf, setMf] = useState({ t: "", tipo: "pdf", cat: "comercial", sz: "", file: null, fileName: "" });
@@ -2686,6 +2697,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
   const [uf, setUf] = useState({ name: "", email: "", pw: "", role: "gerente", dId: "", eId: "" });
   const [ufConvIds, setUfConvIds] = useState([]);
   const [cfgConvenios, setCfgConvenios] = useState([]);
+  const [cfgConvParMap, setCfgConvParMap] = useState({});
   const [delUserConf, setDelUserConf] = useState(null);
   const [uSearch, setUSearch] = useState("");
   const [uRoleFilter, setURoleFilter] = useState("");
@@ -2798,7 +2810,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
     } catch (e) { alert(e.response?.data?.error || "Erro ao resetar senha"); }
   };
   // Segmented communication state
-  const [commForm, setCommForm] = useState({ titulo: "", msg: "", perfis: [], individuais: [], prioridade: "info" });
+  const [commForm, setCommForm] = useState({ titulo: "", msg: "", perfis: [], individuais: [], prioridade: "info", convenio: "" });
   const [commHist, setCommHist] = useState([
     { id: "ch1", titulo: "Atualização de política comercial", msg: "Informamos que a nova política de comissionamento entra em vigor em Março/2025.", perfis: ["parceiro"], dt: "2025-02-01 10:00", por: "Super Admin", total: 4 },
     { id: "ch2", titulo: "Treinamento Plataforma", msg: "Participe do treinamento sobre a nova plataforma dia 15/02 às 14h.", perfis: ["parceiro", "gerente"], dt: "2025-01-28 15:30", por: "Super Admin", total: 7 },
@@ -3151,14 +3163,24 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
                 <button key={role} onClick={() => setCommForm(prev => ({ ...prev, perfis: prev.perfis.includes(role) ? prev.perfis.filter(r => r !== role) : [...prev.perfis, role] }))} style={{ padding: "6px 14px", borderRadius: 20, fontSize: 12, fontWeight: 500, cursor: "pointer", border: `1px solid ${commForm.perfis.includes(role) ? T.ac : T.bor}`, background: commForm.perfis.includes(role) ? T.ac + "1A" : "transparent", color: commForm.perfis.includes(role) ? T.ac : T.t2, fontFamily: "'DM Sans',sans-serif", textTransform: "capitalize" }}>{role}{commForm.perfis.includes(role) ? " ✓" : ""}</button>
               ))}
             </div>
-            <div style={{ fontSize: 11, color: T.tm, marginTop: 6 }}>{commForm.perfis.length > 0 ? `${users.filter(u => commForm.perfis.includes(u.role)).length} usuário(s) alcançados` : "Selecione ao menos um perfil"}</div>
+            <div style={{ fontSize: 11, color: T.tm, marginTop: 6 }}>{commForm.perfis.length > 0 ? `${(() => { let u = users.filter(u => commForm.perfis.includes(u.role)); if (commForm.convenio && cfgConvParMap[commForm.convenio]) { const convSet = cfgConvParMap[commForm.convenio]; u = u.filter(x => x.role !== "parceiro" || convSet.has(x.id)); } return u.length; })()} usuário(s) alcançados` : "Selecione ao menos um perfil"}</div>
           </div>
+
+          {commForm.perfis.includes("parceiro") && cfgConvenios.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Filtrar por convênio (opcional)</label>
+              <select value={commForm.convenio} onChange={e => setCommForm(prev => ({ ...prev, convenio: e.target.value, individuais: [] }))} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+                <option value="">Todos os convênios</option>
+                {cfgConvenios.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+          )}
 
           {commForm.perfis.includes("parceiro") && (
             <div style={{ marginBottom: 14 }}>
               <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Ou selecione parceiros individuais (opcional)</label>
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap", maxHeight: 120, overflowY: "auto", padding: 8, background: T.inp, borderRadius: 6, border: `1px solid ${T.bor}` }}>
-                {users.filter(u => u.role === "parceiro").map(p => (
+                {users.filter(u => u.role === "parceiro").filter(u => !commForm.convenio || !cfgConvParMap[commForm.convenio] || cfgConvParMap[commForm.convenio].has(u.id)).map(p => (
                   <button key={p.id} onClick={() => setCommForm(prev => ({ ...prev, individuais: prev.individuais.includes(p.id) ? prev.individuais.filter(id => id !== p.id) : [...prev.individuais, p.id] }))} style={{ padding: "4px 10px", borderRadius: 14, fontSize: 11, cursor: "pointer", border: `1px solid ${commForm.individuais.includes(p.id) ? T.ac : T.bor}`, background: commForm.individuais.includes(p.id) ? T.ac + "1A" : "transparent", color: commForm.individuais.includes(p.id) ? T.ac : T.t2, fontFamily: "'DM Sans',sans-serif" }}>{p.name}{commForm.individuais.includes(p.id) ? " ✓" : ""}</button>
                 ))}
               </div>
@@ -3188,12 +3210,23 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <Btn onClick={async () => {
               if (!commForm.titulo || !commForm.msg || commForm.perfis.length === 0) return;
-              const targets = commForm.individuais.length > 0 ? commForm.individuais : users.filter(u => commForm.perfis.includes(u.role)).map(u => u.id);
+              let targets;
+              if (commForm.individuais.length > 0) {
+                targets = commForm.individuais;
+              } else {
+                let filtered = users.filter(u => commForm.perfis.includes(u.role));
+                if (commForm.convenio && cfgConvParMap[commForm.convenio]) {
+                  const convSet = cfgConvParMap[commForm.convenio];
+                  filtered = filtered.filter(u => u.role !== "parceiro" || convSet.has(u.id));
+                }
+                targets = filtered.map(u => u.id);
+              }
               try {
-                await notificationsApi.broadcast({ title: commForm.titulo, message: commForm.msg, type: 'info', roles: commForm.perfis, user_ids: commForm.individuais.length > 0 ? commForm.individuais : undefined });
+                const useUserIds = commForm.individuais.length > 0 || commForm.convenio;
+                await notificationsApi.broadcast({ title: commForm.titulo, message: commForm.msg, type: 'info', roles: commForm.perfis, user_ids: useUserIds ? targets : undefined });
                 targets.forEach(para => addNotif(setNotifs, { tipo: "comunicado", titulo: commForm.titulo, msg: commForm.msg, para, de: user.id, link: "notifs" }));
                 setCommHist(prev => [{ id: "ch" + Date.now(), titulo: commForm.titulo, msg: commForm.msg, perfis: [...commForm.perfis], dt: new Date().toISOString().replace("T", " ").slice(0, 16), por: user.name, total: targets.length }, ...prev]);
-                setCommForm({ titulo: "", msg: "", perfis: [], individuais: [], prioridade: "info" });
+                setCommForm({ titulo: "", msg: "", perfis: [], individuais: [], prioridade: "info", convenio: "" });
                 setCommSent(true); setTimeout(() => setCommSent(false), 3000);
               } catch (e) { console.error("Erro ao enviar comunicado:", e); alert(e.response?.data?.error || "Erro ao enviar"); }
             }} disabled={!commForm.titulo || !commForm.msg || commForm.perfis.length === 0}>📤 Enviar Comunicado</Btn>
