@@ -1,4 +1,4 @@
-import { useState, useEffect, createContext, useContext, useCallback } from "react";
+import { useState, useEffect, useRef, createContext, useContext, useCallback } from "react";
 import { authApi, usersApi, indicationsApi, commissionsApi, nfesApi, materialsApi, notificationsApi, hubspotApi, groupsApi, cnpjAgentApi, diretoriaApi, whatsappApi, conveniosApi, setTokens, clearTokens } from "./services/api";
 import { useBreakpoint, responsive } from "./hooks/useBreakpoint";
 
@@ -329,9 +329,10 @@ function comLabel(tipo, val) {
 function MultiSelectParceiro({ parceiros, selected, onToggle, selS }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const ref = useCallback(node => {
-    if (!node) return;
-    const handler = (e) => { if (!node.contains(e.target)) setOpen(false); };
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
