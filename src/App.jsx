@@ -952,7 +952,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
               ))}</tbody>
               {sorted.length === 0 && <tbody><tr><td colSpan={6} style={{ padding: 30, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhuma indicação{hasFilters ? " com esses filtros" : ""}.</td></tr></tbody>}
             </table></div>
-            {sorted.length > 10 && <div style={{ padding: "8px 14px", textAlign: "center", fontSize: 11, color: T.tm, borderTop: `1px solid ${T.bor}` }}>Mostrando 10 de {sorted.length} — veja todas no Kanban</div>}
+            {sorted.length > 10 && <div style={{ padding: "8px 14px", textAlign: "center", fontSize: 11, color: T.tm, borderTop: `1px solid ${T.bor}` }}>Mostrando 10 de {sorted.length} — veja todas no Funil/Pipeline</div>}
           </div>
         </div>
 
@@ -1270,7 +1270,7 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenc
           🔄 HubSpot sincronizado <span style={{ marginLeft: "auto" }}><Badge type="success">Conectado</Badge></span>
         </div>
         <div style={{ display: "flex", gap: 4, background: T.inp, borderRadius: 6, padding: 3, border: `1px solid ${T.bor}` }}>
-          <button onClick={() => setView("kanban")} style={{ padding: "6px 14px", borderRadius: 4, border: "none", fontFamily: "'DM Sans',sans-serif", fontSize: 12, fontWeight: 600, cursor: "pointer", background: view === "kanban" ? T.ac : "transparent", color: view === "kanban" ? "#fff" : T.tm }}>📊 Kanban</button>
+          <button onClick={() => setView("kanban")} style={{ padding: "6px 14px", borderRadius: 4, border: "none", fontFamily: "'DM Sans',sans-serif", fontSize: 12, fontWeight: 600, cursor: "pointer", background: view === "kanban" ? T.ac : "transparent", color: view === "kanban" ? "#fff" : T.tm }}>📊 Funil</button>
           <button onClick={() => setView("list")} style={{ padding: "6px 14px", borderRadius: 4, border: "none", fontFamily: "'DM Sans',sans-serif", fontSize: 12, fontWeight: 600, cursor: "pointer", background: view === "list" ? T.ac : "transparent", color: view === "list" ? "#fff" : T.tm }}>📋 Lista</button>
         </div>
       </div>
@@ -1547,23 +1547,29 @@ function ParcPage({ users, setUsers, inds }) {
   const [selConvIds, setSelConvIds] = useState([]);
   const [editConvIds, setEditConvIds] = useState([]);
   const [parceiroConvMap, setParceiroConvMap] = useState({}); // parceiro_id -> [convenio names]
+  const [pfGer, setPfGer] = useState("todos");
+  const [pfConv, setPfConv] = useState("todos");
+  const [pfConvParMap, setPfConvParMap] = useState({}); // convenio_id -> Set of parceiro ids
 
   useEffect(() => {
     conveniosApi.getAll().then(async r => {
       const convs = (r.data.convenios || []).filter(c => c.is_active);
       setAllConvenios(convs);
-      // Build parceiro -> convenio name map
       const map = {};
+      const cmap = {};
       for (const c of convs) {
         try {
           const pr = await conveniosApi.getParceiros(c.id);
-          for (const p of (pr.data.parceiros || [])) {
+          const parcList = pr.data.parceiros || [];
+          cmap[c.id] = new Set(parcList.map(p => p.id));
+          for (const p of parcList) {
             if (!map[p.id]) map[p.id] = [];
             map[p.id].push(c.name);
           }
-        } catch {}
+        } catch { cmap[c.id] = new Set(); }
       }
       setParceiroConvMap(map);
+      setPfConvParMap(cmap);
     }).catch(() => {});
   }, []);
 
@@ -1603,11 +1609,24 @@ function ParcPage({ users, setUsers, inds }) {
   const myDirIds = user.role === "executivo" ? users.filter(u => u.role === "diretor" && u.eId === user.id).map(d => d.id) : [];
   const myGerIds = user.role === "executivo" ? users.filter(u => u.role === "gerente" && myDirIds.includes(u.dId)).map(g => g.id) : [];
 
-  const parcs = (user.role === "gerente" ? users.filter(u => u.role === "parceiro" && u.gId === user.id)
+  const allParcs = (user.role === "gerente" ? users.filter(u => u.role === "parceiro" && u.gId === user.id)
     : user.role === "diretor" ? users.filter(u => u.role === "parceiro" && users.find(g => g.id === u.gId && g.dId === user.id))
       : user.role === "executivo" ? users.filter(u => u.role === "parceiro" && myGerIds.includes(u.gId))
-        : users.filter(u => u.role === "parceiro"))
-    .filter(p => !q || p.name.toLowerCase().includes(q.toLowerCase()) || (p.empresa || "").toLowerCase().includes(q.toLowerCase()));
+        : users.filter(u => u.role === "parceiro"));
+
+  const parcGerentes = [...new Map(allParcs.map(p => [p.gId, users.find(u => u.id === p.gId)]).filter(([, g]) => g)).values()];
+
+  const parcs = allParcs
+    .filter(p => !q || p.name.toLowerCase().includes(q.toLowerCase()) || (p.empresa || "").toLowerCase().includes(q.toLowerCase()))
+    .filter(p => pfGer === "todos" || p.gId === pfGer)
+    .filter(p => {
+      if (pfConv === "todos") return true;
+      const convParceiros = pfConvParMap[pfConv];
+      return convParceiros && convParceiros.has(p.id);
+    });
+
+  const pfHasFilters = pfGer !== "todos" || pfConv !== "todos" || q;
+  const pfClearFilters = () => { setPfGer("todos"); setPfConv("todos"); setQ(""); };
 
   const [adding, setAdding] = useState(false);
   const add = async () => {
@@ -1671,12 +1690,31 @@ function ParcPage({ users, setUsers, inds }) {
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 12, marginBottom: 16, alignItems: "center" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, padding: "7px 12px" }}>
-          <span style={{ color: T.tm }}>🔍</span>
-          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar..." style={{ background: "none", border: "none", color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13, outline: "none", width: 180 }} />
+      <div style={{ display: "flex", gap: 12, marginBottom: 16, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "10px 14px", background: T.card, border: `1px solid ${T.bor}`, borderRadius: 8, flex: 1 }}>
+          <span style={{ fontSize: 11, color: T.tm, fontWeight: 600 }}>🔍 Filtros:</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, padding: "5px 10px" }}>
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar nome/empresa..." style={{ background: "none", border: "none", color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12, outline: "none", width: 150 }} />
+          </div>
+          {parcGerentes.length > 1 && <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", fontWeight: 600 }}>Executivo:</span>
+            <select value={pfGer} onChange={e => setPfGer(e.target.value)} style={{ padding: "7px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12, outline: "none" }}>
+              <option value="todos">Todos</option>
+              {parcGerentes.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+            </select>
+          </div>}
+          {allConvenios.length > 0 && <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", fontWeight: 600 }}>Convênio:</span>
+            <select value={pfConv} onChange={e => setPfConv(e.target.value)} style={{ padding: "7px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12, outline: "none" }}>
+              <option value="todos">Todos</option>
+              {allConvenios.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>}
+          {pfHasFilters && <>
+            <button onClick={pfClearFilters} style={{ padding: "5px 10px", borderRadius: 6, border: `1px solid ${T.er}44`, background: T.er + "11", color: T.er, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>✕ Limpar</button>
+            <span style={{ fontSize: 11, color: T.t2 }}>{parcs.length} de {allParcs.length}</span>
+          </>}
         </div>
-        <div style={{ flex: 1 }} />
         <Btn onClick={() => setModal(true)}>＋ Cadastrar Parceiro</Btn>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -2244,7 +2282,7 @@ function MinhasInd({ inds, setInds, notifs, setNotifs, users, cadenceRules }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <div style={{ display: "flex", gap: 4, background: T.inp, borderRadius: 6, padding: 3, border: `1px solid ${T.bor}` }}>
           <button onClick={() => setView("list")} style={{ padding: "6px 14px", borderRadius: 4, border: "none", fontFamily: "'DM Sans',sans-serif", fontSize: 12, fontWeight: 600, cursor: "pointer", background: view === "list" ? T.ac : "transparent", color: view === "list" ? "#fff" : T.tm }}>📋 Lista</button>
-          <button onClick={() => setView("kanban")} style={{ padding: "6px 14px", borderRadius: 4, border: "none", fontFamily: "'DM Sans',sans-serif", fontSize: 12, fontWeight: 600, cursor: "pointer", background: view === "kanban" ? T.ac : "transparent", color: view === "kanban" ? "#fff" : T.tm }}>📊 Kanban</button>
+          <button onClick={() => setView("kanban")} style={{ padding: "6px 14px", borderRadius: 4, border: "none", fontFamily: "'DM Sans',sans-serif", fontSize: 12, fontWeight: 600, cursor: "pointer", background: view === "kanban" ? T.ac : "transparent", color: view === "kanban" ? "#fff" : T.tm }}>📊 Funil</button>
         </div>
         <Btn onClick={() => setModal(true)}>＋ Nova Indicação</Btn>
       </div>
@@ -4676,7 +4714,7 @@ function DiretoriaPage() {
 const RL = { super_admin: "Super Admin", executivo: "Diretor", diretor: "Gerente", gerente: "Executivo", convenio: "Convênio", parceiro: "Parceiro" };
 const NAV = [
   { id: "dash", l: "Dashboard", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro", "convenio"] },
-  { id: "kanban", l: "Kanban", r: ["super_admin", "executivo", "diretor", "gerente"] },
+  { id: "kanban", l: "Funil/Pipeline", r: ["super_admin", "executivo", "diretor", "gerente"] },
   { id: "inds", l: "Minhas Indicações", r: ["parceiro"] },
   { id: "convenio", l: "Meu Convênio", r: ["convenio"] },
   { id: "parcs", l: "Parceiros", r: ["super_admin", "executivo", "diretor", "gerente"] },
@@ -4687,7 +4725,7 @@ const NAV = [
   { id: "notifs", l: "Notificações", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro", "convenio"] },
   { id: "cfg", l: "Configurações", r: ["super_admin"] },
 ];
-const TIT = { dash: "Dashboard", kanban: "Pipeline de Indicações", inds: "Minhas Indicações", convenio: "Meu Convênio", parcs: "Parceiros Indicadores", groups: "WhatsApp - Conversas", diretoria: "Visão Diretoria", fin: "Financeiro", mats: "Material de Apoio", notifs: "Central de Notificações", cfg: "Configurações" };
+const TIT = { dash: "Dashboard", kanban: "Funil / Pipeline", inds: "Minhas Indicações", convenio: "Meu Convênio", parcs: "Parceiros Indicadores", groups: "WhatsApp - Conversas", diretoria: "Visão Diretoria", fin: "Financeiro", mats: "Material de Apoio", notifs: "Central de Notificações", cfg: "Configurações" };
 const EMO = { dash: "📊", kanban: "📋", inds: "🏢", convenio: "🤝", parcs: "👥", groups: "📱", diretoria: "📈", fin: "💰", mats: "📁", notifs: "🔔", cfg: "⚙️" };
 
 export default function App() {
