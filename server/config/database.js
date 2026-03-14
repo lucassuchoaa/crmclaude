@@ -431,6 +431,98 @@ async function createTables(db) {
     )
   `);
 
+  // Pipelines table
+  await ddl(`
+    CREATE TABLE IF NOT EXISTS pipelines (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      is_active INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Pipeline stages table
+  await ddl(`
+    CREATE TABLE IF NOT EXISTS pipeline_stages (
+      id TEXT PRIMARY KEY,
+      pipeline_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      color TEXT DEFAULT '#6366f1',
+      display_order INTEGER DEFAULT 0,
+      is_win INTEGER DEFAULT 0,
+      is_lost INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Deals table
+  await ddl(`
+    CREATE TABLE IF NOT EXISTS deals (
+      id TEXT PRIMARY KEY,
+      pipeline_id TEXT NOT NULL,
+      stage_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      company TEXT,
+      value REAL DEFAULT 0,
+      owner_id TEXT NOT NULL,
+      priority TEXT DEFAULT 'medium',
+      contact_name TEXT,
+      contact_phone TEXT,
+      contact_email TEXT,
+      notes TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Deal activities table
+  const dealActivitiesDDL = isPg
+    ? `CREATE TABLE IF NOT EXISTS deal_activities (
+        id SERIAL PRIMARY KEY,
+        deal_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'note',
+        description TEXT,
+        scheduled_at TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )`
+    : `CREATE TABLE IF NOT EXISTS deal_activities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        deal_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'note',
+        description TEXT,
+        scheduled_at TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (deal_id) REFERENCES deals(id) ON DELETE CASCADE
+      )`;
+  await db.exec(dealActivitiesDDL);
+
+  // Deal tasks table
+  const dealTasksDDL = isPg
+    ? `CREATE TABLE IF NOT EXISTS deal_tasks (
+        id SERIAL PRIMARY KEY,
+        deal_id TEXT NOT NULL,
+        assigned_to TEXT NOT NULL,
+        title TEXT NOT NULL,
+        due_date TEXT,
+        is_completed INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )`
+    : `CREATE TABLE IF NOT EXISTS deal_tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        deal_id TEXT NOT NULL,
+        assigned_to TEXT NOT NULL,
+        title TEXT NOT NULL,
+        due_date TEXT,
+        is_completed INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (deal_id) REFERENCES deals(id) ON DELETE CASCADE
+      )`;
+  await db.exec(dealTasksDDL);
+
   // ── Indexes ──
   // PG and SQLite both support CREATE INDEX IF NOT EXISTS
   const indexes = `
@@ -458,6 +550,14 @@ async function createTables(db) {
     CREATE INDEX IF NOT EXISTS idx_parceiro_convenios_convenio ON parceiro_convenios(convenio_id);
     CREATE INDEX IF NOT EXISTS idx_user_convenios_user ON user_convenios(user_id);
     CREATE INDEX IF NOT EXISTS idx_user_convenios_convenio ON user_convenios(convenio_id);
+    CREATE INDEX IF NOT EXISTS idx_pipelines_created_by ON pipelines(created_by);
+    CREATE INDEX IF NOT EXISTS idx_pipeline_stages_pipeline ON pipeline_stages(pipeline_id);
+    CREATE INDEX IF NOT EXISTS idx_deals_pipeline ON deals(pipeline_id);
+    CREATE INDEX IF NOT EXISTS idx_deals_stage ON deals(stage_id);
+    CREATE INDEX IF NOT EXISTS idx_deals_owner ON deals(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_deal_activities_deal ON deal_activities(deal_id);
+    CREATE INDEX IF NOT EXISTS idx_deal_tasks_deal ON deal_tasks(deal_id);
+    CREATE INDEX IF NOT EXISTS idx_deal_tasks_assigned ON deal_tasks(assigned_to);
   `;
 
   if (isPg) {

@@ -320,4 +320,29 @@ export const whatsappApi = {
   disconnect: () => api.post('/whatsapp/instance/disconnect'),
 };
 
+// Pipelines API
+export const pipelinesApi = {
+  getAll: () => api.get('/pipelines'),
+  create: (data) => api.post('/pipelines', data),
+  update: (id, data) => api.put(`/pipelines/${id}`, data),
+  delete: (id) => api.delete(`/pipelines/${id}`),
+  getStages: (id) => api.get(`/pipelines/${id}/stages`),
+  getDeals: (id) => api.get(`/pipelines/${id}/deals`),
+  createDeal: (pipelineId, data) => api.post(`/pipelines/${pipelineId}/deals`, data),
+  getStats: () => api.get('/pipelines/stats/summary'),
+};
+
+// Deals API
+export const dealsApi = {
+  update: (id, data) => api.put(`/pipelines/deals/${id}`, data),
+  moveStage: (id, stage_id) => api.patch(`/pipelines/deals/${id}/stage`, { stage_id }),
+  delete: (id) => api.delete(`/pipelines/deals/${id}`),
+  getActivities: (dealId) => api.get(`/pipelines/deals/${dealId}/activities`),
+  createActivity: (dealId, data) => api.post(`/pipelines/deals/${dealId}/activities`, data),
+  getTasks: (dealId) => api.get(`/pipelines/deals/${dealId}/tasks`),
+  createTask: (dealId, data) => api.post(`/pipelines/deals/${dealId}/tasks`, data),
+  completeTask: (id, is_completed) => api.patch(`/pipelines/tasks/${id}/complete`, { is_completed }),
+  deleteTask: (id) => api.delete(`/pipelines/tasks/${id}`),
+};
+
 export default api;

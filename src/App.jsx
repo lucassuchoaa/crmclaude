@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback } from "react";
-import { authApi, usersApi, indicationsApi, commissionsApi, nfesApi, materialsApi, notificationsApi, hubspotApi, groupsApi, cnpjAgentApi, diretoriaApi, whatsappApi, conveniosApi, setTokens, clearTokens } from "./services/api";
+import { authApi, usersApi, indicationsApi, commissionsApi, nfesApi, materialsApi, notificationsApi, hubspotApi, groupsApi, cnpjAgentApi, diretoriaApi, whatsappApi, conveniosApi, pipelinesApi, dealsApi, setTokens, clearTokens } from "./services/api";
 import { useBreakpoint } from "./hooks/useBreakpoint";
 
 const AuthCtx = createContext(null);
@@ -2647,19 +2647,405 @@ function ConveniosTab() {
   );
 }
 
+// ===== NEGOCIAÇÕES (DEALS PIPELINE) =====
+const ACTIVITY_TYPES = [
+  { id: "call", label: "Ligação", emoji: "📞" },
+  { id: "email", label: "E-mail", emoji: "📧" },
+  { id: "meeting", label: "Reunião", emoji: "🤝" },
+  { id: "whatsapp", label: "WhatsApp", emoji: "💬" },
+  { id: "visit", label: "Visita", emoji: "🏢" },
+  { id: "note", label: "Nota", emoji: "📝" },
+];
+const PRIORITY_COLORS = { low: "#10b981", medium: "#f59e0b", high: "#ef4444" };
+const PRIORITY_LABELS = { low: "Baixa", medium: "Média", high: "Alta" };
+
+function NegociosPage({ users }) {
+  const { user } = useAuth();
+  const { breakpoint } = useBreakpoint();
+  const isMobile = breakpoint === "mobile";
+  const [pipelines, setPipelines] = useState([]);
+  const [selectedPipeline, setSelectedPipeline] = useState(null);
+  const [stages, setStages] = useState([]);
+  const [deals, setDeals] = useState([]);
+  const [viewMode, setViewMode] = useState("kanban");
+  const [showDealModal, setShowDealModal] = useState(false);
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [selectedDeal, setSelectedDeal] = useState(null);
+  const [dealForm, setDealForm] = useState({ title: "", company: "", value: "", priority: "medium", contact_name: "", contact_phone: "", contact_email: "", notes: "" });
+  const [activities, setActivities] = useState([]);
+  const [tasks, setTasks] = useState([]);
+  const [detailTab, setDetailTab] = useState("atividades");
+  const [actForm, setActForm] = useState({ type: "note", description: "", scheduled_at: "" });
+  const [taskForm, setTaskForm] = useState({ title: "", assigned_to: "", due_date: "" });
+  const [loading, setLoading] = useState(true);
+  const canEdit = ["gerente", "super_admin", "executivo"].includes(user.role);
+
+  useEffect(() => {
+    pipelinesApi.getAll().then(r => {
+      setPipelines(r.data);
+      if (r.data.length > 0) setSelectedPipeline(r.data[0]);
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (!selectedPipeline) return;
+    Promise.all([
+      pipelinesApi.getStages(selectedPipeline.id),
+      pipelinesApi.getDeals(selectedPipeline.id),
+    ]).then(([sr, dr]) => {
+      setStages(sr.data);
+      setDeals(dr.data);
+    }).catch(() => {});
+  }, [selectedPipeline]);
+
+  const loadDealDetails = async (deal) => {
+    setSelectedDeal(deal);
+    setDetailTab("atividades");
+    setShowDetailModal(true);
+    const [ar, tr] = await Promise.all([
+      dealsApi.getActivities(deal.id).catch(() => ({ data: [] })),
+      dealsApi.getTasks(deal.id).catch(() => ({ data: [] })),
+    ]);
+    setActivities(ar.data);
+    setTasks(tr.data);
+  };
+
+  const handleCreateDeal = async () => {
+    if (!dealForm.title || !selectedPipeline) return;
+    try {
+      await pipelinesApi.createDeal(selectedPipeline.id, { ...dealForm, value: parseFloat(dealForm.value) || 0 });
+      const r = await pipelinesApi.getDeals(selectedPipeline.id);
+      setDeals(r.data);
+      setShowDealModal(false);
+      setDealForm({ title: "", company: "", value: "", priority: "medium", contact_name: "", contact_phone: "", contact_email: "", notes: "" });
+    } catch (e) { console.error(e); }
+  };
+
+  const handleMoveDeal = async (dealId, newStageId) => {
+    setDeals(prev => prev.map(d => d.id === dealId ? { ...d, stage_id: newStageId } : d));
+    dealsApi.moveStage(dealId, newStageId).catch(() => {});
+  };
+
+  const handleAddActivity = async () => {
+    if (!actForm.description || !selectedDeal) return;
+    await dealsApi.createActivity(selectedDeal.id, actForm);
+    const r = await dealsApi.getActivities(selectedDeal.id);
+    setActivities(r.data);
+    setActForm({ type: "note", description: "", scheduled_at: "" });
+  };
+
+  const handleAddTask = async () => {
+    if (!taskForm.title || !selectedDeal) return;
+    await dealsApi.createTask(selectedDeal.id, { ...taskForm, assigned_to: taskForm.assigned_to || user.id });
+    const r = await dealsApi.getTasks(selectedDeal.id);
+    setTasks(r.data);
+    setTaskForm({ title: "", assigned_to: "", due_date: "" });
+  };
+
+  const handleToggleTask = async (taskId, current) => {
+    await dealsApi.completeTask(taskId, !current);
+    setTasks(prev => prev.map(t => Number(t.id) === Number(taskId) ? { ...t, is_completed: !current ? 1 : 0 } : t));
+  };
+
+  const handleDeleteDeal = async (dealId) => {
+    await dealsApi.delete(dealId);
+    setDeals(prev => prev.filter(d => d.id !== dealId));
+    setShowDetailModal(false);
+  };
+
+  if (loading) return <div style={{ padding: 40, textAlign: "center", color: T.tm }}>Carregando...</div>;
+  if (pipelines.length === 0) return (
+    <div style={{ padding: 40, textAlign: "center" }}>
+      <div style={{ fontSize: 48, marginBottom: 16 }}>💼</div>
+      <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Nenhum funil criado</h3>
+      <p style={{ color: T.tm, fontSize: 13, marginBottom: 16 }}>Crie um funil em Configurações → Funis para começar.</p>
+    </div>
+  );
+
+  const totalValue = deals.reduce((s, d) => s + Number(d.value || 0), 0);
+  const wonDeals = deals.filter(d => { const st = stages.find(s => s.id === d.stage_id); return st && Number(st.is_win); });
+  const wonValue = wonDeals.reduce((s, d) => s + Number(d.value || 0), 0);
+
+  return (
+    <div>
+      {/* Header: pipeline selector + controls */}
+      <div className="negocios-header" style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", marginBottom: 20 }}>
+        <select value={selectedPipeline?.id || ""} onChange={e => { const p = pipelines.find(x => x.id === e.target.value); setSelectedPipeline(p); }}
+          style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 13, fontFamily: "'DM Sans',sans-serif", minWidth: 180 }}>
+          {pipelines.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <div style={{ display: "flex", gap: 4 }}>
+          {["kanban", "lista"].map(m => (
+            <button key={m} onClick={() => setViewMode(m)}
+              style={{ padding: "6px 14px", fontSize: 12, fontWeight: 600, border: `1px solid ${viewMode === m ? T.ac : T.bor}`, background: viewMode === m ? T.ac + "22" : "transparent", color: viewMode === m ? T.ac : T.tm, borderRadius: 6, cursor: "pointer", textTransform: "capitalize" }}>{m === "kanban" ? "Funil" : "Lista"}</button>
+          ))}
+        </div>
+        <div style={{ flex: 1 }} />
+        <div style={{ display: "flex", gap: 12, fontSize: 12, color: T.t2 }}>
+          <span>{deals.length} negociações</span>
+          <span>R$ {totalValue.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
+          {wonDeals.length > 0 && <span style={{ color: T.ok }}>✓ {wonDeals.length} ganhos (R$ {wonValue.toLocaleString("pt-BR", { minimumFractionDigits: 2 })})</span>}
+        </div>
+        {canEdit && <Btn onClick={() => setShowDealModal(true)} sm>＋ Nova Negociação</Btn>}
+      </div>
+
+      {/* KANBAN VIEW */}
+      {viewMode === "kanban" && (
+        <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 12, minHeight: 400 }}>
+          {stages.map(stage => {
+            const stageDeals = deals.filter(d => d.stage_id === stage.id);
+            const stageValue = stageDeals.reduce((s, d) => s + Number(d.value || 0), 0);
+            return (
+              <div key={stage.id} style={{ minWidth: isMobile ? 260 : 280, maxWidth: 320, flex: "0 0 auto" }}
+                onDragOver={canEdit ? e => e.preventDefault() : undefined}
+                onDrop={canEdit ? e => { const id = e.dataTransfer.getData("text/plain"); handleMoveDeal(id, stage.id); } : undefined}>
+                <div style={{ background: stage.color + "22", borderRadius: "8px 8px 0 0", padding: "10px 14px", borderLeft: `3px solid ${stage.color}` }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: stage.color }}>{stage.name}</span>
+                    <span style={{ fontSize: 11, color: T.tm }}>{stageDeals.length} · R$ {stageValue.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}</span>
+                  </div>
+                  {Number(stage.is_win) ? <span style={{ fontSize: 10, color: T.ok }}>✓ Ganho</span> : null}
+                  {Number(stage.is_lost) ? <span style={{ fontSize: 10, color: T.er }}>✗ Perdido</span> : null}
+                </div>
+                <div style={{ background: T.bg2, borderRadius: "0 0 8px 8px", padding: 8, minHeight: 100, border: `1px solid ${T.bor}`, borderTop: "none" }}>
+                  {stageDeals.map(deal => (
+                    <div key={deal.id} draggable={canEdit} onDragStart={canEdit ? e => e.dataTransfer.setData("text/plain", deal.id) : undefined}
+                      onClick={() => loadDealDetails(deal)}
+                      style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 8, padding: 12, marginBottom: 8, cursor: "pointer", transition: "border-color .2s" }}
+                      onMouseEnter={e => e.currentTarget.style.borderColor = T.ac}
+                      onMouseLeave={e => e.currentTarget.style.borderColor = T.bor}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 6 }}>
+                        <span style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.3 }}>{deal.title}</span>
+                        <span style={{ fontSize: 10, background: PRIORITY_COLORS[deal.priority] + "22", color: PRIORITY_COLORS[deal.priority], padding: "2px 6px", borderRadius: 4, fontWeight: 600 }}>{PRIORITY_LABELS[deal.priority]}</span>
+                      </div>
+                      {deal.company && <div style={{ fontSize: 11, color: T.t2, marginBottom: 4 }}>{deal.company}</div>}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: T.ac }}>R$ {Number(deal.value || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
+                        <span style={{ fontSize: 10, color: T.tm }}>{deal.owner_name}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* LIST VIEW */}
+      {viewMode === "lista" && (
+        <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr>{["Título", "Empresa", "Valor", "Etapa", "Prioridade", "Responsável"].map(h => <th key={h} style={{ textAlign: "left", padding: "12px 14px", fontSize: 10, fontWeight: 600, color: T.tm, textTransform: "uppercase", borderBottom: `1px solid ${T.bor}`, background: T.bg2 }}>{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {deals.map(deal => {
+                const stage = stages.find(s => s.id === deal.stage_id);
+                return (
+                  <tr key={deal.id} onClick={() => loadDealDetails(deal)} style={{ cursor: "pointer" }} onMouseEnter={e => e.currentTarget.style.background = T.bg2} onMouseLeave={e => e.currentTarget.style.background = ""}>
+                    <td style={{ padding: "12px 14px", fontSize: 13, borderBottom: `1px solid ${T.bor}`, fontWeight: 600 }}>{deal.title}</td>
+                    <td style={{ padding: "12px 14px", fontSize: 13, borderBottom: `1px solid ${T.bor}`, color: T.t2 }}>{deal.company || "—"}</td>
+                    <td style={{ padding: "12px 14px", fontSize: 13, borderBottom: `1px solid ${T.bor}`, color: T.ac, fontWeight: 600 }}>R$ {Number(deal.value || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
+                    <td style={{ padding: "12px 14px", fontSize: 13, borderBottom: `1px solid ${T.bor}` }}><span style={{ background: (stage?.color || "#666") + "22", color: stage?.color || "#666", padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600 }}>{stage?.name || "—"}</span></td>
+                    <td style={{ padding: "12px 14px", fontSize: 13, borderBottom: `1px solid ${T.bor}` }}><span style={{ color: PRIORITY_COLORS[deal.priority] }}>{PRIORITY_LABELS[deal.priority]}</span></td>
+                    <td style={{ padding: "12px 14px", fontSize: 13, borderBottom: `1px solid ${T.bor}`, color: T.t2 }}>{deal.owner_name}</td>
+                  </tr>
+                );
+              })}
+              {deals.length === 0 && <tr><td colSpan={6} style={{ padding: 40, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhuma negociação neste funil</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* CREATE DEAL MODAL */}
+      <Modal open={showDealModal} onClose={() => setShowDealModal(false)} title="Nova Negociação" footer={<Btn onClick={handleCreateDeal} disabled={!dealForm.title}>Criar Negociação</Btn>}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <Inp label="Título *" value={dealForm.title} onChange={v => setDealForm({ ...dealForm, title: v })} placeholder="Nome da negociação" />
+          <Inp label="Empresa" value={dealForm.company} onChange={v => setDealForm({ ...dealForm, company: v })} placeholder="Nome da empresa" />
+          <div style={{ display: "flex", gap: 12 }}>
+            <Inp label="Valor (R$)" value={dealForm.value} onChange={v => setDealForm({ ...dealForm, value: v })} type="number" placeholder="0.00" style={{ flex: 1 }} />
+            <div className="input-group" style={{ flex: 1 }}>
+              <label style={{ fontSize: 12, color: T.t2, textTransform: "uppercase", fontWeight: 600, marginBottom: 6 }}>Prioridade</label>
+              <select value={dealForm.priority} onChange={e => setDealForm({ ...dealForm, priority: e.target.value })}
+                style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+                <option value="low">Baixa</option><option value="medium">Média</option><option value="high">Alta</option>
+              </select>
+            </div>
+          </div>
+          <Inp label="Nome do Contato" value={dealForm.contact_name} onChange={v => setDealForm({ ...dealForm, contact_name: v })} />
+          <div style={{ display: "flex", gap: 12 }}>
+            <Inp label="Telefone" value={dealForm.contact_phone} onChange={v => setDealForm({ ...dealForm, contact_phone: v })} style={{ flex: 1 }} />
+            <Inp label="E-mail" value={dealForm.contact_email} onChange={v => setDealForm({ ...dealForm, contact_email: v })} style={{ flex: 1 }} />
+          </div>
+          <div className="input-group">
+            <label style={{ fontSize: 12, color: T.t2, textTransform: "uppercase", fontWeight: 600, marginBottom: 6 }}>Notas</label>
+            <textarea value={dealForm.notes} onChange={e => setDealForm({ ...dealForm, notes: e.target.value })} rows={3}
+              style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13, resize: "vertical" }} />
+          </div>
+        </div>
+      </Modal>
+
+      {/* DEAL DETAIL MODAL */}
+      <Modal open={showDetailModal} onClose={() => setShowDetailModal(false)} title={selectedDeal?.title || ""} wide>
+        {selectedDeal && (
+          <div>
+            {/* Deal info header */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginBottom: 16, padding: 12, background: T.bg2, borderRadius: 8 }}>
+              <div><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>Empresa</span><div style={{ fontSize: 13, fontWeight: 600 }}>{selectedDeal.company || "—"}</div></div>
+              <div><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>Valor</span><div style={{ fontSize: 13, fontWeight: 700, color: T.ac }}>R$ {Number(selectedDeal.value || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</div></div>
+              <div><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>Prioridade</span><div style={{ fontSize: 13, color: PRIORITY_COLORS[selectedDeal.priority] }}>{PRIORITY_LABELS[selectedDeal.priority]}</div></div>
+              <div><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>Responsável</span><div style={{ fontSize: 13 }}>{selectedDeal.owner_name}</div></div>
+              {selectedDeal.contact_name && <div><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>Contato</span><div style={{ fontSize: 13 }}>{selectedDeal.contact_name} {selectedDeal.contact_phone ? `· ${selectedDeal.contact_phone}` : ""}</div></div>}
+              <div style={{ flex: 1 }} />
+              {canEdit && <Btn v="danger" sm onClick={() => { if (confirm("Excluir esta negociação?")) handleDeleteDeal(selectedDeal.id); }}>Excluir</Btn>}
+            </div>
+
+            {/* Tabs: Atividades / Tarefas */}
+            <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${T.bor}`, marginBottom: 16 }}>
+              {["atividades", "tarefas"].map(t => (
+                <button key={t} onClick={() => setDetailTab(t)}
+                  style={{ padding: "8px 16px", fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: "none", color: detailTab === t ? T.ac : T.tm, borderBottom: `2px solid ${detailTab === t ? T.ac : "transparent"}`, marginBottom: -1, textTransform: "capitalize" }}>{t}</button>
+              ))}
+            </div>
+
+            {/* ACTIVITIES TAB */}
+            {detailTab === "atividades" && (
+              <div>
+                {canEdit && (
+                  <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+                    <select value={actForm.type} onChange={e => setActForm({ ...actForm, type: e.target.value })}
+                      style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }}>
+                      {ACTIVITY_TYPES.map(t => <option key={t.id} value={t.id}>{t.emoji} {t.label}</option>)}
+                    </select>
+                    <input value={actForm.description} onChange={e => setActForm({ ...actForm, description: e.target.value })} placeholder="Descrição da atividade..."
+                      style={{ flex: 1, minWidth: 200, padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12, fontFamily: "'DM Sans',sans-serif" }}
+                      onKeyDown={e => e.key === "Enter" && handleAddActivity()} />
+                    <input type="datetime-local" value={actForm.scheduled_at} onChange={e => setActForm({ ...actForm, scheduled_at: e.target.value })}
+                      style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }} />
+                    <Btn sm onClick={handleAddActivity} disabled={!actForm.description}>Registrar</Btn>
+                  </div>
+                )}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {activities.map(a => {
+                    const at = ACTIVITY_TYPES.find(t => t.id === a.type) || ACTIVITY_TYPES[5];
+                    return (
+                      <div key={a.id} style={{ display: "flex", gap: 12, padding: 12, background: T.bg2, borderRadius: 8, border: `1px solid ${T.bor}` }}>
+                        <span style={{ fontSize: 20 }}>{at.emoji}</span>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 13 }}>{a.description}</div>
+                          <div style={{ fontSize: 11, color: T.tm, marginTop: 4 }}>
+                            {a.user_name} · {new Date(a.created_at).toLocaleString("pt-BR")}
+                            {a.scheduled_at && <span style={{ marginLeft: 8, color: T.wn }}> Agendado: {new Date(a.scheduled_at).toLocaleString("pt-BR")}</span>}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {activities.length === 0 && <div style={{ padding: 20, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhuma atividade registrada</div>}
+                </div>
+              </div>
+            )}
+
+            {/* TASKS TAB */}
+            {detailTab === "tarefas" && (
+              <div>
+                {canEdit && (
+                  <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+                    <input value={taskForm.title} onChange={e => setTaskForm({ ...taskForm, title: e.target.value })} placeholder="Nova tarefa..."
+                      style={{ flex: 1, minWidth: 200, padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12, fontFamily: "'DM Sans',sans-serif" }}
+                      onKeyDown={e => e.key === "Enter" && handleAddTask()} />
+                    <select value={taskForm.assigned_to} onChange={e => setTaskForm({ ...taskForm, assigned_to: e.target.value })}
+                      style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }}>
+                      <option value="">Atribuir a mim</option>
+                      {users.filter(u => ["gerente", "diretor", "executivo", "super_admin"].includes(u.role)).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                    </select>
+                    <input type="date" value={taskForm.due_date} onChange={e => setTaskForm({ ...taskForm, due_date: e.target.value })}
+                      style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }} />
+                    <Btn sm onClick={handleAddTask} disabled={!taskForm.title}>Adicionar</Btn>
+                  </div>
+                )}
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {tasks.map(t => (
+                    <div key={t.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "10px 12px", background: T.bg2, borderRadius: 8, border: `1px solid ${T.bor}`, opacity: Number(t.is_completed) ? 0.6 : 1 }}>
+                      <input type="checkbox" checked={!!Number(t.is_completed)} onChange={() => handleToggleTask(t.id, Number(t.is_completed))}
+                        style={{ width: 18, height: 18, accentColor: T.ac, cursor: "pointer" }} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500, textDecoration: Number(t.is_completed) ? "line-through" : "none" }}>{t.title}</div>
+                        <div style={{ fontSize: 11, color: T.tm }}>
+                          {t.assigned_name || "—"}
+                          {t.due_date && <span style={{ marginLeft: 8, color: new Date(t.due_date) < new Date() && !Number(t.is_completed) ? T.er : T.tm }}>📅 {new Date(t.due_date).toLocaleDateString("pt-BR")}</span>}
+                        </div>
+                      </div>
+                      {canEdit && <button onClick={() => dealsApi.deleteTask(t.id).then(() => setTasks(prev => prev.filter(x => Number(x.id) !== Number(t.id))))}
+                        style={{ background: "none", border: "none", color: T.tm, cursor: "pointer", fontSize: 14 }}>✕</button>}
+                    </div>
+                  ))}
+                  {tasks.length === 0 && <div style={{ padding: 20, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhuma tarefa</div>}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
+    </div>
+  );
+}
+
 // ===== CONFIG =====
 function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias, notifs, setNotifs, cadenceRules, setCadenceRules }) {
   const { user } = useAuth();
   const { breakpoint } = useBreakpoint();
   const isSA = user.role === "super_admin";
+  const canManagePipelines = isSA || user.role === "executivo" || user.role === "gerente";
   const [cfg, setCfg] = useState({ prazo: 5, minF: 20, hsKey: "", hsPipe: "", emOn: true, waOn: false });
   const [saved, setSaved] = useState(false);
-  const [tab, setTab] = useState("geral");
+  const [tab, setTab] = useState(canManagePipelines && !isSA ? "funis" : "geral");
+  // Pipeline config state
+  const [cfgPipelines, setCfgPipelines] = useState([]);
+  const [pipeModal, setPipeModal] = useState(false);
+  const [editPipe, setEditPipe] = useState(null);
+  const [pipeForm, setPipeForm] = useState({ name: "", stages: [{ name: "Novo", color: "#6366f1", is_win: false, is_lost: false }, { name: "Em Andamento", color: "#f59e0b", is_win: false, is_lost: false }, { name: "Ganho", color: "#10b981", is_win: true, is_lost: false }, { name: "Perdido", color: "#ef4444", is_win: false, is_lost: true }] });
   const [hsStatus, setHsStatus] = useState({ connected: null, message: "" });
   const [hsPipelines, setHsPipelines] = useState([]);
   const [hsLoading, setHsLoading] = useState(false);
   const [hsSaving, setHsSaving] = useState(false);
   const [hsKeyPreview, setHsKeyPreview] = useState(null);
+
+  // Load pipelines for funis tab
+  const loadCfgPipelines = useCallback(() => {
+    pipelinesApi.getAll().then(r => setCfgPipelines(r.data)).catch(() => {});
+  }, []);
+  useEffect(() => { if (canManagePipelines) loadCfgPipelines(); }, [canManagePipelines, loadCfgPipelines]);
+
+  const handleSavePipeline = async () => {
+    if (!pipeForm.name || pipeForm.stages.length === 0) return;
+    try {
+      if (editPipe) {
+        await pipelinesApi.update(editPipe.id, pipeForm);
+      } else {
+        await pipelinesApi.create(pipeForm);
+      }
+      loadCfgPipelines();
+      setPipeModal(false);
+      setEditPipe(null);
+      setPipeForm({ name: "", stages: [{ name: "Novo", color: "#6366f1", is_win: false, is_lost: false }, { name: "Em Andamento", color: "#f59e0b", is_win: false, is_lost: false }, { name: "Ganho", color: "#10b981", is_win: true, is_lost: false }, { name: "Perdido", color: "#ef4444", is_win: false, is_lost: true }] });
+    } catch (e) { console.error(e); }
+  };
+
+  const handleEditPipeline = async (pipe) => {
+    const sr = await pipelinesApi.getStages(pipe.id);
+    setEditPipe(pipe);
+    setPipeForm({ name: pipe.name, stages: sr.data.map(s => ({ ...s, is_win: !!Number(s.is_win), is_lost: !!Number(s.is_lost) })) });
+    setPipeModal(true);
+  };
+
+  const handleDeletePipeline = async (id) => {
+    if (!confirm("Desativar este funil?")) return;
+    await pipelinesApi.delete(id);
+    loadCfgPipelines();
+  };
 
   // Load HubSpot config on mount
   useEffect(() => {
@@ -2885,7 +3271,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
   return (
     <div>
       <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${T.bor}`, marginBottom: 20 }}>
-        {["geral", "hubspot", "notificações", "usuários", "parceiros", "convênios", "materiais", "auditoria"].map(t => <button key={t} onClick={() => { setTab(t); if (t === "auditoria" && auditData.length === 0 && !auditLoading) loadAudit(0, auditFilters); }} style={{ padding: "10px 16px", fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: "none", color: tab === t ? T.ac : T.tm, fontFamily: "'DM Sans',sans-serif", borderBottom: `2px solid ${tab === t ? T.ac : "transparent"}`, marginBottom: -1, textTransform: "capitalize" }}>{t}</button>)}
+        {(isSA ? ["geral", "hubspot", "notificações", "usuários", "parceiros", "convênios", "funis", "materiais", "auditoria"] : ["funis"]).map(t => <button key={t} onClick={() => { setTab(t); if (t === "auditoria" && auditData.length === 0 && !auditLoading) loadAudit(0, auditFilters); }} style={{ padding: "10px 16px", fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: "none", color: tab === t ? T.ac : T.tm, fontFamily: "'DM Sans',sans-serif", borderBottom: `2px solid ${tab === t ? T.ac : "transparent"}`, marginBottom: -1, textTransform: "capitalize" }}>{t}</button>)}
       </div>
       {tab === "geral" && <div>
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20, marginBottom: 16 }}>
@@ -3568,6 +3954,69 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
 
       {/* CONVÊNIOS TAB */}
       {tab === "convênios" && <ConveniosTab />}
+
+      {/* FUNIS TAB */}
+      {tab === "funis" && canManagePipelines && (
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <div style={{ fontSize: 13, color: T.t2 }}>{cfgPipelines.length} funil(is) ativo(s)</div>
+            <Btn onClick={() => { setEditPipe(null); setPipeForm({ name: "", stages: [{ name: "Novo", color: "#6366f1", is_win: false, is_lost: false }, { name: "Em Andamento", color: "#f59e0b", is_win: false, is_lost: false }, { name: "Ganho", color: "#10b981", is_win: true, is_lost: false }, { name: "Perdido", color: "#ef4444", is_win: false, is_lost: true }] }); setPipeModal(true); }}>＋ Novo Funil</Btn>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {cfgPipelines.map(p => (
+              <div key={p.id} style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <div>
+                    <span style={{ fontSize: 15, fontWeight: 700 }}>{p.name}</span>
+                    <span style={{ fontSize: 11, color: T.tm, marginLeft: 12 }}>Criado por {p.creator_name || "—"}</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <Btn v="secondary" sm onClick={() => handleEditPipeline(p)}>Editar</Btn>
+                    <Btn v="danger" sm onClick={() => handleDeletePipeline(p.id)}>Desativar</Btn>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {cfgPipelines.length === 0 && <div style={{ padding: 40, textAlign: "center", color: T.tm }}>Nenhum funil criado ainda</div>}
+          </div>
+
+          {/* Pipeline Create/Edit Modal */}
+          <Modal open={pipeModal} onClose={() => setPipeModal(false)} title={editPipe ? "Editar Funil" : "Novo Funil"} wide
+            footer={<Btn onClick={handleSavePipeline} disabled={!pipeForm.name || pipeForm.stages.length === 0}>{editPipe ? "Salvar" : "Criar Funil"}</Btn>}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <Inp label="Nome do Funil *" value={pipeForm.name} onChange={v => setPipeForm({ ...pipeForm, name: v })} placeholder="Ex: Vendas B2B, Onboarding..." />
+              <div>
+                <label style={{ fontSize: 12, color: T.t2, textTransform: "uppercase", fontWeight: 600, marginBottom: 8, display: "block" }}>Etapas do Funil</label>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {pipeForm.stages.map((s, i) => (
+                    <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", padding: 10, background: T.bg2, borderRadius: 8, border: `1px solid ${T.bor}` }}>
+                      <input type="color" value={s.color} onChange={e => { const ns = [...pipeForm.stages]; ns[i].color = e.target.value; setPipeForm({ ...pipeForm, stages: ns }); }}
+                        style={{ width: 32, height: 32, border: "none", cursor: "pointer", borderRadius: 4 }} />
+                      <input value={s.name} onChange={e => { const ns = [...pipeForm.stages]; ns[i].name = e.target.value; setPipeForm({ ...pipeForm, stages: ns }); }}
+                        style={{ flex: 1, padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 13, fontFamily: "'DM Sans',sans-serif" }}
+                        placeholder="Nome da etapa" />
+                      <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: T.ok, cursor: "pointer" }}>
+                        <input type="checkbox" checked={s.is_win} onChange={e => { const ns = [...pipeForm.stages]; ns[i].is_win = e.target.checked; if (e.target.checked) ns[i].is_lost = false; setPipeForm({ ...pipeForm, stages: ns }); }} /> Ganho
+                      </label>
+                      <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: T.er, cursor: "pointer" }}>
+                        <input type="checkbox" checked={s.is_lost} onChange={e => { const ns = [...pipeForm.stages]; ns[i].is_lost = e.target.checked; if (e.target.checked) ns[i].is_win = false; setPipeForm({ ...pipeForm, stages: ns }); }} /> Perdido
+                      </label>
+                      <button onClick={() => { if (i > 0) { const ns = [...pipeForm.stages]; [ns[i-1], ns[i]] = [ns[i], ns[i-1]]; setPipeForm({ ...pipeForm, stages: ns }); } }}
+                        style={{ background: "none", border: "none", color: T.tm, cursor: i > 0 ? "pointer" : "default", fontSize: 14, opacity: i > 0 ? 1 : 0.3 }}>↑</button>
+                      <button onClick={() => { if (i < pipeForm.stages.length - 1) { const ns = [...pipeForm.stages]; [ns[i], ns[i+1]] = [ns[i+1], ns[i]]; setPipeForm({ ...pipeForm, stages: ns }); } }}
+                        style={{ background: "none", border: "none", color: T.tm, cursor: i < pipeForm.stages.length - 1 ? "pointer" : "default", fontSize: 14, opacity: i < pipeForm.stages.length - 1 ? 1 : 0.3 }}>↓</button>
+                      <button onClick={() => { const ns = pipeForm.stages.filter((_, j) => j !== i); setPipeForm({ ...pipeForm, stages: ns }); }}
+                        style={{ background: "none", border: "none", color: T.er, cursor: "pointer", fontSize: 14 }}>✕</button>
+                    </div>
+                  ))}
+                </div>
+                <button onClick={() => setPipeForm({ ...pipeForm, stages: [...pipeForm.stages, { name: "", color: "#6366f1", is_win: false, is_lost: false }] })}
+                  style={{ marginTop: 8, padding: "6px 14px", fontSize: 12, background: "transparent", border: `1px dashed ${T.bor}`, borderRadius: 6, color: T.t2, cursor: "pointer", width: "100%" }}>＋ Adicionar Etapa</button>
+              </div>
+            </div>
+          </Modal>
+        </div>
+      )}
 
       {/* MATERIAIS TAB */}
       {tab === "materiais" && (
@@ -4746,6 +5195,7 @@ const RL = { super_admin: "Super Admin", executivo: "Diretor", diretor: "Gerente
 const NAV = [
   { id: "dash", l: "Dashboard", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro", "convenio"] },
   { id: "kanban", l: "Funil/Pipeline", r: ["super_admin", "executivo", "diretor", "gerente"] },
+  { id: "negocios", l: "Negociações", r: ["super_admin", "executivo", "diretor", "gerente"] },
   { id: "inds", l: "Minhas Indicações", r: ["parceiro"] },
   { id: "convenio", l: "Meu Convênio", r: ["convenio"] },
   { id: "parcs", l: "Parceiros", r: ["super_admin", "executivo", "diretor", "gerente"] },
@@ -4754,10 +5204,10 @@ const NAV = [
   { id: "fin", l: "Financeiro", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro"] },
   { id: "mats", l: "Material de Apoio", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro", "convenio"] },
   { id: "notifs", l: "Notificações", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro", "convenio"] },
-  { id: "cfg", l: "Configurações", r: ["super_admin"] },
+  { id: "cfg", l: "Configurações", r: ["super_admin", "executivo", "gerente"] },
 ];
-const TIT = { dash: "Dashboard", kanban: "Funil / Pipeline", inds: "Minhas Indicações", convenio: "Meu Convênio", parcs: "Parceiros Indicadores", groups: "WhatsApp - Conversas", diretoria: "Visão Diretoria", fin: "Financeiro", mats: "Material de Apoio", notifs: "Central de Notificações", cfg: "Configurações" };
-const EMO = { dash: "📊", kanban: "📋", inds: "🏢", convenio: "🤝", parcs: "👥", groups: "📱", diretoria: "📈", fin: "💰", mats: "📁", notifs: "🔔", cfg: "⚙️" };
+const TIT = { dash: "Dashboard", kanban: "Funil / Pipeline", negocios: "Negociações", inds: "Minhas Indicações", convenio: "Meu Convênio", parcs: "Parceiros Indicadores", groups: "WhatsApp - Conversas", diretoria: "Visão Diretoria", fin: "Financeiro", mats: "Material de Apoio", notifs: "Central de Notificações", cfg: "Configurações" };
+const EMO = { dash: "📊", kanban: "📋", negocios: "💼", inds: "🏢", convenio: "🤝", parcs: "👥", groups: "📱", diretoria: "📈", fin: "💰", mats: "📁", notifs: "🔔", cfg: "⚙️" };
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -5081,6 +5531,7 @@ export default function App() {
           <div className={`${useDrawer ? "main-padding--mobile" : "main-padding"}`}>
             {pg === "dash" && <Dash inds={inds} users={users} comms={comms} nfes={nfes} activity={activity} />}
             {pg === "kanban" && <KanbanPage inds={inds} setInds={setInds} users={users} travaDias={travaDias} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} />}
+            {pg === "negocios" && <NegociosPage users={users} />}
             {pg === "inds" && <MinhasInd inds={inds} setInds={setInds} notifs={notifs} setNotifs={setNotifs} users={users} cadenceRules={cadenceRules} />}
             {pg === "convenio" && <ConvenioPage />}
             {pg === "parcs" && <ParcPage users={users} setUsers={setUsers} inds={inds} />}
