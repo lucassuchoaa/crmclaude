@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback } from "react";
 import { authApi, usersApi, indicationsApi, commissionsApi, nfesApi, materialsApi, notificationsApi, hubspotApi, groupsApi, cnpjAgentApi, diretoriaApi, whatsappApi, conveniosApi, setTokens, clearTokens } from "./services/api";
-import { useBreakpoint, responsive } from "./hooks/useBreakpoint";
+import { useBreakpoint } from "./hooks/useBreakpoint";
 
 const AuthCtx = createContext(null);
 const useAuth = () => useContext(AuthCtx);
@@ -180,11 +180,10 @@ const fonts = `@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wgh
 function Badge({ children, type = "info" }) {
   const cl = { success: T.ok, warning: T.wn, danger: T.er, info: T.inf, accent: T.ac, muted: T.tm };
   const co = cl[type] || cl.info;
-  return <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 10, background: co + "22", color: co, textTransform: "uppercase", letterSpacing: 0.3 }}>{children}</span>;
+  return <span className="badge" style={{ background: co + "22", color: co }}>{children}</span>;
 }
 
 function Btn({ children, v = "primary", onClick, disabled, full, sm, style: sx }) {
-  const base = { display: "inline-flex", alignItems: "center", gap: 8, padding: sm ? "6px 12px" : "10px 20px", border: "none", borderRadius: 6, fontFamily: "'DM Sans',sans-serif", fontSize: sm ? 12 : 14, fontWeight: 600, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.5 : 1, whiteSpace: "nowrap", width: full ? "100%" : "auto", justifyContent: full ? "center" : undefined, transition: "all 0.2s" };
   const vs = {
     primary: { background: T.ac, color: "#fff" },
     secondary: { background: "transparent", color: T.t2, border: `1px solid ${T.bor}` },
@@ -192,20 +191,20 @@ function Btn({ children, v = "primary", onClick, disabled, full, sm, style: sx }
     danger: { background: T.er + "22", color: T.er, border: `1px solid ${T.er}44` },
     success: { background: T.ok + "22", color: T.ok, border: `1px solid ${T.ok}44` },
   };
-  return <button style={{ ...base, ...vs[v], ...sx }} onClick={disabled ? undefined : onClick}>{children}</button>;
+  return <button className={`btn${sm ? " btn--sm" : ""}${full ? " btn--full" : ""}`} style={{ ...vs[v], ...sx }} onClick={disabled ? undefined : onClick} disabled={disabled}>{children}</button>;
 }
 
 function Modal({ open, onClose, title, children, footer, wide }) {
   if (!open) return null;
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 999 }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 12, width: wide ? 700 : 520, maxWidth: "92vw", maxHeight: "85vh", overflowY: "auto", boxShadow: "0 8px 40px rgba(0,0,0,0.5)" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", borderBottom: `1px solid ${T.bor}` }}>
-          <h3 style={{ fontSize: 16, fontWeight: 700 }}>{title}</h3>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: T.t2, cursor: "pointer", fontSize: 18 }}>✕</button>
+    <div onClick={onClose} className="modal-overlay">
+      <div onClick={e => e.stopPropagation()} className={`modal-content ${wide ? "modal-content--wide" : "modal-content--default"}`} style={{ background: T.card, borderColor: T.bor }}>
+        <div className="modal-header" style={{ borderBottomColor: T.bor }}>
+          <h3 className="modal-header__title">{title}</h3>
+          <button onClick={onClose} className="modal-header__close" style={{ color: T.t2 }}>✕</button>
         </div>
-        <div style={{ padding: 24 }}>{children}</div>
-        {footer && <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "14px 24px", borderTop: `1px solid ${T.bor}` }}>{footer}</div>}
+        <div className="modal-body">{children}</div>
+        {footer && <div className="modal-footer" style={{ borderTopColor: T.bor }}>{footer}</div>}
       </div>
     </div>
   );
@@ -213,9 +212,9 @@ function Modal({ open, onClose, title, children, footer, wide }) {
 
 function Inp({ label, value, onChange, type = "text", placeholder, style: sx }) {
   return (
-    <div style={{ marginBottom: 14, ...sx }}>
-      {label && <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</label>}
-      <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+    <div className="input-group" style={sx}>
+      {label && <label className="input-label" style={{ color: T.t2 }}>{label}</label>}
+      <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} className="input-field" style={{ background: T.inp, borderColor: T.bor, color: T.txt }} />
     </div>
   );
 }
@@ -246,14 +245,14 @@ function Login({ onLogin }) {
   };
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: T.bg, fontFamily: "'DM Sans',sans-serif", color: T.txt }}>
+    <div className="login-page" style={{ background: T.bg, color: T.txt }}>
       <style>{fonts}</style>
-      <div style={{ position: "absolute", inset: 0, background: `radial-gradient(ellipse 80% 60% at 50% 0%, ${T.ac}14 0%, transparent 60%)` }} />
-      <div style={{ position: "relative", background: T.card, border: `1px solid ${T.bor}`, borderRadius: 16, padding: "44px 36px", width: 400, maxWidth: "90vw", boxShadow: "0 8px 40px rgba(0,0,0,0.5)" }}>
-        <div style={{ position: "absolute", top: -1, left: "20%", right: "20%", height: 2, background: `linear-gradient(90deg, transparent, ${T.ac}, transparent)` }} />
-        <div style={{ textAlign: "center", marginBottom: 32 }}>
-          <h1 style={{ fontFamily: "'Space Mono',monospace", fontSize: 26, fontWeight: 700, color: T.ac }}>SOMAPAY</h1>
-          <p style={{ fontSize: 12, color: T.tm, marginTop: 4, letterSpacing: 2, textTransform: "uppercase" }}>Portal de Parceiros</p>
+      <div className="absolute inset-0" style={{ background: `radial-gradient(ellipse 80% 60% at 50% 0%, ${T.ac}14 0%, transparent 60%)` }} />
+      <div className="login-card" style={{ background: T.card, borderColor: T.bor }}>
+        <div className="login-accent-line" style={{ background: `linear-gradient(90deg, transparent, ${T.ac}, transparent)` }} />
+        <div className="text-center mb-6" style={{ marginBottom: 32 }}>
+          <h1 className="font-mono" style={{ fontSize: 26, fontWeight: 700, color: T.ac }}>SOMAPAY</h1>
+          <p className="uppercase" style={{ fontSize: 12, color: T.tm, marginTop: 4, letterSpacing: 2 }}>Portal de Parceiros</p>
         </div>
         <Inp label="E-mail" value={em} onChange={v => { setEm(v); setErr(""); }} placeholder="seu@email.com" />
         <Inp label="Senha" value={pw} onChange={v => { setPw(v); setErr(""); }} type="password" placeholder="••••••••" />
@@ -288,12 +287,12 @@ function ForceChangePassword({ user, onChanged, onLogout }) {
   };
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: T.bg, fontFamily: "'DM Sans',sans-serif", color: T.txt }}>
+    <div className="login-page" style={{ background: T.bg, color: T.txt }}>
       <style>{fonts}</style>
-      <div style={{ position: "absolute", inset: 0, background: `radial-gradient(ellipse 80% 60% at 50% 0%, ${T.wn}14 0%, transparent 60%)` }} />
-      <div style={{ position: "relative", background: T.card, border: `1px solid ${T.bor}`, borderRadius: 16, padding: "44px 36px", width: 420, maxWidth: "90vw", boxShadow: "0 8px 40px rgba(0,0,0,0.5)" }}>
-        <div style={{ position: "absolute", top: -1, left: "20%", right: "20%", height: 2, background: `linear-gradient(90deg, transparent, ${T.wn}, transparent)` }} />
-        <div style={{ textAlign: "center", marginBottom: 24 }}>
+      <div className="absolute inset-0" style={{ background: `radial-gradient(ellipse 80% 60% at 50% 0%, ${T.wn}14 0%, transparent 60%)` }} />
+      <div className="login-card" style={{ background: T.card, borderColor: T.bor, width: 420 }}>
+        <div className="login-accent-line" style={{ background: `linear-gradient(90deg, transparent, ${T.wn}, transparent)` }} />
+        <div className="text-center mb-6" style={{ marginBottom: 24 }}>
           <div style={{ fontSize: 36, marginBottom: 8 }}>🔐</div>
           <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>Alterar Senha</h1>
           <p style={{ fontSize: 13, color: T.t2, marginTop: 8 }}>Olá, <strong>{user.name}</strong>. Por segurança, é necessário alterar sua senha no primeiro acesso.</p>
@@ -303,7 +302,7 @@ function ForceChangePassword({ user, onChanged, onLogout }) {
         <Inp label="Confirmar nova senha" value={np2} onChange={v => { setNp2(v); setErr(""); }} type="password" placeholder="Repita a nova senha" />
         {err && <p style={{ color: T.er, fontSize: 13, textAlign: "center", margin: "8px 0" }}>{err}</p>}
         <Btn v="primary" full onClick={go} disabled={loading} style={{ marginTop: 12, padding: 14 }}>{loading ? "Alterando..." : "Alterar Senha e Continuar"}</Btn>
-        <button onClick={onLogout} style={{ width: "100%", marginTop: 12, padding: 10, background: "transparent", border: `1px solid ${T.bor}`, borderRadius: 6, color: T.tm, cursor: "pointer", fontFamily: "'DM Sans',sans-serif", fontSize: 12 }}>Sair</button>
+        <button className="btn btn--full" onClick={onLogout} style={{ marginTop: 12, padding: 10, background: "transparent", border: `1px solid ${T.bor}`, color: T.tm, fontSize: 12 }}>Sair</button>
       </div>
     </div>
   );
@@ -578,32 +577,32 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
     return (
       <div>
         {/* Welcome + Gerente Info */}
-        <div style={{ display: "flex", gap: 16, marginBottom: 16, alignItems: "stretch" }}>
-          <div style={{ flex: 1, background: `linear-gradient(135deg, ${T.ac}22 0%, ${T.ac}08 100%)`, border: `1px solid ${T.ac}30`, borderRadius: 12, padding: 20 }}>
-            <div style={{ fontSize: 11, color: T.ac, textTransform: "uppercase", letterSpacing: 1, fontWeight: 600, marginBottom: 6 }}>Bem-vindo de volta</div>
-            <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>{user.name}</div>
+        <div className="flex r-flex-col-mobile gap-4 mb-4 items-stretch">
+          <div className="welcome-card flex-1" style={{ background: `linear-gradient(135deg, ${T.ac}22 0%, ${T.ac}08 100%)`, border: `1px solid ${T.ac}30` }}>
+            <div className="uppercase font-semibold ls-wide" style={{ fontSize: 11, color: T.ac, letterSpacing: 1, marginBottom: 6 }}>Bem-vindo de volta</div>
+            <div className="welcome-card__name">{user.name}</div>
             <div style={{ fontSize: 12, color: T.t2 }}>{me?.empresa || "Parceiro"}</div>
-            <div style={{ display: "flex", gap: 12, marginTop: 12 }}>
-              <div style={{ padding: "6px 12px", background: T.card, borderRadius: 6, border: `1px solid ${T.bor}`, fontSize: 11 }}>
-                <span style={{ color: T.tm }}>Executivo: </span><span style={{ fontWeight: 600 }}>{myGerente?.name || "—"}</span>
+            <div className="welcome-card__meta">
+              <div className="welcome-card__chip" style={{ background: T.card, borderColor: T.bor }}>
+                <span style={{ color: T.tm }}>Executivo: </span><span className="font-semibold">{myGerente?.name || "—"}</span>
               </div>
-              <div style={{ padding: "6px 12px", background: T.card, borderRadius: 6, border: `1px solid ${T.bor}`, fontSize: 11 }}>
-                <span style={{ color: T.tm }}>Conversão: </span><span style={{ fontWeight: 700, color: parseFloat(pTx) >= 20 ? T.ok : T.wn }}>{pTx}%</span>
+              <div className="welcome-card__chip" style={{ background: T.card, borderColor: T.bor }}>
+                <span style={{ color: T.tm }}>Conversão: </span><span className="font-bold" style={{ color: parseFloat(pTx) >= 20 ? T.ok : T.wn }}>{pTx}%</span>
               </div>
             </div>
           </div>
           {/* My Commercial Condition */}
-          <div style={{ width: 300, background: T.card, border: `1px solid ${T.bor}`, borderRadius: 12, padding: 20, display: "flex", flexDirection: "column", justifyContent: "center" }}>
-            <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10, fontWeight: 600 }}>💰 Minha Condição Comercial</div>
-            <div style={{ flex: 1, background: T.inp, borderRadius: 8, padding: 16, textAlign: "center", border: `1px solid ${me?.comTipo === "pct" ? T.ac : T.inf}25` }}>
-              <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", marginBottom: 4 }}>{me?.comTipo === "pct" ? "% sobre Cashin" : "Valor por Conta Ativa"}</div>
-              <div style={{ fontSize: 28, fontWeight: 700, fontFamily: "'Space Mono',monospace", color: me?.comTipo === "pct" ? T.ac : T.inf }}>{me?.comTipo === "pct" ? `${me.comVal}%` : me?.comVal != null ? `R$ ${me.comVal.toFixed(2)}` : "—"}</div>
+          <div className="r-w-full-mobile flex flex-col justify-center" style={{ width: 300, background: T.card, border: `1px solid ${T.bor}`, borderRadius: 12, padding: 20 }}>
+            <div className="uppercase font-semibold ls-wide" style={{ fontSize: 10, color: T.tm, marginBottom: 10 }}>💰 Minha Condição Comercial</div>
+            <div className="flex-1 text-center" style={{ background: T.inp, borderRadius: 8, padding: 16, border: `1px solid ${me?.comTipo === "pct" ? T.ac : T.inf}25` }}>
+              <div className="uppercase" style={{ fontSize: 10, color: T.tm, marginBottom: 4 }}>{me?.comTipo === "pct" ? "% sobre Cashin" : "Valor por Conta Ativa"}</div>
+              <div className="font-mono font-bold" style={{ fontSize: 28, color: me?.comTipo === "pct" ? T.ac : T.inf }}>{me?.comTipo === "pct" ? `${me.comVal}%` : me?.comVal != null ? `R$ ${me.comVal.toFixed(2)}` : "—"}</div>
             </div>
           </div>
         </div>
 
         {/* KPIs Row */}
-        <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "repeat(2, 1fr)", lg: "repeat(4, 1fr)" }), gap: 12, marginBottom: 12 }}>
+        <div className="grid r-grid-kpi" style={{ gap: 12, marginBottom: 12 }}>
           {[
             { l: "Total", v: pTotal, co: T.ac, ic: "📋" },
             { l: "Em Andamento", v: pPipeline, co: T.inf, ic: "🔄" },
@@ -621,7 +620,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
             </div>
           ))}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "repeat(2, 1fr)", lg: "repeat(4, 1fr)" }), gap: 12, marginBottom: 20 }}>
+        <div className="grid r-grid-kpi" style={{ gap: 12, marginBottom: 20 }}>
           {[
             { l: "Recusadas", v: pRecusadas, co: T.er, ic: "❌" },
             { l: "Total Funcionários", v: pTotalFunc.toLocaleString('pt-BR'), co: T.inf, ic: "👥" },
@@ -641,7 +640,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
         </div>
 
         {/* Funnel + Financial Side by Side */}
-        <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr 1fr", lg: "1fr 1fr" }), gap: 16, marginBottom: 16 }}>
+        <div className="grid r-grid" style={{ gap: 16, marginBottom: 16 }}>
           {/* Mini Funnel */}
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 16 }}>
             <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>📊 Meu Funil</h3>
@@ -726,12 +725,12 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
         </div>
 
         {/* Table + Activity */}
-        <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr", lg: "2fr 1fr" }), gap: 16 }}>
+        <div className="grid r-grid-main" style={{ gap: 16 }}>
           {/* Indicações */}
           <div>
             <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>📋 Minhas Indicações{pHasFilters ? " (Filtradas)" : ""}</h3>
             <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-              <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+              <div className="table-responsive"><table className="data-table">
                 <thead><tr>{["Empresa", "Status", "Liberação", "Limite", "Data"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
                 <tbody>{pSorted.map(ind => (
                   <tr key={ind.id} onClick={() => selectPInd(ind)} style={{ cursor: "pointer" }}>
@@ -817,7 +816,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
   return (
     <div>
       {/* ROW 1: KPIs */}
-      <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "repeat(2, 1fr)", lg: "repeat(4, 1fr)" }), gap: 12, marginBottom: 12 }}>
+      <div className="grid r-grid-kpi" style={{ gap: 12, marginBottom: 12 }}>
         {[
           { l: "Total Indicações", v: total, co: T.ac, ic: "📋" },
           { l: "Em Andamento", v: pipeline, co: T.inf, ic: "🔄" },
@@ -835,7 +834,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
           </div>
         ))}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "repeat(2, 1fr)", lg: "repeat(4, 1fr)" }), gap: 12, marginBottom: 20 }}>
+      <div className="grid r-grid-kpi" style={{ gap: 12, marginBottom: 20 }}>
         {[
           { l: "Recusadas", v: recusadas, co: T.er, ic: "❌" },
           { l: "Total Funcionários", v: totalFuncionarios.toLocaleString('pt-BR'), co: T.inf, ic: "👥" },
@@ -934,12 +933,12 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
       )}
 
       {/* ROW 5: 3-column layout */}
-      <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr", lg: "2fr 1fr" }), gap: 16, marginBottom: 16 }}>
+      <div className="grid r-grid-main" style={{ gap: 16, marginBottom: 16 }}>
         {/* Indicações filtradas */}
         <div>
           <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>📋 Indicações {hasFilters ? "(Filtradas)" : "Recentes"}</h3>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+            <div className="table-responsive"><table className="data-table">
               <thead><tr>{["Empresa", "Parceiro", "Status", "Liberação", "Limite", "Data"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>{sorted.slice(0, 10).map(ind => (
                 <tr key={ind.id}>
@@ -981,7 +980,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
         <div style={{ marginBottom: 16 }}>
           <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>🏛️ Performance dos Gerentes</h3>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+            <div className="table-responsive"><table className="data-table">
               <thead><tr>{["Gerente", "Executivos", "Parceiros", "Indicações", "Ativas", "Conversão"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>{dirRanking.map(d => (
                 <tr key={d.id}>
@@ -1011,12 +1010,12 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
       )}
 
       {/* ROW 7: Ranking + Gerentes/Deals */}
-      <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr 1fr", lg: "1fr 1fr" }), gap: 16 }}>
+      <div className="grid r-grid" style={{ gap: 16 }}>
         {/* Ranking Parceiros */}
         <div>
           <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>🏆 Ranking de Parceiros</h3>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+            <div className="table-responsive"><table className="data-table">
               <thead><tr>{["#", "Parceiro", "Total", "Ativas", "Em Andamento", "Funcionários", "Conversão"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>{parcRanking.map((p, i) => (
                 <tr key={p.id}>
@@ -1051,7 +1050,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
           <div>
             <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>👔 Performance dos Executivos</h3>
             <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-              <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+              <div className="table-responsive"><table className="data-table">
                 <thead><tr>{["Executivo", "Parceiros", "Indicações", "Ativas", "Conversão"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
                 <tbody>{gerRanking.map(g => (
                   <tr key={g.id}>
@@ -1081,7 +1080,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
           <div>
             <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>🔗 HubSpot Deals</h3>
             <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-              <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+              <div className="table-responsive"><table className="data-table">
                 <thead><tr>{["Empresa", "Deal", "Parceiro", "Status"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
                 <tbody>{baseInds.filter(i => i.hsId).slice(0, 8).map(ind => (
                   <tr key={ind.id}>
@@ -1266,10 +1265,10 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenc
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "flex-start", alignItems: "center", marginBottom: 12 }}>
-        <div style={{ display: "flex", gap: 4, background: T.inp, borderRadius: 6, padding: 3, border: `1px solid ${T.bor}` }}>
-          <button onClick={() => setView("kanban")} style={{ padding: "6px 14px", borderRadius: 4, border: "none", fontFamily: "'DM Sans',sans-serif", fontSize: 12, fontWeight: 600, cursor: "pointer", background: view === "kanban" ? T.ac : "transparent", color: view === "kanban" ? "#fff" : T.tm }}>📊 Funil</button>
-          <button onClick={() => setView("list")} style={{ padding: "6px 14px", borderRadius: 4, border: "none", fontFamily: "'DM Sans',sans-serif", fontSize: 12, fontWeight: 600, cursor: "pointer", background: view === "list" ? T.ac : "transparent", color: view === "list" ? "#fff" : T.tm }}>📋 Lista</button>
+      <div className="flex justify-start items-center mb-3">
+        <div className="view-toggle" style={{ background: T.inp, borderColor: T.bor }}>
+          <button onClick={() => setView("kanban")} className="view-toggle__btn" style={{ background: view === "kanban" ? T.ac : "transparent", color: view === "kanban" ? "#fff" : T.tm }}>📊 Funil</button>
+          <button onClick={() => setView("list")} className="view-toggle__btn" style={{ background: view === "list" ? T.ac : "transparent", color: view === "list" ? "#fff" : T.tm }}>📋 Lista</button>
         </div>
       </div>
 
@@ -1314,8 +1313,8 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenc
 
       {/* KANBAN VIEW */}
       {view === "kanban" && (
-        <div style={{ overflowX: "auto", marginLeft: -28, marginRight: -28, paddingLeft: 28, paddingRight: 28, paddingBottom: 12 }}>
-          <div style={{ display: "inline-flex", gap: 10, minWidth: "max-content" }}>
+        <div className="kanban-scroll" style={{ marginLeft: -28, marginRight: -28, paddingLeft: 28, paddingRight: 28 }}>
+          <div className="kanban-board">
             {KCOLS.map(col => {
               const cards = fl.filter(i => i.st === col.id);
               return (
@@ -1357,7 +1356,7 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenc
       {/* LIST VIEW */}
       {view === "list" && (
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-          <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+          <div className="table-responsive"><table className="data-table">
             <thead><tr>{["Empresa", "Contato", "Func.", "Status", "Liberação", "Limite Trava", "Parceiro", "Data"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
             <tbody>
               {[...fl].sort((a, b) => b.dt.localeCompare(a.dt)).map(ind => (
@@ -1827,7 +1826,7 @@ function ParcPage({ users, setUsers, inds }) {
             <div style={{ marginTop: 8, fontSize: 11, color: T.er }}>{cnpjInfo.error}</div>
           )}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr 1fr", lg: "1fr 1fr" }), gap: 14 }}>
+        <div className="grid r-grid" style={{ gap: 14 }}>
           <Inp label="Nome *" value={f.name} onChange={v => setF({ ...f, name: v })} placeholder="Nome completo" />
           <Inp label="Empresa" value={f.empresa} onChange={v => setF({ ...f, empresa: v })} placeholder="Razão Social" />
           <Inp label="E-mail *" value={f.email} onChange={v => setF({ ...f, email: v })} placeholder="email@ex.com" />
@@ -1900,7 +1899,7 @@ function ParcPage({ users, setUsers, inds }) {
       <Modal open={!!editParc} onClose={() => { setEditParc(null); setResetPwResult(null); }} title="Editar Parceiro"
         footer={<><Btn v="secondary" onClick={() => { setEditParc(null); setResetPwResult(null); }}>Cancelar</Btn><Btn onClick={saveEditParc} disabled={editSaving}>{editSaving ? "Salvando..." : "Salvar"}</Btn></>}>
         {editParc && <div>
-          <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr 1fr", lg: "1fr 1fr" }), gap: 14 }}>
+          <div className="grid r-grid" style={{ gap: 14 }}>
             <Inp label="Nome" value={ef.name} onChange={v => setEf({ ...ef, name: v })} />
             <Inp label="Empresa" value={ef.empresa} onChange={v => setEf({ ...ef, empresa: v })} />
             <Inp label="Telefone" value={ef.tel} onChange={v => setEf({ ...ef, tel: v })} />
@@ -2000,7 +1999,7 @@ function ConvenioPage() {
 
       {/* Stats Cards */}
       {stats && (
-        <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr 1fr", sm: "1fr 1fr", md: "repeat(4, 1fr)", lg: "repeat(4, 1fr)" }), gap: 14, marginBottom: 24 }}>
+        <div className="grid r-grid-2x2-mobile" style={{ gap: 14, marginBottom: 24 }}>
           {[
             { label: "Total Parceiros", value: stats.totalParceiros, icon: "👥", color: T.ac },
             { label: "Total Indicações", value: stats.totalIndications, icon: "📋", color: T.inf },
@@ -2046,7 +2045,7 @@ function ConvenioPage() {
       {/* Parceiros Table */}
       {tab === "parceiros" && (
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-          <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 500 }}>
+          <div className="table-responsive"><table className="data-table" style={{ minWidth: 500 }}>
             <thead><tr>{["Parceiro", "Empresa", "CNPJ", "Indicações", "Ativas"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
             <tbody>
               {parceiros.length === 0 && <tr><td colSpan={5} style={{ ...tdS, textAlign: "center", color: T.t2 }}>Nenhum parceiro vinculado</td></tr>}
@@ -2067,7 +2066,7 @@ function ConvenioPage() {
       {/* Indicações Table */}
       {tab === "indicações" && (
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-          <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+          <div className="table-responsive"><table className="data-table">
             <thead><tr>{["Empresa", "Status", "Parceiro", "Data"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
             <tbody>
               {indications.length === 0 && <tr><td colSpan={4} style={{ ...tdS, textAlign: "center", color: T.t2 }}>Nenhuma indicação</td></tr>}
@@ -2316,7 +2315,7 @@ function MinhasInd({ inds, setInds, notifs, setNotifs, users, cadenceRules }) {
       {/* LIST VIEW */}
       {view === "list" && (
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-          <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+          <div className="table-responsive"><table className="data-table">
             <thead><tr>{["Empresa", "Contato", "Func.", "Status", "HubSpot", "Liberação", "Data"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
             <tbody>
               {my.map(ind => (
@@ -2420,7 +2419,7 @@ function MinhasInd({ inds, setInds, notifs, setNotifs, users, cadenceRules }) {
       {/* MODAL: Nova Indicação with CNPJ enrichment */}
       <Modal open={modal} onClose={() => { setModal(false); setHr(null); setCnpjData(null); }} title="Nova Indicação" wide footer={<><Btn v="secondary" onClick={() => { setModal(false); setHr(null); setCnpjData(null); }}>Cancelar</Btn><Btn onClick={submit} disabled={!f.emp || !f.cnpj || !f.cont}>Enviar</Btn></>}>
         <div style={{ marginBottom: 16, padding: 12, background: T.inp, borderRadius: 6, fontSize: 12, color: T.t2 }}>⚠️ Consulte o CNPJ para verificar no HubSpot e preencher dados automaticamente da Receita Federal.</div>
-        <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr 1fr", lg: "1fr 1fr" }), gap: 14 }}>
+        <div className="grid r-grid" style={{ gap: 14 }}>
           <div style={{ gridColumn: "1/-1", marginBottom: 14 }}>
             <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>CNPJ *</label>
             <div style={{ display: "flex", gap: 6 }}>
@@ -2910,7 +2909,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20, marginBottom: 16 }}>
           <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>💰 Modelo de Comissionamento</h3>
           <p style={{ fontSize: 12, color: T.tm, marginBottom: 16 }}>Cada parceiro recebe uma condição comercial individual — escolha entre percentual ou valor fixo:</p>
-          <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr 1fr", lg: "1fr 1fr" }), gap: 14, marginBottom: 16 }}>
+          <div className="grid r-grid" style={{ gap: 14, marginBottom: 16 }}>
             <div style={{ background: T.inp, borderRadius: 8, padding: 16, border: `1px solid ${T.ac}25` }}>
               <div style={{ fontSize: 10, color: T.ac, textTransform: "uppercase", fontWeight: 600, letterSpacing: 0.5, marginBottom: 8 }}>Opção A</div>
               <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>% sobre Cashin</div>
@@ -2926,7 +2925,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
           {/* Parceiro Commission Overview */}
           <div style={{ fontSize: 11, fontWeight: 600, color: T.t2, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>Condições por Parceiro</div>
           <div style={{ background: T.bg2, borderRadius: 8, border: `1px solid ${T.bor}`, overflow: "hidden" }}>
-            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+            <div className="table-responsive"><table className="data-table">
               <thead><tr>{["Parceiro", "Empresa", "Tipo", "Valor", "Executivo"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>{users.filter(u => u.role === "parceiro").map(p => (
                 <tr key={p.id}>
@@ -3069,7 +3068,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
           <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>⚡ Cadência Automática</h3>
           <p style={{ fontSize: 12, color: T.tm, marginBottom: 16 }}>Notificações disparadas automaticamente a cada ação no sistema.{isSA && " Clique no toggle para ativar/desativar ou no lápis para editar."}</p>
           <div style={{ background: T.bg2, borderRadius: 8, border: `1px solid ${T.bor}`, overflow: "hidden" }}>
-            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+            <div className="table-responsive"><table className="data-table">
               <thead><tr>{["Evento", "Notifica", "Tipo", "Status", ...(isSA ? ["Ações"] : [])].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>
                 {cadenceRules.map((r) => {
@@ -3142,7 +3141,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
           <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>📢 Comunicação Segmentada</h3>
           <p style={{ fontSize: 12, color: T.tm, marginBottom: 16 }}>Envie comunicados direcionados para perfis ou usuários específicos.</p>
 
-          <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr 1fr", lg: "1fr 1fr" }), gap: 14, marginBottom: 16 }}>
+          <div className="grid r-grid" style={{ gap: 14, marginBottom: 16 }}>
             <Inp label="Título do comunicado *" value={commForm.titulo} onChange={v => setCommForm({ ...commForm, titulo: v })} placeholder="Ex: Atualização de política" />
             <div style={{ marginBottom: 14 }}>
               <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Prioridade</label>
@@ -3236,7 +3235,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20 }}>
           <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 16 }}>📜 Histórico de Comunicados</h3>
           <div style={{ background: T.bg2, borderRadius: 8, border: `1px solid ${T.bor}`, overflow: "hidden" }}>
-            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+            <div className="table-responsive"><table className="data-table">
               <thead><tr>{["Título", "Perfis", "Alcançados", "Enviado por", "Data"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>
                 {commHist.map(c => (
@@ -3272,7 +3271,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
             {(uSearch || uRoleFilter) && <Btn v="secondary" sm onClick={() => { setUSearch(""); setURoleFilter(""); }}>Limpar</Btn>}
           </div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+            <div className="table-responsive"><table className="data-table">
               <thead><tr>{["Usuário", "E-mail", "Perfil", "Vínculo", "Status", "Último Acesso", "Ações"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>{users.filter(u => u.role !== "parceiro").filter(u => { if (uRoleFilter && u.role !== uRoleFilter) return false; if (uSearch) { const s = uSearch.toLowerCase(); return u.name.toLowerCase().includes(s) || u.email.toLowerCase().includes(s); } return true; }).map(u => (
                 <tr key={u.id}>
@@ -3309,7 +3308,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
           </div>
           <Modal open={userModal} onClose={() => setUserModal(false)} title="Adicionar Usuário Interno"
             footer={<><Btn v="secondary" onClick={() => setUserModal(false)}>Cancelar</Btn><Btn onClick={addUser} disabled={!uf.name || !uf.email || !uf.pw || (uf.role === "gerente" && !uf.dId) || (uf.role === "diretor" && !uf.eId) || (uf.role === "convenio" && ufConvIds.length === 0)}>Adicionar</Btn></>}>
-            <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr 1fr", lg: "1fr 1fr" }), gap: 14 }}>
+            <div className="grid r-grid" style={{ gap: 14 }}>
               <Inp label="Nome completo *" value={uf.name} onChange={v => setUf({ ...uf, name: v })} placeholder="Nome" />
               <Inp label="E-mail *" value={uf.email} onChange={v => setUf({ ...uf, email: v })} placeholder="email@somapay.com.br" />
               <Inp label="Senha *" value={uf.pw} onChange={v => setUf({ ...uf, pw: v })} type="password" placeholder="Senha" />
@@ -3364,7 +3363,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
           <Modal open={!!editUser} onClose={() => { setEditUser(null); setEuResetPw(null); }} title="Editar Usuário"
             footer={<><Btn v="secondary" onClick={() => { setEditUser(null); setEuResetPw(null); }}>Cancelar</Btn><Btn onClick={saveEditUser} disabled={euSaving}>{euSaving ? "Salvando..." : "Salvar"}</Btn></>}>
             {editUser && <div>
-              <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr 1fr", lg: "1fr 1fr" }), gap: 14 }}>
+              <div className="grid r-grid" style={{ gap: 14 }}>
                 <Inp label="Nome" value={euF.name} onChange={v => setEuF({ ...euF, name: v })} />
                 <div style={{ marginBottom: 14 }}>
                   <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>E-mail</label>
@@ -3443,7 +3442,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
             {(pSearch || pExecFilter) && <Btn v="secondary" sm onClick={() => { setPSearch(""); setPExecFilter(""); }}>Limpar</Btn>}
           </div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 800 }}>
+            <div className="table-responsive"><table className="data-table" style={{ minWidth: 800 }}>
               <thead><tr>{["Parceiro", "Empresa", "CNPJ", "Telefone", "Comissão", "Executivo", "Indicações", "Ações"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>{allParcs.length === 0 ? (
                 <tr><td colSpan={8} style={{ ...tdS, textAlign: "center", color: T.tm, padding: 30 }}>Nenhum parceiro encontrado</td></tr>
@@ -3578,7 +3577,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
             <Btn onClick={() => setMatModal(true)}>＋ Adicionar Material</Btn>
           </div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+            <div className="table-responsive"><table className="data-table">
               <thead><tr>{["Tipo", "Título", "Categoria", "Tamanho", "Data", "Ações"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>
                 {mats.map(m => (
@@ -3610,7 +3609,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
 
           <Modal open={matModal} onClose={() => setMatModal(false)} title="Adicionar Material de Apoio"
             footer={<><Btn v="secondary" onClick={() => setMatModal(false)}>Cancelar</Btn><Btn onClick={addMat} disabled={!mf.t || matSaving}>{matSaving ? "Enviando..." : "Adicionar"}</Btn></>}>
-            <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr 1fr", lg: "1fr 1fr" }), gap: 14 }}>
+            <div className="grid r-grid" style={{ gap: 14 }}>
               <div style={{ gridColumn: "1/-1" }}>
                 <Inp label="Título *" value={mf.t} onChange={v => setMf({ ...mf, t: v })} placeholder="Ex: Manual do Parceiro 2025" />
               </div>
@@ -3680,7 +3679,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
             {auditLoading ? (
               <div style={{ padding: 40, textAlign: "center", color: T.tm, fontSize: 13 }}>Carregando...</div>
             ) : (
-              <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 800 }}>
+              <div className="table-responsive"><table className="data-table" style={{ minWidth: 800 }}>
                 <thead><tr>{["Data/Hora", "Usuário", "Ação", "Indicação", "Detalhes", "Valores"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
                 <tbody>
                   {auditData.map(e => (
@@ -3831,7 +3830,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
   return (
     <div>
       {/* Stats cards */}
-      <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "repeat(2, 1fr)", lg: "repeat(3, 1fr)" }), gap: 14, marginBottom: 24 }}>
+      <div className="grid r-grid-3" style={{ gap: 14, marginBottom: 24 }}>
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 18, borderLeft: `3px solid ${T.ac}` }}>
           <div style={{ fontSize: 11, color: T.tm, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>{isParceiro ? "Total Comissões" : "Comissões Enviadas"}</div>
           <div style={{ fontSize: 22, fontWeight: 700, fontFamily: "'Space Mono',monospace" }}>{fmtBRL(totalComm)}</div>
@@ -3861,7 +3860,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
             <Btn onClick={() => setCommModal(true)}>📤 Enviar Relatório</Btn>
           </div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+            <div className="table-responsive"><table className="data-table">
               <thead><tr>{["Parceiro", "Título", "Período", "Valor", "Arquivo", "Data", "Ações"].map(h => <th key={h} style={thStyle}>{h}</th>)}</tr></thead>
               <tbody>
                 {myComms.map(r => {
@@ -3894,7 +3893,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
       {(tab === "nfes") && (
         <div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+            <div className="table-responsive"><table className="data-table">
               <thead><tr>{["Parceiro", "Nº NFe", "Valor", "Arquivo", "Data Envio", "Status", "Dt Pagamento", "Ações"].map(h => <th key={h} style={thStyle}>{h}</th>)}</tr></thead>
               <tbody>
                 {myNfes.map(n => {
@@ -3933,7 +3932,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
       {(tab === "meusRel") && (
         <div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+            <div className="table-responsive"><table className="data-table">
               <thead><tr>{["Título", "Período", "Valor", "Arquivo", "Data", "Ações"].map(h => <th key={h} style={thStyle}>{h}</th>)}</tr></thead>
               <tbody>
                 {myComms.map(r => (
@@ -3960,7 +3959,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
             <Btn onClick={() => setNfeModal(true)}>📤 Enviar NFe</Btn>
           </div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
-            <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+            <div className="table-responsive"><table className="data-table">
               <thead><tr>{["Nº NFe", "Valor", "Arquivo", "Data Envio", "Status", "Dt Pagamento"].map(h => <th key={h} style={thStyle}>{h}</th>)}</tr></thead>
               <tbody>
                 {myNfes.map(n => (
@@ -3983,7 +3982,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
       {/* Modal: Enviar Relatório de Comissão */}
       <Modal open={commModal} onClose={() => setCommModal(false)} title="Enviar Relatório de Comissão"
         footer={<><Btn v="secondary" onClick={() => setCommModal(false)}>Cancelar</Btn><Btn onClick={addComm} disabled={!cf.pId || !cf.titulo || !cf.periodo || !cf.valor}>Enviar</Btn></>}>
-        <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr 1fr", lg: "1fr 1fr" }), gap: 14 }}>
+        <div className="grid r-grid" style={{ gap: 14 }}>
           <div style={{ gridColumn: "1/-1", marginBottom: 14 }}>
             <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Parceiro *</label>
             <select value={cf.pId} onChange={e => setCf({ ...cf, pId: e.target.value })} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
@@ -4009,7 +4008,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
         <div style={{ marginBottom: 16, padding: 12, background: T.inp, borderRadius: 6, fontSize: 12, color: T.t2 }}>
           📋 Envie a nota fiscal referente à comissão do período. O pagamento será processado após validação.
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "1fr 1fr", lg: "1fr 1fr" }), gap: 14 }}>
+        <div className="grid r-grid" style={{ gap: 14 }}>
           <Inp label="Número da NFe *" value={nf.num} onChange={v => setNf({ ...nf, num: v })} placeholder="Ex: NFe 001234" />
           <Inp label="Valor (R$) *" value={nf.valor} onChange={v => setNf({ ...nf, valor: v })} type="number" placeholder="0.00" />
           <div style={{ gridColumn: "1/-1", marginBottom: 14 }}>
@@ -4112,7 +4111,7 @@ function NotifsPage({ notifs, setNotifs, users, userId }) {
   return (
     <div>
       {/* Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: responsive(breakpoint, { xs: "1fr", sm: "1fr", md: "repeat(2, 1fr)", lg: "repeat(4, 1fr)" }), gap: 14, marginBottom: 24 }}>
+      <div className="grid r-grid-kpi" style={{ gap: 14, marginBottom: 24 }}>
         {[
           { l: "Total", v: mine.length, c: T.inf, ico: "📬" },
           { l: "Não Lidas", v: unread, c: T.ac, ico: "🔴" },
@@ -4648,7 +4647,7 @@ function DiretoriaPage() {
             {item.parceiros.length === 0 ? (
               <div style={{ fontSize: 12, color: T.tm, textAlign: "center", padding: 12 }}>Nenhum parceiro</div>
             ) : (
-              <div className="table-responsive"><table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, minWidth: 600 }}>
+              <div className="table-responsive"><table className="data-table" style={{ fontSize: 12 }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${T.bor}` }}>
                     <th style={{ textAlign: "left", padding: "8px 6px", color: T.t2, fontWeight: 600 }}>Parceiro</th>
@@ -4936,57 +4935,53 @@ export default function App() {
   // Theme chooser screen (after login, before dashboard)
   if (user && !theme) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#0a0e1a", fontFamily: "'DM Sans',sans-serif", color: "#f1f5f9" }}>
+      <div className="theme-chooser" style={{ background: "#0a0e1a", color: "#f1f5f9" }}>
         <style>{fonts}</style>
-        <div style={{ position: "absolute", inset: 0, background: `radial-gradient(ellipse 80% 60% at 50% 0%, #f9731614 0%, transparent 60%)` }} />
-        <div style={{ position: "relative", textAlign: "center", maxWidth: 520, padding: "0 20px" }}>
-          <h1 style={{ fontFamily: "'Space Mono',monospace", fontSize: 26, fontWeight: 700, color: "#f97316", marginBottom: 6 }}>SOMAPAY</h1>
-          <p style={{ fontSize: 12, color: "#64748b", letterSpacing: 2, textTransform: "uppercase", marginBottom: 32 }}>Escolha sua aparência</p>
+        <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 80% 60% at 50% 0%, #f9731614 0%, transparent 60%)" }} />
+        <div className="relative text-center" style={{ maxWidth: 520, padding: "0 20px" }}>
+          <h1 className="font-mono" style={{ fontSize: 26, fontWeight: 700, color: "#f97316", marginBottom: 6 }}>SOMAPAY</h1>
+          <p className="uppercase" style={{ fontSize: 12, color: "#64748b", letterSpacing: 2, marginBottom: 32 }}>Escolha sua aparência</p>
           <p style={{ fontSize: 14, color: "#94a3b8", marginBottom: 28 }}>Olá, <strong style={{ color: "#f1f5f9" }}>{user.name}</strong>! Como prefere usar o portal?</p>
-          <div style={{ display: "flex", gap: 20, justifyContent: "center" }}>
+          <div className="flex gap-5 justify-center r-flex-col-mobile items-center">
             {/* Dark */}
-            <button onClick={() => applyTheme("dark")} style={{ cursor: "pointer", border: "2px solid #1e2d4a", borderRadius: 16, overflow: "hidden", background: "none", padding: 0, transition: "border-color 0.2s", width: 220 }}
+            <button onClick={() => applyTheme("dark")} className="theme-chooser__card" style={{ borderColor: "#1e2d4a" }}
               onMouseEnter={e => e.currentTarget.style.borderColor = "#f97316"} onMouseLeave={e => e.currentTarget.style.borderColor = "#1e2d4a"}>
-              <div style={{ background: "#0a0e1a", padding: 20 }}>
+              <div className="p-5" style={{ background: "#0a0e1a" }}>
                 <div style={{ background: "#111827", borderRadius: 8, padding: 14, border: "1px solid #1e2d4a", marginBottom: 10 }}>
-                  <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                  <div className="flex gap-2 mb-2">
                     <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#f97316" }} />
-                    <div style={{ flex: 1, height: 8, borderRadius: 4, background: "#1e2d4a" }} />
+                    <div className="flex-1" style={{ height: 8, borderRadius: 4, background: "#1e2d4a" }} />
                   </div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <div style={{ flex: 1, height: 24, borderRadius: 4, background: "#1a2235" }} />
-                    <div style={{ flex: 1, height: 24, borderRadius: 4, background: "#1a2235" }} />
+                  <div className="flex gap-2">
+                    <div className="flex-1" style={{ height: 24, borderRadius: 4, background: "#1a2235" }} />
+                    <div className="flex-1" style={{ height: 24, borderRadius: 4, background: "#1a2235" }} />
                   </div>
                 </div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  {["#10b981", "#3b82f6", "#f59e0b"].map(c => <div key={c} style={{ flex: 1, height: 6, borderRadius: 3, background: c + "44" }} />)}
+                <div className="flex gap-2">
+                  {["#10b981", "#3b82f6", "#f59e0b"].map(c => <div key={c} className="flex-1" style={{ height: 6, borderRadius: 3, background: c + "44" }} />)}
                 </div>
               </div>
-              <div style={{ padding: "12px 0", background: "#111827", borderTop: "1px solid #1e2d4a" }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: "#f1f5f9", fontFamily: "'DM Sans',sans-serif" }}>🌙 Modo Escuro</span>
-              </div>
+              <div className="py-3 font-sans font-bold" style={{ background: "#111827", borderTop: "1px solid #1e2d4a", fontSize: 13, color: "#f1f5f9" }}>🌙 Modo Escuro</div>
             </button>
             {/* Light */}
-            <button onClick={() => applyTheme("light")} style={{ cursor: "pointer", border: "2px solid #e2e8f0", borderRadius: 16, overflow: "hidden", background: "none", padding: 0, transition: "border-color 0.2s", width: 220 }}
+            <button onClick={() => applyTheme("light")} className="theme-chooser__card" style={{ borderColor: "#e2e8f0" }}
               onMouseEnter={e => e.currentTarget.style.borderColor = "#f97316"} onMouseLeave={e => e.currentTarget.style.borderColor = "#e2e8f0"}>
-              <div style={{ background: "#f1f5f9", padding: 20 }}>
+              <div className="p-5" style={{ background: "#f1f5f9" }}>
                 <div style={{ background: "#ffffff", borderRadius: 8, padding: 14, border: "1px solid #e2e8f0", marginBottom: 10 }}>
-                  <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                  <div className="flex gap-2 mb-2">
                     <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#f97316" }} />
-                    <div style={{ flex: 1, height: 8, borderRadius: 4, background: "#e2e8f0" }} />
+                    <div className="flex-1" style={{ height: 8, borderRadius: 4, background: "#e2e8f0" }} />
                   </div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <div style={{ flex: 1, height: 24, borderRadius: 4, background: "#f8fafc" }} />
-                    <div style={{ flex: 1, height: 24, borderRadius: 4, background: "#f8fafc" }} />
+                  <div className="flex gap-2">
+                    <div className="flex-1" style={{ height: 24, borderRadius: 4, background: "#f8fafc" }} />
+                    <div className="flex-1" style={{ height: 24, borderRadius: 4, background: "#f8fafc" }} />
                   </div>
                 </div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  {["#10b981", "#3b82f6", "#f59e0b"].map(c => <div key={c} style={{ flex: 1, height: 6, borderRadius: 3, background: c + "44" }} />)}
+                <div className="flex gap-2">
+                  {["#10b981", "#3b82f6", "#f59e0b"].map(c => <div key={c} className="flex-1" style={{ height: 6, borderRadius: 3, background: c + "44" }} />)}
                 </div>
               </div>
-              <div style={{ padding: "12px 0", background: "#ffffff", borderTop: "1px solid #e2e8f0" }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: "#1e293b", fontFamily: "'DM Sans',sans-serif" }}>☀️ Modo Claro</span>
-              </div>
+              <div className="py-3 font-sans font-bold" style={{ background: "#ffffff", borderTop: "1px solid #e2e8f0", fontSize: 13, color: "#1e293b" }}>☀️ Modo Claro</div>
             </button>
           </div>
           <p style={{ fontSize: 11, color: "#64748b", marginTop: 20 }}>Você pode alterar depois no menu lateral</p>
@@ -5009,25 +5004,27 @@ export default function App() {
     if (useDrawer) setMobileMenuOpen(false);
   };
 
+  const isCollapsed = !useDrawer && collapsed;
+
   return (
     <AuthCtx.Provider value={{ user }}>
       <style>{fonts}</style>
-      <div style={{ display: "flex", minHeight: "100vh", fontFamily: "'DM Sans',sans-serif", background: T.bg, color: T.txt }}>
+      <div className="app-layout" style={{ background: T.bg, color: T.txt }}>
         {/* Mobile overlay */}
         {useDrawer && mobileMenuOpen && (
-          <div onClick={() => setMobileMenuOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 99 }} />
+          <div className="mobile-overlay animate-fadeIn" onClick={() => setMobileMenuOpen(false)} />
         )}
         {/* Sidebar / Drawer */}
         {showSidebar && (
-          <aside style={{ width: sW, background: T.bg2, borderRight: `1px solid ${T.bor}`, display: "flex", flexDirection: "column", position: "fixed", top: 0, left: 0, bottom: 0, zIndex: 100, transition: useDrawer ? "transform 0.2s ease" : "width 0.2s ease", overflow: "hidden" }}>
+          <aside className={`sidebar ${useDrawer ? "sidebar--mobile animate-slideInLeft" : isCollapsed ? "sidebar--collapsed" : "sidebar--expanded"}`} style={{ background: T.bg2, borderRight: `1px solid ${T.bor}` }}>
             {/* Logo + collapse toggle */}
-            <div style={{ padding: (!useDrawer && collapsed) ? "20px 0" : "20px 18px", borderBottom: `1px solid ${T.bor}`, display: "flex", alignItems: "center", justifyContent: (!useDrawer && collapsed) ? "center" : "space-between" }}>
-              {(!useDrawer && collapsed)
+            <div className={`sidebar__logo ${isCollapsed ? "sidebar__logo--collapsed" : ""}`} style={{ borderBottom: `1px solid ${T.bor}`, justifyContent: isCollapsed ? "center" : "space-between" }}>
+              {isCollapsed
                 ? <button onClick={() => setCollapsed(false)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, color: T.ac, fontFamily: "'Space Mono',monospace", fontWeight: 700 }}>S</button>
                 : <>
                   <div>
-                    <div style={{ fontFamily: "'Space Mono',monospace", fontSize: 18, fontWeight: 700, color: T.ac }}>SOMAPAY</div>
-                    <div style={{ fontSize: 9, color: T.tm, letterSpacing: 2, textTransform: "uppercase", marginTop: 2 }}>Portal Parceiros</div>
+                    <div className="font-mono" style={{ fontSize: 18, fontWeight: 700, color: T.ac }}>SOMAPAY</div>
+                    <div className="uppercase" style={{ fontSize: 9, color: T.tm, letterSpacing: 2, marginTop: 2 }}>Portal Parceiros</div>
                   </div>
                   {useDrawer
                     ? <button onClick={() => setMobileMenuOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, color: T.tm, padding: 4 }}>✕</button>
@@ -5037,48 +5034,51 @@ export default function App() {
               }
             </div>
             {/* Nav */}
-            <nav style={{ flex: 1, padding: (!useDrawer && collapsed) ? "12px 6px" : "12px 10px", display: "flex", flexDirection: "column", gap: 2 }}>
+            <nav className={`sidebar__nav ${isCollapsed ? "sidebar__nav--collapsed" : ""}`}>
               {nav.map(n => (
-                <button key={n.id} onClick={() => handleNavClick(n.id)} title={(!useDrawer && collapsed) ? n.l : undefined}
-                  style={{ display: "flex", alignItems: "center", justifyContent: (!useDrawer && collapsed) ? "center" : "flex-start", gap: (!useDrawer && collapsed) ? 0 : 10, padding: (!useDrawer && collapsed) ? "10px 0" : "10px 12px", borderRadius: 6, color: pg === n.id ? T.ac : T.t2, fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: pg === n.id ? T.ac + "1A" : "transparent", width: "100%", textAlign: "left", fontFamily: "'DM Sans',sans-serif" }}>
-                  <span style={{ fontSize: (!useDrawer && collapsed) ? 18 : 13 }}>{EMO[n.id]}</span>{(!useDrawer && collapsed) ? null : <span>{n.l}</span>}
+                <button key={n.id} onClick={() => handleNavClick(n.id)} title={isCollapsed ? n.l : undefined}
+                  className={`sidebar__nav-btn ${isCollapsed ? "sidebar__nav-btn--collapsed" : ""}`}
+                  style={{ color: pg === n.id ? T.ac : T.t2, background: pg === n.id ? T.ac + "1A" : "transparent" }}>
+                  <span style={{ fontSize: isCollapsed ? 18 : 13 }}>{EMO[n.id]}</span>{isCollapsed ? null : <span>{n.l}</span>}
                 </button>
               ))}
             </nav>
             {/* User + theme toggle + logout */}
-            <div style={{ padding: (!useDrawer && collapsed) ? "10px 6px" : "14px 10px", borderTop: `1px solid ${T.bor}` }}>
+            <div className={`sidebar__footer ${isCollapsed ? "sidebar__footer--collapsed" : ""}`} style={{ borderTop: `1px solid ${T.bor}` }}>
               {(useDrawer || !collapsed) && (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px" }}>
-                  <div style={{ width: 32, height: 32, borderRadius: "50%", background: T.ac + "22", color: T.ac, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700 }}>{user.av || user.name[0]}</div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{user.name}</div>
-                    <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>{RL[user.role]}</div>
+                <div className="flex items-center gap-2 p-2">
+                  <div className="avatar avatar--lg" style={{ background: T.ac + "22", color: T.ac }}>{user.av || user.name[0]}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="truncate" style={{ fontSize: 12, fontWeight: 600 }}>{user.name}</div>
+                    <div className="uppercase" style={{ fontSize: 10, color: T.tm }}>{RL[user.role]}</div>
                   </div>
                 </div>
               )}
               <button onClick={() => applyTheme(theme === "dark" ? "light" : "dark")} title="Alternar tema"
-                style={{ display: "flex", alignItems: "center", justifyContent: (!useDrawer && collapsed) ? "center" : "flex-start", gap: 10, padding: (!useDrawer && collapsed) ? "10px 0" : "10px 12px", borderRadius: 6, color: T.t2, fontSize: 13, cursor: "pointer", border: "none", background: "transparent", width: "100%", textAlign: "left", fontFamily: "'DM Sans',sans-serif", marginTop: 4 }}>
-                <span>{theme === "dark" ? "☀️" : "🌙"}</span>{(!useDrawer && collapsed) ? null : <span>{theme === "dark" ? "Modo Claro" : "Modo Escuro"}</span>}
+                className={`sidebar__nav-btn ${isCollapsed ? "sidebar__nav-btn--collapsed" : ""}`}
+                style={{ color: T.t2, marginTop: 4 }}>
+                <span>{theme === "dark" ? "☀️" : "🌙"}</span>{isCollapsed ? null : <span>{theme === "dark" ? "Modo Claro" : "Modo Escuro"}</span>}
               </button>
               <button onClick={handleLogout} title="Sair"
-                style={{ display: "flex", alignItems: "center", justifyContent: (!useDrawer && collapsed) ? "center" : "flex-start", gap: 10, padding: (!useDrawer && collapsed) ? "10px 0" : "10px 12px", borderRadius: 6, color: T.t2, fontSize: 13, cursor: "pointer", border: "none", background: "transparent", width: "100%", textAlign: "left", fontFamily: "'DM Sans',sans-serif", marginTop: 2 }}>
-                🚪 {(!useDrawer && collapsed) ? null : "Sair"}
+                className={`sidebar__nav-btn ${isCollapsed ? "sidebar__nav-btn--collapsed" : ""}`}
+                style={{ color: T.t2, marginTop: 2 }}>
+                🚪 {isCollapsed ? null : "Sair"}
               </button>
             </div>
           </aside>
         )}
-        <main style={{ flex: 1, marginLeft: useDrawer ? 0 : sW, minHeight: "100vh", transition: "margin-left 0.2s ease", paddingTop: useDrawer ? 0 : 0 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: isMobile ? "14px 16px 14px 60px" : "14px 28px", borderBottom: `1px solid ${T.bor}`, background: T.bg2, position: "sticky", top: 0, zIndex: 50 }}>
+        <main className={`main-content ${useDrawer ? "main-content--mobile" : isCollapsed ? "main-content--collapsed" : "main-content--desktop"}`}>
+          <div className={`app-header ${useDrawer ? "app-header--mobile" : ""}`} style={{ borderBottom: `1px solid ${T.bor}`, background: T.bg2 }}>
             {useDrawer && (
-              <button onClick={() => setMobileMenuOpen(true)} style={{ position: "fixed", left: 12, top: 10, zIndex: 51, background: T.bg2, border: `1px solid ${T.bor}`, borderRadius: 8, width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: 20, color: T.txt }}>☰</button>
+              <button onClick={() => setMobileMenuOpen(true)} className="app-header__hamburger" style={{ background: T.bg2, border: `1px solid ${T.bor}`, color: T.txt }}>☰</button>
             )}
             <h2 style={{ fontSize: isMobile ? 16 : 18, fontWeight: 700, letterSpacing: -0.5 }}>{TIT[pg]}</h2>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div className="flex items-center gap-3">
               <NotifBell notifs={notifs} setNotifs={setNotifs} userId={user.id} setPg={setPg} />
               {!isMobile && <Badge type="success">● HubSpot</Badge>}
             </div>
           </div>
-          <div style={{ padding: isMobile ? "16px 12px" : "24px 28px" }}>
+          <div className={`${useDrawer ? "main-padding--mobile" : "main-padding"}`}>
             {pg === "dash" && <Dash inds={inds} users={users} comms={comms} nfes={nfes} activity={activity} />}
             {pg === "kanban" && <KanbanPage inds={inds} setInds={setInds} users={users} travaDias={travaDias} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} />}
             {pg === "inds" && <MinhasInd inds={inds} setInds={setInds} notifs={notifs} setNotifs={setNotifs} users={users} cadenceRules={cadenceRules} />}
