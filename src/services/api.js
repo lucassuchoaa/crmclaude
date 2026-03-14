@@ -320,9 +320,19 @@ export const whatsappApi = {
   disconnect: () => api.post('/whatsapp/instance/disconnect'),
 };
 
+// Teams API
+export const teamsApi = {
+  getAll: () => api.get('/teams'),
+  getById: (id) => api.get(`/teams/${id}`),
+  getMyTeams: () => api.get('/teams/user/my-teams'),
+  create: (data) => api.post('/teams', data),
+  update: (id, data) => api.put(`/teams/${id}`, data),
+  delete: (id) => api.delete(`/teams/${id}`),
+};
+
 // Pipelines API
 export const pipelinesApi = {
-  getAll: () => api.get('/pipelines'),
+  getAll: (params) => api.get('/pipelines', { params }),
   create: (data) => api.post('/pipelines', data),
   update: (id, data) => api.put(`/pipelines/${id}`, data),
   delete: (id) => api.delete(`/pipelines/${id}`),

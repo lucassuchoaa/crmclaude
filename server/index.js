@@ -24,6 +24,7 @@ import diretoriaRoutes from './routes/diretoria.js';
 import whatsappRoutes from './routes/whatsapp.js';
 import conveniosRoutes from './routes/convenios.js';
 import pipelinesRoutes from './routes/pipelines.js';
+import teamsRoutes from './routes/teams.js';
 import { startHubSpotScheduler } from './services/hubspotSync.js';
 
 dotenv.config();
@@ -91,6 +92,7 @@ app.use('/api/diretoria', diretoriaRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/convenios', conveniosRoutes);
 app.use('/api/pipelines', pipelinesRoutes);
+app.use('/api/teams', teamsRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

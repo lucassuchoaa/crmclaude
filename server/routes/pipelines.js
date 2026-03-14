@@ -25,21 +25,15 @@ function addOwnerFilter(query, params, user, alias = 'd') {
   return query;
 }
 
-function addPipelineVisibility(query, params, user, alias = 'p') {
-  if (user.role === 'super_admin' || user.role === 'executivo') return query;
-  if (user.role === 'diretor') {
-    query += ` AND (${alias}.created_by = ? OR ${alias}.created_by IN (
-      SELECT id FROM users WHERE manager_id = ?
-      UNION SELECT id FROM users WHERE manager_id IN (SELECT id FROM users WHERE manager_id = ?)
-    ))`;
-    params.push(user.id, user.id, user.id);
-  } else if (user.role === 'gerente') {
-    query += ` AND (${alias}.created_by = ? OR ${alias}.created_by IN (SELECT id FROM users WHERE manager_id = ?))`;
-    params.push(user.id, user.id);
-  } else {
-    query += ` AND ${alias}.created_by = ?`;
-    params.push(user.id);
+function addPipelineVisibility(query, params, user, alias = 'p', teamId = null) {
+  if (teamId) {
+    query += ` AND ${alias}.team_id = ?`;
+    params.push(teamId);
   }
+  if (user.role === 'super_admin') return query;
+  // Non-admin: only see pipelines from their teams
+  query += ` AND (${alias}.team_id IS NULL OR ${alias}.team_id IN (SELECT team_id FROM team_members WHERE user_id = ?))`;
+  params.push(user.id);
   return query;
 }
 
@@ -51,9 +45,10 @@ function addPipelineVisibility(query, params, user, alias = 'p') {
 router.get('/', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
-    let query = `SELECT p.*, u.name as creator_name FROM pipelines p LEFT JOIN users u ON p.created_by = u.id WHERE p.is_active = 1`;
+    const { team_id } = req.query;
+    let query = `SELECT p.*, u.name as creator_name, t.name as team_name FROM pipelines p LEFT JOIN users u ON p.created_by = u.id LEFT JOIN teams t ON p.team_id = t.id WHERE p.is_active = 1`;
     const params = [];
-    query = addPipelineVisibility(query, params, req.user);
+    query = addPipelineVisibility(query, params, req.user, 'p', team_id);
     query += ` ORDER BY p.created_at DESC`;
     const rows = await db.prepare(query).all(...params);
     res.json(rows);
@@ -70,11 +65,11 @@ router.post('/', authenticate, async (req, res) => {
     if (req.user.role === 'diretor') return res.status(403).json({ error: 'Sem permissão' });
 
     const db = getDatabase();
-    const { name, stages } = req.body;
+    const { name, stages, team_id } = req.body;
     if (!name) return res.status(400).json({ error: 'Nome obrigatório' });
 
     const id = uuidv4();
-    await db.prepare(`INSERT INTO pipelines (id, name, created_by) VALUES (?, ?, ?)`).run(id, name, req.user.id);
+    await db.prepare(`INSERT INTO pipelines (id, name, created_by, team_id) VALUES (?, ?, ?, ?)`).run(id, name, req.user.id, team_id || null);
 
     if (stages && stages.length > 0) {
       for (let i = 0; i < stages.length; i++) {

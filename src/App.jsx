@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback } from "react";
-import { authApi, usersApi, indicationsApi, commissionsApi, nfesApi, materialsApi, notificationsApi, hubspotApi, groupsApi, cnpjAgentApi, diretoriaApi, whatsappApi, conveniosApi, pipelinesApi, dealsApi, setTokens, clearTokens } from "./services/api";
+import { authApi, usersApi, indicationsApi, commissionsApi, nfesApi, materialsApi, notificationsApi, hubspotApi, groupsApi, cnpjAgentApi, diretoriaApi, whatsappApi, conveniosApi, pipelinesApi, dealsApi, teamsApi, setTokens, clearTokens } from "./services/api";
 import { useBreakpoint } from "./hooks/useBreakpoint";
 
 const AuthCtx = createContext(null);
@@ -2659,7 +2659,7 @@ const ACTIVITY_TYPES = [
 const PRIORITY_COLORS = { low: "#10b981", medium: "#f59e0b", high: "#ef4444" };
 const PRIORITY_LABELS = { low: "Baixa", medium: "Média", high: "Alta" };
 
-function NegociosPage({ users }) {
+function NegociosPage({ users, selectedTeam, myTeams }) {
   const { user } = useAuth();
   const { breakpoint } = useBreakpoint();
   const isMobile = breakpoint === "mobile";
@@ -2681,11 +2681,13 @@ function NegociosPage({ users }) {
   const canEdit = ["gerente", "super_admin", "executivo"].includes(user.role);
 
   useEffect(() => {
-    pipelinesApi.getAll().then(r => {
+    const params = selectedTeam ? { team_id: selectedTeam } : {};
+    pipelinesApi.getAll(params).then(r => {
       setPipelines(r.data);
       if (r.data.length > 0) setSelectedPipeline(r.data[0]);
+      else setSelectedPipeline(null);
     }).catch(() => {}).finally(() => setLoading(false));
-  }, []);
+  }, [selectedTeam]);
 
   useEffect(() => {
     if (!selectedPipeline) return;
@@ -2994,7 +2996,7 @@ function NegociosPage({ users }) {
 }
 
 // ===== CONFIG =====
-function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias, notifs, setNotifs, cadenceRules, setCadenceRules }) {
+function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias, notifs, setNotifs, cadenceRules, setCadenceRules, myTeams, setMyTeams }) {
   const { user } = useAuth();
   const { breakpoint } = useBreakpoint();
   const isSA = user.role === "super_admin";
@@ -3006,7 +3008,18 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
   const [cfgPipelines, setCfgPipelines] = useState([]);
   const [pipeModal, setPipeModal] = useState(false);
   const [editPipe, setEditPipe] = useState(null);
-  const [pipeForm, setPipeForm] = useState({ name: "", stages: [{ name: "Novo", color: "#6366f1", is_win: false, is_lost: false }, { name: "Em Andamento", color: "#f59e0b", is_win: false, is_lost: false }, { name: "Ganho", color: "#10b981", is_win: true, is_lost: false }, { name: "Perdido", color: "#ef4444", is_win: false, is_lost: true }] });
+  const defaultStages = [{ name: "Novo", color: "#6366f1", is_win: false, is_lost: false }, { name: "Em Andamento", color: "#f59e0b", is_win: false, is_lost: false }, { name: "Ganho", color: "#10b981", is_win: true, is_lost: false }, { name: "Perdido", color: "#ef4444", is_win: false, is_lost: true }];
+  const [pipeForm, setPipeForm] = useState({ name: "", team_id: "", stages: defaultStages });
+  // Teams config state
+  const [cfgTeams, setCfgTeams] = useState([]);
+  const [teamModal, setTeamModal] = useState(false);
+  const [editTeam, setEditTeam] = useState(null);
+  const AVAILABLE_MODULES = [
+    { id: "kanban", l: "Funil/Pipeline" }, { id: "negocios", l: "Negociações" }, { id: "parcs", l: "Parceiros" },
+    { id: "groups", l: "WhatsApp" }, { id: "diretoria", l: "Visão Diretoria" }, { id: "fin", l: "Financeiro" },
+    { id: "mats", l: "Material de Apoio" },
+  ];
+  const [teamForm, setTeamForm] = useState({ name: "", description: "", modules: [], members: [] });
   const [hsStatus, setHsStatus] = useState({ connected: null, message: "" });
   const [hsPipelines, setHsPipelines] = useState([]);
   const [hsLoading, setHsLoading] = useState(false);
@@ -3030,14 +3043,14 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
       loadCfgPipelines();
       setPipeModal(false);
       setEditPipe(null);
-      setPipeForm({ name: "", stages: [{ name: "Novo", color: "#6366f1", is_win: false, is_lost: false }, { name: "Em Andamento", color: "#f59e0b", is_win: false, is_lost: false }, { name: "Ganho", color: "#10b981", is_win: true, is_lost: false }, { name: "Perdido", color: "#ef4444", is_win: false, is_lost: true }] });
+      setPipeForm({ name: "", team_id: "", stages: defaultStages });
     } catch (e) { console.error(e); }
   };
 
   const handleEditPipeline = async (pipe) => {
     const sr = await pipelinesApi.getStages(pipe.id);
     setEditPipe(pipe);
-    setPipeForm({ name: pipe.name, stages: sr.data.map(s => ({ ...s, is_win: !!Number(s.is_win), is_lost: !!Number(s.is_lost) })) });
+    setPipeForm({ name: pipe.name, team_id: pipe.team_id || "", stages: sr.data.map(s => ({ ...s, is_win: !!Number(s.is_win), is_lost: !!Number(s.is_lost) })) });
     setPipeModal(true);
   };
 
@@ -3045,6 +3058,48 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
     if (!confirm("Desativar este funil?")) return;
     await pipelinesApi.delete(id);
     loadCfgPipelines();
+  };
+
+  // Load teams for equipes tab
+  const loadCfgTeams = useCallback(() => {
+    if (isSA) teamsApi.getAll().then(r => setCfgTeams(r.data)).catch(() => {});
+  }, [isSA]);
+  useEffect(() => { loadCfgTeams(); }, [loadCfgTeams]);
+
+  const handleSaveTeam = async () => {
+    if (!teamForm.name) return;
+    try {
+      if (editTeam) {
+        await teamsApi.update(editTeam.id, teamForm);
+      } else {
+        await teamsApi.create(teamForm);
+      }
+      loadCfgTeams();
+      // Refresh user's teams
+      teamsApi.getMyTeams().then(r => setMyTeams(r.data)).catch(() => {});
+      setTeamModal(false);
+      setEditTeam(null);
+      setTeamForm({ name: "", description: "", modules: [], members: [] });
+    } catch (e) { console.error(e); }
+  };
+
+  const handleEditTeam = async (team) => {
+    const r = await teamsApi.getById(team.id);
+    const data = r.data;
+    setEditTeam(data);
+    setTeamForm({
+      name: data.name,
+      description: data.description || "",
+      modules: JSON.parse(data.modules || "[]"),
+      members: (data.members || []).map(m => m.id),
+    });
+    setTeamModal(true);
+  };
+
+  const handleDeleteTeam = async (id) => {
+    if (!confirm("Desativar esta equipe?")) return;
+    await teamsApi.delete(id);
+    loadCfgTeams();
   };
 
   // Load HubSpot config on mount
@@ -3271,7 +3326,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
   return (
     <div>
       <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${T.bor}`, marginBottom: 20 }}>
-        {(isSA ? ["geral", "hubspot", "notificações", "usuários", "parceiros", "convênios", "funis", "materiais", "auditoria"] : ["funis"]).map(t => <button key={t} onClick={() => { setTab(t); if (t === "auditoria" && auditData.length === 0 && !auditLoading) loadAudit(0, auditFilters); }} style={{ padding: "10px 16px", fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: "none", color: tab === t ? T.ac : T.tm, fontFamily: "'DM Sans',sans-serif", borderBottom: `2px solid ${tab === t ? T.ac : "transparent"}`, marginBottom: -1, textTransform: "capitalize" }}>{t}</button>)}
+        {(isSA ? ["geral", "hubspot", "notificações", "usuários", "parceiros", "convênios", "equipes", "funis", "materiais", "auditoria"] : ["funis"]).map(t => <button key={t} onClick={() => { setTab(t); if (t === "auditoria" && auditData.length === 0 && !auditLoading) loadAudit(0, auditFilters); }} style={{ padding: "10px 16px", fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: "none", color: tab === t ? T.ac : T.tm, fontFamily: "'DM Sans',sans-serif", borderBottom: `2px solid ${tab === t ? T.ac : "transparent"}`, marginBottom: -1, textTransform: "capitalize" }}>{t}</button>)}
       </div>
       {tab === "geral" && <div>
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20, marginBottom: 16 }}>
@@ -3955,12 +4010,95 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
       {/* CONVÊNIOS TAB */}
       {tab === "convênios" && <ConveniosTab />}
 
+      {/* EQUIPES TAB */}
+      {tab === "equipes" && isSA && (
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <div style={{ fontSize: 13, color: T.t2 }}>{cfgTeams.length} equipe(s) ativa(s)</div>
+            <Btn onClick={() => { setEditTeam(null); setTeamForm({ name: "", description: "", modules: [], members: [] }); setTeamModal(true); }}>＋ Nova Equipe</Btn>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {cfgTeams.map(t => {
+              let mods = [];
+              try { mods = JSON.parse(t.modules || "[]"); } catch {}
+              return (
+                <div key={t.id} style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 16 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <div>
+                      <span style={{ fontSize: 15, fontWeight: 700 }}>{t.name}</span>
+                      {t.description && <span style={{ fontSize: 11, color: T.tm, marginLeft: 12 }}>{t.description}</span>}
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <Btn v="secondary" sm onClick={() => handleEditTeam(t)}>Editar</Btn>
+                      <Btn v="danger" sm onClick={() => handleDeleteTeam(t.id)}>Desativar</Btn>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {mods.map(m => {
+                      const nav = NAV.find(n => n.id === m);
+                      return <span key={m} style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4, background: T.ac + "22", color: T.ac, fontWeight: 600 }}>{nav ? nav.l : m}</span>;
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+            {cfgTeams.length === 0 && <div style={{ padding: 40, textAlign: "center", color: T.tm }}>Nenhuma equipe criada ainda</div>}
+          </div>
+
+          {/* Team Create/Edit Modal */}
+          <Modal open={teamModal} onClose={() => setTeamModal(false)} title={editTeam ? "Editar Equipe" : "Nova Equipe"} wide
+            footer={<Btn onClick={handleSaveTeam} disabled={!teamForm.name || teamForm.modules.length === 0}>{editTeam ? "Salvar" : "Criar Equipe"}</Btn>}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <Inp label="Nome da Equipe *" value={teamForm.name} onChange={v => setTeamForm({ ...teamForm, name: v })} placeholder="Ex: Comercial B2B, Onboarding..." />
+              <Inp label="Descrição" value={teamForm.description} onChange={v => setTeamForm({ ...teamForm, description: v })} placeholder="Descrição opcional" />
+
+              <div>
+                <label style={{ fontSize: 12, color: T.t2, textTransform: "uppercase", fontWeight: 600, marginBottom: 8, display: "block" }}>Módulos de Acesso *</label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {AVAILABLE_MODULES.map(m => {
+                    const checked = teamForm.modules.includes(m.id);
+                    return (
+                      <label key={m.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 12px", background: checked ? T.ac + "22" : T.bg2, border: `1px solid ${checked ? T.ac : T.bor}`, borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 500, color: checked ? T.ac : T.t2 }}>
+                        <input type="checkbox" checked={checked} onChange={e => {
+                          const mods = e.target.checked ? [...teamForm.modules, m.id] : teamForm.modules.filter(x => x !== m.id);
+                          setTeamForm({ ...teamForm, modules: mods });
+                        }} style={{ accentColor: T.ac }} />
+                        {m.l}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: 12, color: T.t2, textTransform: "uppercase", fontWeight: 600, marginBottom: 8, display: "block" }}>Membros da Equipe</label>
+                <div style={{ maxHeight: 250, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
+                  {users.filter(u => ["executivo", "diretor", "gerente", "super_admin"].includes(u.role)).map(u => {
+                    const checked = teamForm.members.includes(u.id);
+                    return (
+                      <label key={u.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: checked ? T.ac + "11" : T.bg2, border: `1px solid ${checked ? T.ac + "44" : T.bor}`, borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
+                        <input type="checkbox" checked={checked} onChange={e => {
+                          const members = e.target.checked ? [...teamForm.members, u.id] : teamForm.members.filter(x => x !== u.id);
+                          setTeamForm({ ...teamForm, members });
+                        }} style={{ accentColor: T.ac }} />
+                        <span style={{ fontWeight: 600 }}>{u.name}</span>
+                        <span style={{ color: T.tm, fontSize: 10 }}>{RL[u.role]}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </Modal>
+        </div>
+      )}
+
       {/* FUNIS TAB */}
       {tab === "funis" && canManagePipelines && (
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
             <div style={{ fontSize: 13, color: T.t2 }}>{cfgPipelines.length} funil(is) ativo(s)</div>
-            <Btn onClick={() => { setEditPipe(null); setPipeForm({ name: "", stages: [{ name: "Novo", color: "#6366f1", is_win: false, is_lost: false }, { name: "Em Andamento", color: "#f59e0b", is_win: false, is_lost: false }, { name: "Ganho", color: "#10b981", is_win: true, is_lost: false }, { name: "Perdido", color: "#ef4444", is_win: false, is_lost: true }] }); setPipeModal(true); }}>＋ Novo Funil</Btn>
+            <Btn onClick={() => { setEditPipe(null); setPipeForm({ name: "", team_id: "", stages: defaultStages }); setPipeModal(true); }}>＋ Novo Funil</Btn>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {cfgPipelines.map(p => (
@@ -3985,6 +4123,16 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
             footer={<Btn onClick={handleSavePipeline} disabled={!pipeForm.name || pipeForm.stages.length === 0}>{editPipe ? "Salvar" : "Criar Funil"}</Btn>}>
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               <Inp label="Nome do Funil *" value={pipeForm.name} onChange={v => setPipeForm({ ...pipeForm, name: v })} placeholder="Ex: Vendas B2B, Onboarding..." />
+              {isSA && cfgTeams.length > 0 && (
+                <div className="input-group">
+                  <label style={{ fontSize: 12, color: T.t2, textTransform: "uppercase", fontWeight: 600, marginBottom: 6 }}>Equipe</label>
+                  <select value={pipeForm.team_id || ""} onChange={e => setPipeForm({ ...pipeForm, team_id: e.target.value || null })}
+                    style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+                    <option value="">Sem equipe (visível a todos)</option>
+                    {cfgTeams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                </div>
+              )}
               <div>
                 <label style={{ fontSize: 12, color: T.t2, textTransform: "uppercase", fontWeight: 600, marginBottom: 8, display: "block" }}>Etapas do Funil</label>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -5233,6 +5381,8 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [dataLoading, setDataLoading] = useState(false);
   const [, forceUpdate] = useState(0);
+  const [myTeams, setMyTeams] = useState([]);
+  const [selectedTeam, setSelectedTeam] = useState(null);
   const { isMobile, isTablet, isDesktop, breakpoint } = useBreakpoint();
 
   // Check for existing session on mount
@@ -5258,12 +5408,13 @@ export default function App() {
 
     try {
       // Fetch all data in parallel
-      const [usersRes, indsRes, matsRes, notifsRes, activityRes] = await Promise.all([
+      const [usersRes, indsRes, matsRes, notifsRes, activityRes, teamsRes] = await Promise.all([
         usersApi.getAll(),
         indicationsApi.getAll(),
         materialsApi.getAll(),
         notificationsApi.getAll(),
         indicationsApi.getActivity(20).catch(() => ({ data: { activity: [] } })),
+        teamsApi.getMyTeams().catch(() => ({ data: [] })),
       ]);
 
       // Transform and set users
@@ -5301,6 +5452,11 @@ export default function App() {
         link: n.link || 'notifs',
       }));
       setNotifs(notifications);
+
+      // Set teams
+      const teams = teamsRes.data || [];
+      setMyTeams(teams);
+      if (teams.length > 0 && !selectedTeam) setSelectedTeam(null); // null = ver todas
 
       // Load commissions and NFes based on role
       if (['super_admin', 'executivo', 'diretor', 'gerente', 'parceiro'].includes(user.role)) {
@@ -5444,7 +5600,25 @@ export default function App() {
 
   if (user.mustChangePassword) return <ForceChangePassword user={user} onChanged={() => setUser(u => ({ ...u, mustChangePassword: false }))} onLogout={handleLogout} />;
 
-  const nav = NAV.filter(n => n.r.includes(user.role));
+  // Build allowed modules from teams
+  const teamModules = (() => {
+    if (user.role === 'super_admin' || user.role === 'parceiro' || user.role === 'convenio') return null; // no team filtering
+    if (myTeams.length === 0) return null; // no teams assigned = see everything allowed by role
+    const allMods = new Set();
+    const teamsToCheck = selectedTeam ? myTeams.filter(t => t.id === selectedTeam) : myTeams;
+    teamsToCheck.forEach(t => {
+      try { JSON.parse(t.modules).forEach(m => allMods.add(m)); } catch {}
+    });
+    return allMods.size > 0 ? allMods : null;
+  })();
+  const nav = NAV.filter(n => {
+    if (!n.r.includes(user.role)) return false;
+    // Always show: dash, notifs, cfg
+    if (["dash", "notifs", "cfg"].includes(n.id)) return true;
+    // If user has teams, filter by team modules
+    if (teamModules) return teamModules.has(n.id);
+    return true;
+  });
   const useDrawer = isMobile || isTablet;
   const sW = useDrawer ? 280 : (collapsed ? 64 : 240);
   const showSidebar = useDrawer ? mobileMenuOpen : true;
@@ -5483,6 +5657,16 @@ export default function App() {
                 </>
               }
             </div>
+            {/* Team selector */}
+            {!isCollapsed && myTeams.length > 0 && !["parceiro", "convenio"].includes(user.role) && (
+              <div style={{ padding: "8px 12px" }}>
+                <select value={selectedTeam || ""} onChange={e => setSelectedTeam(e.target.value || null)}
+                  style={{ width: "100%", padding: "6px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11, fontFamily: "'DM Sans',sans-serif" }}>
+                  <option value="">Todas as equipes</option>
+                  {myTeams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </div>
+            )}
             {/* Nav */}
             <nav className={`sidebar__nav ${isCollapsed ? "sidebar__nav--collapsed" : ""}`}>
               {nav.map(n => (
@@ -5531,7 +5715,7 @@ export default function App() {
           <div className={`${useDrawer ? "main-padding--mobile" : "main-padding"}`}>
             {pg === "dash" && <Dash inds={inds} users={users} comms={comms} nfes={nfes} activity={activity} />}
             {pg === "kanban" && <KanbanPage inds={inds} setInds={setInds} users={users} travaDias={travaDias} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} />}
-            {pg === "negocios" && <NegociosPage users={users} />}
+            {pg === "negocios" && <NegociosPage users={users} selectedTeam={selectedTeam} myTeams={myTeams} />}
             {pg === "inds" && <MinhasInd inds={inds} setInds={setInds} notifs={notifs} setNotifs={setNotifs} users={users} cadenceRules={cadenceRules} />}
             {pg === "convenio" && <ConvenioPage />}
             {pg === "parcs" && <ParcPage users={users} setUsers={setUsers} inds={inds} />}
@@ -5540,7 +5724,7 @@ export default function App() {
             {pg === "fin" && <FinPage comms={comms} setComms={setComms} nfes={nfes} setNfes={setNfes} users={users} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} />}
             {pg === "mats" && <MatsPage mats={mats} />}
             {pg === "notifs" && <NotifsPage notifs={notifs} setNotifs={setNotifs} users={users} userId={user.id} />}
-            {pg === "cfg" && <CfgPage mats={mats} setMats={setMats} users={users} setUsers={setUsers} inds={inds} travaDias={travaDias} setTravaDias={setTravaDias} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} setCadenceRules={setCadenceRules} />}
+            {pg === "cfg" && <CfgPage mats={mats} setMats={setMats} users={users} setUsers={setUsers} inds={inds} travaDias={travaDias} setTravaDias={setTravaDias} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} setCadenceRules={setCadenceRules} myTeams={myTeams} setMyTeams={setMyTeams} />}
           </div>
         </main>
       </div>

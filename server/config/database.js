@@ -431,12 +431,37 @@ async function createTables(db) {
     )
   `);
 
+  // Teams table
+  await ddl(`
+    CREATE TABLE IF NOT EXISTS teams (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      modules TEXT NOT NULL DEFAULT '[]',
+      is_active INTEGER DEFAULT 1,
+      created_by TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Team members junction table
+  await ddl(`
+    CREATE TABLE IF NOT EXISTS team_members (
+      team_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (team_id, user_id)
+    )
+  `);
+
   // Pipelines table
   await ddl(`
     CREATE TABLE IF NOT EXISTS pipelines (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       created_by TEXT NOT NULL,
+      team_id TEXT,
       is_active INTEGER DEFAULT 1,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -550,7 +575,11 @@ async function createTables(db) {
     CREATE INDEX IF NOT EXISTS idx_parceiro_convenios_convenio ON parceiro_convenios(convenio_id);
     CREATE INDEX IF NOT EXISTS idx_user_convenios_user ON user_convenios(user_id);
     CREATE INDEX IF NOT EXISTS idx_user_convenios_convenio ON user_convenios(convenio_id);
+    CREATE INDEX IF NOT EXISTS idx_teams_active ON teams(is_active);
+    CREATE INDEX IF NOT EXISTS idx_team_members_team ON team_members(team_id);
+    CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id);
     CREATE INDEX IF NOT EXISTS idx_pipelines_created_by ON pipelines(created_by);
+    CREATE INDEX IF NOT EXISTS idx_pipelines_team ON pipelines(team_id);
     CREATE INDEX IF NOT EXISTS idx_pipeline_stages_pipeline ON pipeline_stages(pipeline_id);
     CREATE INDEX IF NOT EXISTS idx_deals_pipeline ON deals(pipeline_id);
     CREATE INDEX IF NOT EXISTS idx_deals_stage ON deals(stage_id);
@@ -582,6 +611,7 @@ async function createTables(db) {
     await pgSafeAddColumn('users', 'last_login_at', 'TEXT');
     await pgSafeAddColumn('materials', 'file_data', 'BYTEA');
     await pgSafeAddColumn('materials', 'file_original_name', 'TEXT');
+    await pgSafeAddColumn('pipelines', 'team_id', 'TEXT');
   }
 
   // ── SQLite-only migrations ──
@@ -610,6 +640,7 @@ async function createTables(db) {
     await safeAddColumn('users', 'last_login_at', 'TEXT');
     await safeAddColumn('materials', 'file_data', 'BLOB');
     await safeAddColumn('materials', 'file_original_name', 'TEXT');
+    await safeAddColumn('pipelines', 'team_id', 'TEXT');
   }
 }
 
