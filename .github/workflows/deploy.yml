@@ -17,18 +17,19 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
+          script_stop: true
           script: |
-            set -e
-            cd /opt/crm-somapay
+            echo "=== Connected ==="
+            whoami
+            pwd
+
+            cd /opt/crm-somapay || { echo "Directory not found"; exit 1; }
 
             echo "=== Pulling latest code ==="
             git pull origin main
 
-            echo "=== Rebuilding staging ==="
+            echo "=== Rebuilding staging only ==="
             docker compose --profile staging up -d --build
-
-            echo "=== Rebuilding production ==="
-            docker compose --profile prod up -d --build
 
             echo "=== Cleaning old images ==="
             docker image prune -f
@@ -36,5 +37,4 @@ jobs:
             echo "=== Verifying ==="
             sleep 5
             docker compose --profile staging ps
-            docker compose --profile prod ps
             echo "Deploy complete!"
