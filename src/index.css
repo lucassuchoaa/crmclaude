@@ -329,16 +329,14 @@ tr:hover {
 }
 
 .card--bordered {
-  border-width: 1px;
-  border-style: solid;
+  border: 1px solid transparent;
 }
 
 /* KPI Card */
 .kpi-card {
   border-radius: var(--r-lg);
   padding: var(--sp-4);
-  border-width: 1px;
-  border-style: solid;
+  border: 1px solid transparent;
   border-left-width: 3px;
 }
 
@@ -373,8 +371,7 @@ tr:hover {
   flex-wrap: wrap;
   padding: var(--sp-3) 14px;
   border-radius: var(--r-lg);
-  border-width: 1px;
-  border-style: solid;
+  border: 1px solid transparent;
 }
 
 .filter-bar__group {
@@ -460,8 +457,7 @@ tr:hover {
 .input-field {
   width: 100%;
   padding: var(--sp-3) var(--sp-3);
-  border-width: 1px;
-  border-style: solid;
+  border: 1px solid transparent;
   border-radius: var(--r-md);
   font-family: var(--font-sans);
   font-size: var(--fs-base);
@@ -471,8 +467,7 @@ tr:hover {
 
 .select-field {
   padding: 7px var(--sp-3);
-  border-width: 1px;
-  border-style: solid;
+  border: 1px solid transparent;
   border-radius: var(--r-md);
   font-family: var(--font-sans);
   font-size: var(--fs-md);
@@ -497,8 +492,7 @@ tr:hover {
   max-height: 85vh;
   overflow-y: auto;
   box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
-  border-width: 1px;
-  border-style: solid;
+  border: 1px solid transparent;
 }
 
 .modal-content--default { width: 520px; }
@@ -509,8 +503,7 @@ tr:hover {
   align-items: center;
   justify-content: space-between;
   padding: 18px var(--sp-6);
-  border-bottom-width: 1px;
-  border-bottom-style: solid;
+  border-bottom: 1px solid transparent;
 }
 
 .modal-header__title {
@@ -533,8 +526,7 @@ tr:hover {
   justify-content: flex-end;
   gap: var(--sp-3);
   padding: 14px var(--sp-6);
-  border-top-width: 1px;
-  border-top-style: solid;
+  border-top: 1px solid transparent;
 }
 
 /* Login page */
@@ -553,8 +545,7 @@ tr:hover {
   width: 400px;
   max-width: 90vw;
   box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
-  border-width: 1px;
-  border-style: solid;
+  border: 1px solid transparent;
 }
 
 .login-accent-line {
@@ -589,14 +580,12 @@ tr:hover {
   gap: var(--sp-2);
   padding: var(--sp-3) var(--sp-3);
   border-radius: var(--r-lg) var(--r-lg) 0 0;
-  border-width: 1px;
-  border-style: solid;
+  border: 1px solid transparent;
   border-bottom: none;
 }
 
 .kanban-column__body {
-  border-width: 1px;
-  border-style: solid;
+  border: 1px solid transparent;
   border-top: none;
   border-radius: 0 0 var(--r-lg) var(--r-lg);
   padding: 6px;
@@ -610,8 +599,7 @@ tr:hover {
   border-radius: var(--r-md);
   padding: var(--sp-3);
   cursor: pointer;
-  border-width: 1px;
-  border-style: solid;
+  border: 1px solid transparent;
   transition: transform var(--tr-fast), box-shadow var(--tr-fast);
 }
 
@@ -758,8 +746,7 @@ tr:hover {
   gap: var(--sp-1);
   border-radius: var(--r-md);
   padding: 3px;
-  border-width: 1px;
-  border-style: solid;
+  border: 1px solid transparent;
 }
 
 .view-toggle__btn {
@@ -776,8 +763,7 @@ tr:hover {
 .alert {
   border-radius: var(--r-lg);
   padding: var(--sp-4);
-  border-width: 1px;
-  border-style: solid;
+  border: 1px solid transparent;
 }
 
 .alert__header {
@@ -803,8 +789,7 @@ tr:hover {
   padding: var(--sp-3) 14px;
   min-width: 200px;
   flex: 1 1 200px;
-  border-width: 1px;
-  border-style: solid;
+  border: 1px solid transparent;
 }
 
 /* Welcome card (parceiro) */
@@ -830,8 +815,7 @@ tr:hover {
   padding: 6px var(--sp-3);
   border-radius: var(--r-md);
   font-size: var(--fs-sm);
-  border-width: 1px;
-  border-style: solid;
+  border: 1px solid transparent;
 }
 
 /* Dropdown (MultiSelect, etc.) */
@@ -862,14 +846,12 @@ tr:hover {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  border-width: 1px;
-  border-style: solid;
+  border: 1px solid transparent;
 }
 
 .dropdown__search {
   padding: var(--sp-2) var(--sp-3);
-  border-bottom-width: 1px;
-  border-bottom-style: solid;
+  border-bottom: 1px solid transparent;
 }
 
 .dropdown__list {
@@ -895,8 +877,7 @@ tr:hover {
   width: 16px;
   height: 16px;
   border-radius: 3px;
-  border-width: 1.5px;
-  border-style: solid;
+  border: 1.5px solid transparent;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -929,8 +910,7 @@ tr:hover {
 
 .theme-chooser__card {
   cursor: pointer;
-  border-width: 2px;
-  border-style: solid;
+  border: 2px solid transparent;
   border-radius: var(--r-2xl);
   overflow: hidden;
   background: none;
