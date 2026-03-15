@@ -4675,8 +4675,8 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
             </table>
           </div>
           <Modal open={productModal} onClose={() => setProductModal(false)} title={editProduct ? "Editar Produto" : "Novo Produto"} footer={<Btn onClick={handleSaveProduct}>Salvar</Btn>}>
-            <Inp label="Nome" value={productForm.name} onChange={e => setProductForm({ ...productForm, name: e.target.value })} placeholder="Nome do produto" />
-            <Inp label="Descrição" value={productForm.description} onChange={e => setProductForm({ ...productForm, description: e.target.value })} placeholder="Descrição (opcional)" />
+            <Inp label="Nome" value={productForm.name} onChange={v => setProductForm({ ...productForm, name: v })} placeholder="Nome do produto" />
+            <Inp label="Descrição" value={productForm.description} onChange={v => setProductForm({ ...productForm, description: v })} placeholder="Descrição (opcional)" />
           </Modal>
         </div>
       )}
