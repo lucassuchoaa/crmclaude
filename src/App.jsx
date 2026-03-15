@@ -2679,7 +2679,9 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
   const [contactForm, setContactForm] = useState({ name: "", phone: "", email: "", role: "" });
   const [activities, setActivities] = useState([]);
   const [tasks, setTasks] = useState([]);
-  const [detailTab, setDetailTab] = useState("atividades");
+  const [detailTab, setDetailTab] = useState("detalhes");
+  const [editingDeal, setEditingDeal] = useState(false);
+  const [editDealForm, setEditDealForm] = useState({});
   const [actForm, setActForm] = useState({ type: "note", description: "", scheduled_at: "" });
   const [taskForm, setTaskForm] = useState({ title: "", assigned_to: "", due_date: "" });
   const [loading, setLoading] = useState(true);
@@ -2708,7 +2710,8 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
 
   const loadDealDetails = async (deal) => {
     setSelectedDeal(deal);
-    setDetailTab("atividades");
+    setDetailTab("detalhes");
+    setEditingDeal(false);
     setShowDetailModal(true);
     const [ar, tr, cr] = await Promise.all([
       dealsApi.getActivities(deal.id).catch(() => ({ data: [] })),
@@ -2765,9 +2768,11 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
     dealsApi.moveStage(dealId, newStageId).catch(() => {});
   };
 
-  const handleAddActivity = async () => {
+  const handleAddActivity = async (forceNoSchedule = false) => {
     if (!actForm.description || !selectedDeal) return;
-    await dealsApi.createActivity(selectedDeal.id, actForm);
+    const payload = { ...actForm };
+    if (forceNoSchedule) payload.scheduled_at = "";
+    await dealsApi.createActivity(selectedDeal.id, payload);
     const r = await dealsApi.getActivities(selectedDeal.id);
     setActivities(r.data);
     setActForm({ type: "note", description: "", scheduled_at: "" });
@@ -2784,6 +2789,18 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
   const handleToggleTask = async (taskId, current) => {
     await dealsApi.completeTask(taskId, !current);
     setTasks(prev => prev.map(t => Number(t.id) === Number(taskId) ? { ...t, is_completed: !current ? 1 : 0 } : t));
+  };
+
+  const handleUpdateDeal = async () => {
+    if (!selectedDeal) return;
+    try {
+      await dealsApi.update(selectedDeal.id, { ...editDealForm, value: parseFloat(editDealForm.value) || 0, num_employees: parseInt(editDealForm.num_employees) || null, product_id: editDealForm.product_id || null });
+      const r = await pipelinesApi.getDeals(selectedPipeline.id);
+      setDeals(r.data);
+      const updated = r.data.find(d => d.id === selectedDeal.id);
+      if (updated) setSelectedDeal(updated);
+      setEditingDeal(false);
+    } catch (e) { console.error(e); }
   };
 
   const handleDeleteDeal = async (dealId) => {
@@ -2958,25 +2975,84 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
       <Modal open={showDetailModal} onClose={() => setShowDetailModal(false)} title={selectedDeal?.title || ""} wide>
         {selectedDeal && (
           <div>
-            {/* Deal info header */}
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginBottom: 16, padding: 12, background: T.bg2, borderRadius: 8 }}>
-              <div><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>Empresa</span><div style={{ fontSize: 13, fontWeight: 600 }}>{selectedDeal.company || "—"}</div></div>
-              {selectedDeal.product_name && <div><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>Produto</span><div style={{ fontSize: 13, fontWeight: 600, color: T.ac }}>{selectedDeal.product_name}</div></div>}
-              <div><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>Nº Colaboradores</span><div style={{ fontSize: 13, fontWeight: 700 }}>{selectedDeal.num_employees || "—"}</div></div>
-              <div><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>Prioridade</span><div style={{ fontSize: 13, color: PRIORITY_COLORS[selectedDeal.priority] }}>{PRIORITY_LABELS[selectedDeal.priority]}</div></div>
-              <div><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>Responsável</span><div style={{ fontSize: 13 }}>{selectedDeal.owner_name}</div></div>
-              {selectedDeal.contact_name && <div><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>Contato</span><div style={{ fontSize: 13 }}>{selectedDeal.contact_name} {selectedDeal.contact_phone ? `· ${selectedDeal.contact_phone}` : ""}</div></div>}
-              <div style={{ flex: 1 }} />
-              {canEdit && <Btn v="danger" sm onClick={() => { if (confirm("Excluir esta negociação?")) handleDeleteDeal(selectedDeal.id); }}>Excluir</Btn>}
-            </div>
-
-            {/* Tabs: Atividades / Tarefas */}
+            {/* Tabs */}
             <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${T.bor}`, marginBottom: 16 }}>
-              {["atividades", "contatos", "tarefas"].map(t => (
+              {["detalhes", "atividades", "contatos", "tarefas"].map(t => (
                 <button key={t} onClick={() => setDetailTab(t)}
                   style={{ padding: "8px 16px", fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: "none", color: detailTab === t ? T.ac : T.tm, borderBottom: `2px solid ${detailTab === t ? T.ac : "transparent"}`, marginBottom: -1, textTransform: "capitalize" }}>{t}</button>
               ))}
             </div>
+
+            {/* DETAILS TAB */}
+            {detailTab === "detalhes" && (
+              <div>
+                {!editingDeal ? (
+                  <div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 16, padding: 12, background: T.bg2, borderRadius: 8, marginBottom: 12 }}>
+                      <div><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>Empresa</span><div style={{ fontSize: 13, fontWeight: 600 }}>{selectedDeal.company || "—"}</div></div>
+                      {selectedDeal.product_name && <div><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>Produto</span><div style={{ fontSize: 13, fontWeight: 600, color: T.ac }}>{selectedDeal.product_name}</div></div>}
+                      <div><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>Nº Colaboradores</span><div style={{ fontSize: 13, fontWeight: 700 }}>{selectedDeal.num_employees || "—"}</div></div>
+                      <div><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>Prioridade</span><div style={{ fontSize: 13, color: PRIORITY_COLORS[selectedDeal.priority] }}>{PRIORITY_LABELS[selectedDeal.priority]}</div></div>
+                      <div><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>Responsável</span><div style={{ fontSize: 13 }}>{selectedDeal.owner_name}</div></div>
+                      <div><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>Valor</span><div style={{ fontSize: 13 }}>{selectedDeal.value ? `R$ ${Number(selectedDeal.value).toLocaleString("pt-BR")}` : "—"}</div></div>
+                      {selectedDeal.contact_name && <div><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>Contato</span><div style={{ fontSize: 13 }}>{selectedDeal.contact_name} {selectedDeal.contact_phone ? `· ${selectedDeal.contact_phone}` : ""}</div></div>}
+                    </div>
+                    {selectedDeal.notes && <div style={{ padding: 12, background: T.bg2, borderRadius: 8, marginBottom: 12, fontSize: 13, whiteSpace: "pre-wrap" }}><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", display: "block", marginBottom: 4 }}>Notas</span>{selectedDeal.notes}</div>}
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {canEdit && <Btn sm onClick={() => { setEditDealForm({ title: selectedDeal.title, company: selectedDeal.company || "", value: selectedDeal.value || "", num_employees: selectedDeal.num_employees || "", priority: selectedDeal.priority || "medium", contact_name: selectedDeal.contact_name || "", contact_phone: selectedDeal.contact_phone || "", contact_email: selectedDeal.contact_email || "", notes: selectedDeal.notes || "", product_id: selectedDeal.product_id || "", owner_id: selectedDeal.owner_id || "" }); setEditingDeal(true); }}>Editar</Btn>}
+                      {canEdit && <Btn v="danger" sm onClick={() => { if (confirm("Excluir esta negociação?")) handleDeleteDeal(selectedDeal.id); }}>Excluir</Btn>}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    <Inp label="Título" value={editDealForm.title} onChange={v => setEditDealForm({ ...editDealForm, title: v })} />
+                    <Inp label="Empresa" value={editDealForm.company} onChange={v => setEditDealForm({ ...editDealForm, company: v })} />
+                    <div style={{ display: "flex", gap: 12 }}>
+                      <div className="input-group" style={{ flex: 1 }}>
+                        <label style={{ fontSize: 12, color: T.t2, textTransform: "uppercase", fontWeight: 600, marginBottom: 6 }}>Produto</label>
+                        <select value={editDealForm.product_id} onChange={e => setEditDealForm({ ...editDealForm, product_id: e.target.value })}
+                          style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+                          <option value="">Sem produto</option>
+                          {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                      </div>
+                      <Inp label="Nº Colaboradores" value={editDealForm.num_employees} onChange={v => setEditDealForm({ ...editDealForm, num_employees: v })} type="number" style={{ flex: 1 }} />
+                    </div>
+                    <div style={{ display: "flex", gap: 12 }}>
+                      <Inp label="Valor (R$)" value={editDealForm.value} onChange={v => setEditDealForm({ ...editDealForm, value: v })} type="number" style={{ flex: 1 }} />
+                      <div className="input-group" style={{ flex: 1 }}>
+                        <label style={{ fontSize: 12, color: T.t2, textTransform: "uppercase", fontWeight: 600, marginBottom: 6 }}>Prioridade</label>
+                        <select value={editDealForm.priority} onChange={e => setEditDealForm({ ...editDealForm, priority: e.target.value })}
+                          style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+                          <option value="low">Baixa</option><option value="medium">Média</option><option value="high">Alta</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="input-group">
+                      <label style={{ fontSize: 12, color: T.t2, textTransform: "uppercase", fontWeight: 600, marginBottom: 6 }}>Responsável</label>
+                      <select value={editDealForm.owner_id} onChange={e => setEditDealForm({ ...editDealForm, owner_id: e.target.value })}
+                        style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+                        {users.filter(u => ["gerente", "diretor", "executivo", "super_admin"].includes(u.role)).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                      </select>
+                    </div>
+                    <Inp label="Nome do Contato" value={editDealForm.contact_name} onChange={v => setEditDealForm({ ...editDealForm, contact_name: v })} />
+                    <div style={{ display: "flex", gap: 12 }}>
+                      <Inp label="Telefone" value={editDealForm.contact_phone} onChange={v => setEditDealForm({ ...editDealForm, contact_phone: v })} style={{ flex: 1 }} />
+                      <Inp label="E-mail" value={editDealForm.contact_email} onChange={v => setEditDealForm({ ...editDealForm, contact_email: v })} style={{ flex: 1 }} />
+                    </div>
+                    <div className="input-group">
+                      <label style={{ fontSize: 12, color: T.t2, textTransform: "uppercase", fontWeight: 600, marginBottom: 6 }}>Notas</label>
+                      <textarea value={editDealForm.notes} onChange={e => setEditDealForm({ ...editDealForm, notes: e.target.value })} rows={3}
+                        style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13, resize: "vertical" }} />
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <Btn onClick={handleUpdateDeal}>Salvar</Btn>
+                      <Btn v="secondary" onClick={() => setEditingDeal(false)}>Cancelar</Btn>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* ACTIVITIES TAB */}
             {detailTab === "atividades" && (
@@ -2992,20 +3068,28 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
                       onKeyDown={e => e.key === "Enter" && handleAddActivity()} />
                     <input type="datetime-local" value={actForm.scheduled_at} onChange={e => setActForm({ ...actForm, scheduled_at: e.target.value })}
                       style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }} />
-                    <Btn sm onClick={handleAddActivity} disabled={!actForm.description}>Registrar</Btn>
+                    <Btn sm onClick={() => handleAddActivity(true)} disabled={!actForm.description}>Registrar</Btn>
+                    <Btn sm v="secondary" onClick={() => { if (!actForm.scheduled_at) { alert("Selecione data/hora para agendar"); return; } handleAddActivity(false); }} disabled={!actForm.description}>Agendar</Btn>
                   </div>
                 )}
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {activities.map(a => {
                     const at = ACTIVITY_TYPES.find(t => t.id === a.type) || ACTIVITY_TYPES[5];
+                    const isScheduled = !!a.scheduled_at;
+                    const isPast = isScheduled && new Date(a.scheduled_at) < new Date();
                     return (
-                      <div key={a.id} style={{ display: "flex", gap: 12, padding: 12, background: T.bg2, borderRadius: 8, border: `1px solid ${T.bor}` }}>
+                      <div key={a.id} style={{ display: "flex", gap: 12, padding: 12, background: T.bg2, borderRadius: 8, border: `1px solid ${isScheduled && !isPast ? T.wn + "66" : T.bor}` }}>
                         <span style={{ fontSize: 20 }}>{at.emoji}</span>
                         <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 13 }}>{a.description}</div>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                            <span style={{ fontSize: 13 }}>{a.description}</span>
+                            {isScheduled && !isPast && <span style={{ fontSize: 10, background: T.wn + "22", color: T.wn, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Agendado</span>}
+                            {isScheduled && isPast && <span style={{ fontSize: 10, background: T.ok + "22", color: T.ok, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Concluído</span>}
+                            {!isScheduled && <span style={{ fontSize: 10, background: T.inf + "22", color: T.inf, padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Registrado</span>}
+                          </div>
                           <div style={{ fontSize: 11, color: T.tm, marginTop: 4 }}>
                             {a.user_name} · {new Date(a.created_at).toLocaleString("pt-BR")}
-                            {a.scheduled_at && <span style={{ marginLeft: 8, color: T.wn }}> Agendado: {new Date(a.scheduled_at).toLocaleString("pt-BR")}</span>}
+                            {isScheduled && <span style={{ marginLeft: 8, color: isPast ? T.ok : T.wn }}>{isPast ? "✓" : "📅"} {new Date(a.scheduled_at).toLocaleString("pt-BR")}</span>}
                           </div>
                         </div>
                       </div>
@@ -3099,6 +3183,15 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
 }
 
 // ===== BI / ANALYTICS =====
+const BI_WIDGETS = [
+  { id: "overview", label: "Resumo Geral", icon: "📊", wide: false },
+  { id: "by_owner", label: "Ranking por Responsável", icon: "👤", wide: false },
+  { id: "by_stage", label: "Deals por Etapa", icon: "🔄", wide: false },
+  { id: "loss_reasons", label: "Motivos de Perda", icon: "❌", wide: false },
+  { id: "activity_ranking", label: "Ranking de Atividades", icon: "⚡", wide: false },
+  { id: "timeline", label: "Evolução no Tempo", icon: "📈", wide: true },
+];
+
 function BIPage({ users, selectedTeam, myTeams }) {
   const { user } = useAuth();
   const [pipelines, setPipelines] = useState([]);
@@ -3111,6 +3204,16 @@ function BIPage({ users, selectedTeam, myTeams }) {
   const [timeline, setTimeline] = useState([]);
   const [actRanking, setActRanking] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Custom views system
+  const storageKey = `bi_views_${user.id}`;
+  const [savedViews, setSavedViews] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(storageKey)) || []; } catch { return []; }
+  });
+  const [activeWidgets, setActiveWidgets] = useState(() => BI_WIDGETS.map(w => w.id));
+  const [showViewConfig, setShowViewConfig] = useState(false);
+  const [viewName, setViewName] = useState("");
+  const [selectedView, setSelectedView] = useState("");
 
   useEffect(() => { pipelinesApi.getAll().then(r => { setPipelines(r.data); if (r.data.length > 0) setSelPipeline(r.data[0].id); }).catch(() => {}); }, []);
 
@@ -3131,14 +3234,46 @@ function BIPage({ users, selectedTeam, myTeams }) {
 
   useEffect(() => { loadBI(); }, [loadBI]);
 
+  const saveView = () => {
+    if (!viewName.trim()) return;
+    const newView = { id: Date.now().toString(), name: viewName, widgets: [...activeWidgets], pipeline: selPipeline, period };
+    const updated = [...savedViews, newView];
+    setSavedViews(updated);
+    localStorage.setItem(storageKey, JSON.stringify(updated));
+    setViewName("");
+    setSelectedView(newView.id);
+  };
+
+  const loadView = (viewId) => {
+    const view = savedViews.find(v => v.id === viewId);
+    if (!view) { setSelectedView(""); setActiveWidgets(BI_WIDGETS.map(w => w.id)); return; }
+    setSelectedView(viewId);
+    setActiveWidgets(view.widgets);
+    if (view.pipeline && pipelines.find(p => p.id === view.pipeline)) setSelPipeline(view.pipeline);
+    if (view.period) setPeriod(view.period);
+  };
+
+  const deleteView = (viewId) => {
+    const updated = savedViews.filter(v => v.id !== viewId);
+    setSavedViews(updated);
+    localStorage.setItem(storageKey, JSON.stringify(updated));
+    if (selectedView === viewId) { setSelectedView(""); setActiveWidgets(BI_WIDGETS.map(w => w.id)); }
+  };
+
+  const toggleWidget = (wId) => {
+    setActiveWidgets(prev => prev.includes(wId) ? prev.filter(id => id !== wId) : [...prev, wId]);
+  };
+
   const maxBar = (arr, key) => Math.max(...arr.map(a => Number(a[key]) || 0), 1);
 
   if (loading && !overview) return <div style={{ padding: 40, textAlign: "center", color: T.tm }}>Carregando dados...</div>;
 
+  const isActive = (wId) => activeWidgets.includes(wId);
+
   return (
     <div>
-      {/* Filters */}
-      <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
+      {/* Filters + View controls */}
+      <div style={{ display: "flex", gap: 12, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
         <select value={selPipeline} onChange={e => setSelPipeline(e.target.value)} style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 8, color: T.txt, fontSize: 13, fontFamily: "'DM Sans',sans-serif" }}>
           {pipelines.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
@@ -3146,10 +3281,50 @@ function BIPage({ users, selectedTeam, myTeams }) {
           {[["7", "7 dias"], ["15", "15 dias"], ["30", "30 dias"], ["60", "60 dias"], ["90", "90 dias"], ["180", "6 meses"], ["365", "1 ano"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
         <Btn sm onClick={loadBI}>Atualizar</Btn>
+        <div style={{ flex: 1 }} />
+        {savedViews.length > 0 && (
+          <select value={selectedView} onChange={e => loadView(e.target.value)} style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 8, color: T.txt, fontSize: 13, fontFamily: "'DM Sans',sans-serif" }}>
+            <option value="">Todas as visões</option>
+            {savedViews.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+          </select>
+        )}
+        <Btn sm v="secondary" onClick={() => setShowViewConfig(!showViewConfig)}>Personalizar</Btn>
       </div>
 
+      {/* View configuration panel */}
+      {showViewConfig && (
+        <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 16, marginBottom: 16 }}>
+          <h4 style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Personalizar Visão</h4>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+            {BI_WIDGETS.map(w => (
+              <button key={w.id} onClick={() => toggleWidget(w.id)}
+                style={{ padding: "6px 12px", fontSize: 12, border: `1px solid ${isActive(w.id) ? T.ac : T.bor}`, background: isActive(w.id) ? T.ac + "22" : "transparent", color: isActive(w.id) ? T.ac : T.tm, borderRadius: 6, cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+                {w.icon} {w.label}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input value={viewName} onChange={e => setViewName(e.target.value)} placeholder="Nome da visão..."
+              style={{ flex: 1, maxWidth: 250, padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12, fontFamily: "'DM Sans',sans-serif" }}
+              onKeyDown={e => e.key === "Enter" && saveView()} />
+            <Btn sm onClick={saveView} disabled={!viewName.trim()}>Salvar Visão</Btn>
+            {selectedView && <Btn sm v="danger" onClick={() => deleteView(selectedView)}>Excluir Visão</Btn>}
+          </div>
+          {savedViews.length > 0 && (
+            <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {savedViews.map(v => (
+                <div key={v.id} style={{ display: "flex", gap: 4, alignItems: "center", padding: "4px 10px", background: selectedView === v.id ? T.ac + "22" : T.bg2, border: `1px solid ${selectedView === v.id ? T.ac : T.bor}`, borderRadius: 6 }}>
+                  <button onClick={() => loadView(v.id)} style={{ background: "none", border: "none", color: T.txt, cursor: "pointer", fontSize: 12, fontFamily: "'DM Sans',sans-serif" }}>{v.name}</button>
+                  <button onClick={() => deleteView(v.id)} style={{ background: "none", border: "none", color: T.er, cursor: "pointer", fontSize: 11 }}>✕</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Overview cards */}
-      {overview && (
+      {isActive("overview") && overview && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 24 }}>
           {[
             { l: "Total Deals", v: overview.total_deals, c: T.ac },
@@ -3169,6 +3344,7 @@ function BIPage({ users, selectedTeam, myTeams }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(400px, 1fr))", gap: 16 }}>
         {/* By Owner - ranking */}
+        {isActive("by_owner") && (
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20 }}>
           <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>Ranking por Responsável</h3>
           {byOwner.length === 0 && <div style={{ color: T.tm, fontSize: 13 }}>Sem dados</div>}
@@ -3187,8 +3363,10 @@ function BIPage({ users, selectedTeam, myTeams }) {
             );
           })}
         </div>
+        )}
 
         {/* By Stage - funnel */}
+        {isActive("by_stage") && (
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20 }}>
           <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>Deals por Etapa</h3>
           {byStage.length === 0 && <div style={{ color: T.tm, fontSize: 13 }}>Sem dados</div>}
@@ -3207,8 +3385,10 @@ function BIPage({ users, selectedTeam, myTeams }) {
             );
           })}
         </div>
+        )}
 
         {/* Loss Reasons */}
+        {isActive("loss_reasons") && (
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20 }}>
           <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>Motivos de Perda</h3>
           {lossReasons.length === 0 && <div style={{ color: T.tm, fontSize: 13 }}>Sem dados</div>}
@@ -3227,8 +3407,10 @@ function BIPage({ users, selectedTeam, myTeams }) {
             );
           })}
         </div>
+        )}
 
         {/* Activity Ranking */}
+        {isActive("activity_ranking") && (
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20 }}>
           <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>Ranking de Atividades</h3>
           {actRanking.length === 0 && <div style={{ color: T.tm, fontSize: 13 }}>Sem dados</div>}
@@ -3247,8 +3429,10 @@ function BIPage({ users, selectedTeam, myTeams }) {
             );
           })}
         </div>
+        )}
 
         {/* Timeline */}
+        {isActive("timeline") && (
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20, gridColumn: "1 / -1" }}>
           <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>Evolução no Tempo</h3>
           {timeline.length === 0 && <div style={{ color: T.tm, fontSize: 13 }}>Sem dados</div>}
@@ -3267,6 +3451,7 @@ function BIPage({ users, selectedTeam, myTeams }) {
             </div>
           )}
         </div>
+        )}
       </div>
     </div>
   );
