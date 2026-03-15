@@ -340,6 +340,9 @@ export const pipelinesApi = {
   getDeals: (id) => api.get(`/pipelines/${id}/deals`),
   createDeal: (pipelineId, data) => api.post(`/pipelines/${pipelineId}/deals`, data),
   getStats: () => api.get('/pipelines/stats/summary'),
+  getAutomations: (id) => api.get(`/pipelines/${id}/automations`),
+  createAutomation: (id, data) => api.post(`/pipelines/${id}/automations`, data),
+  deleteAutomation: (id) => api.delete(`/pipelines/automations/${id}`),
 };
 
 // Deals API
@@ -353,6 +356,9 @@ export const dealsApi = {
   createTask: (dealId, data) => api.post(`/pipelines/deals/${dealId}/tasks`, data),
   completeTask: (id, is_completed) => api.patch(`/pipelines/tasks/${id}/complete`, { is_completed }),
   deleteTask: (id) => api.delete(`/pipelines/tasks/${id}`),
+  getContacts: (dealId) => api.get(`/pipelines/deals/${dealId}/contacts`),
+  addContact: (dealId, data) => api.post(`/pipelines/deals/${dealId}/contacts`, data),
+  deleteContact: (id) => api.delete(`/pipelines/deals/contacts/${id}`),
 };
 
 export default api;

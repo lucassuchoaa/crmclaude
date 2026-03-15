@@ -100,6 +100,9 @@ router.get('/:id', authenticate, async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
+    const userTeams = await db.prepare('SELECT team_id FROM team_members WHERE user_id = ?').all(user.id);
+    user.team_ids = userTeams.map(t => t.team_id);
+
     // Check access permission
     if (!hasPermission(req.user.role, 'executivo') && user.id !== req.user.id) {
       // Check if user is managed by requester
@@ -118,7 +121,7 @@ router.get('/:id', authenticate, async (req, res) => {
 // Create user
 router.post('/', authenticate, requireMinRole('gerente'), async (req, res) => {
   try {
-    const { email, password, name, role, manager_id, empresa, tel, com_tipo, com_val, cnpj, convenio_ids } = req.body;
+    const { email, password, name, role, manager_id, empresa, tel, com_tipo, com_val, cnpj, convenio_ids, team_ids } = req.body;
 
     if (!email || !password || !name || !role) {
       return res.status(400).json({ error: 'Email, password, name and role required' });
@@ -173,6 +176,13 @@ router.post('/', authenticate, requireMinRole('gerente'), async (req, res) => {
       }
     }
 
+    // Link user to teams if provided
+    if (team_ids && Array.isArray(team_ids) && team_ids.length > 0) {
+      for (const tid of team_ids) {
+        await db.prepare('INSERT OR IGNORE INTO team_members (team_id, user_id) VALUES (?, ?)').run(tid, id);
+      }
+    }
+
     const user = await db.prepare(`
       SELECT id, email, name, role, avatar, manager_id, empresa, tel, com_tipo, com_val, cnpj, is_active, created_at
       FROM users WHERE id = ?
@@ -188,7 +198,7 @@ router.post('/', authenticate, requireMinRole('gerente'), async (req, res) => {
 // Update user
 router.put('/:id', authenticate, async (req, res) => {
   try {
-    const { name, role, manager_id, is_active, empresa, tel, com_tipo, com_val, cnpj, convenio_ids } = req.body;
+    const { name, role, manager_id, is_active, empresa, tel, com_tipo, com_val, cnpj, convenio_ids, team_ids } = req.body;
     const userId = req.params.id;
 
     // Validate com_tipo if provided
@@ -260,6 +270,14 @@ router.put('/:id', authenticate, async (req, res) => {
         for (const cid of convenio_ids) {
           await db.prepare('INSERT OR IGNORE INTO user_convenios (user_id, convenio_id) VALUES (?, ?)').run(userId, cid);
         }
+      }
+    }
+
+    // Update team memberships if provided
+    if (team_ids && Array.isArray(team_ids)) {
+      await db.prepare('DELETE FROM team_members WHERE user_id = ?').run(userId);
+      for (const tid of team_ids) {
+        await db.prepare('INSERT OR IGNORE INTO team_members (team_id, user_id) VALUES (?, ?)').run(tid, userId);
       }
     }
 

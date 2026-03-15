@@ -548,6 +548,36 @@ async function createTables(db) {
       )`;
   await db.exec(dealTasksDDL);
 
+  // Deal contacts (multiple contacts per deal)
+  await ddl(`
+    CREATE TABLE IF NOT EXISTS deal_contacts (
+      id TEXT PRIMARY KEY,
+      deal_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      phone TEXT,
+      email TEXT,
+      role TEXT,
+      is_primary INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Pipeline automations
+  await ddl(`
+    CREATE TABLE IF NOT EXISTS pipeline_automations (
+      id TEXT PRIMARY KEY,
+      pipeline_id TEXT NOT NULL,
+      trigger_stage_id TEXT NOT NULL,
+      action_type TEXT NOT NULL,
+      target_pipeline_id TEXT,
+      target_stage_id TEXT,
+      copy_history INTEGER DEFAULT 0,
+      auto_tasks TEXT,
+      is_active INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   // ── Indexes ──
   // PG and SQLite both support CREATE INDEX IF NOT EXISTS
   const indexes = `
@@ -587,6 +617,9 @@ async function createTables(db) {
     CREATE INDEX IF NOT EXISTS idx_deal_activities_deal ON deal_activities(deal_id);
     CREATE INDEX IF NOT EXISTS idx_deal_tasks_deal ON deal_tasks(deal_id);
     CREATE INDEX IF NOT EXISTS idx_deal_tasks_assigned ON deal_tasks(assigned_to);
+    CREATE INDEX IF NOT EXISTS idx_deal_contacts_deal ON deal_contacts(deal_id);
+    CREATE INDEX IF NOT EXISTS idx_pipeline_automations_pipeline ON pipeline_automations(pipeline_id);
+    CREATE INDEX IF NOT EXISTS idx_pipeline_automations_trigger ON pipeline_automations(trigger_stage_id);
   `;
 
   if (isPg) {

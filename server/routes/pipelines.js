@@ -200,14 +200,87 @@ router.put('/deals/:id', authenticate, async (req, res) => {
   }
 });
 
-// PATCH /deals/:id/stage - move deal to a different stage
+// PATCH /deals/:id/stage - move deal to a different stage (with automation)
 router.patch('/deals/:id/stage', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
     const { stage_id } = req.body;
     if (!stage_id) return res.status(400).json({ error: 'stage_id obrigatório' });
-    await db.prepare(`UPDATE deals SET stage_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(stage_id, req.params.id);
-    res.json({ ok: true });
+
+    // Get deal info before move
+    const deal = await db.prepare('SELECT * FROM deals WHERE id = ?').get(req.params.id);
+    if (!deal) return res.status(404).json({ error: 'Deal não encontrado' });
+
+    // Move deal
+    await db.prepare('UPDATE deals SET stage_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(stage_id, req.params.id);
+
+    // Check for automations on this stage
+    const automations = await db.prepare('SELECT * FROM pipeline_automations WHERE pipeline_id = ? AND trigger_stage_id = ? AND is_active = 1').all(deal.pipeline_id, stage_id);
+
+    const created_deals = [];
+    for (const auto of automations) {
+      if (auto.action_type === 'copy_to_pipeline' && auto.target_pipeline_id) {
+        // Get target stage (first stage if not specified)
+        let targetStageId = auto.target_stage_id;
+        if (!targetStageId) {
+          const first = await db.prepare('SELECT id FROM pipeline_stages WHERE pipeline_id = ? ORDER BY display_order LIMIT 1').get(auto.target_pipeline_id);
+          if (first) targetStageId = first.id;
+        }
+        if (!targetStageId) continue;
+
+        // Copy deal to target pipeline
+        const newId = uuidv4();
+        await db.prepare(`INSERT INTO deals (id, pipeline_id, stage_id, title, company, value, owner_id, priority, contact_name, contact_phone, contact_email, notes)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(newId, auto.target_pipeline_id, targetStageId, deal.title, deal.company, deal.value, deal.owner_id, deal.priority, deal.contact_name, deal.contact_phone, deal.contact_email, deal.notes);
+
+        // Copy contacts
+        const contacts = await db.prepare('SELECT * FROM deal_contacts WHERE deal_id = ?').all(deal.id);
+        for (const c of contacts) {
+          await db.prepare('INSERT INTO deal_contacts (id, deal_id, name, phone, email, role, is_primary) VALUES (?, ?, ?, ?, ?, ?, ?)')
+            .run(uuidv4(), newId, c.name, c.phone, c.email, c.role, c.is_primary);
+        }
+
+        // Copy history/activities if configured
+        if (Number(auto.copy_history)) {
+          const acts = await db.prepare('SELECT * FROM deal_activities WHERE deal_id = ?').all(deal.id);
+          for (const a of acts) {
+            await db.prepare('INSERT INTO deal_activities (deal_id, user_id, type, description, scheduled_at) VALUES (?, ?, ?, ?, ?)')
+              .run(newId, a.user_id, a.type, `[Copiado] ${a.description}`, a.scheduled_at);
+          }
+        }
+
+        // Create auto tasks if configured
+        if (auto.auto_tasks) {
+          try {
+            const tasks = JSON.parse(auto.auto_tasks);
+            for (const task of tasks) {
+              const dueDate = task.due_days ? new Date(Date.now() + task.due_days * 86400000).toISOString().split('T')[0] : null;
+              await db.prepare('INSERT INTO deal_tasks (deal_id, assigned_to, title, due_date) VALUES (?, ?, ?, ?)')
+                .run(newId, deal.owner_id, task.title, dueDate);
+            }
+          } catch (e) { console.error('Auto tasks parse error:', e); }
+        }
+
+        created_deals.push({ id: newId, pipeline_id: auto.target_pipeline_id });
+      }
+
+      if (auto.action_type === 'create_tasks') {
+        // Create auto tasks on the current deal
+        if (auto.auto_tasks) {
+          try {
+            const tasks = JSON.parse(auto.auto_tasks);
+            for (const task of tasks) {
+              const dueDate = task.due_days ? new Date(Date.now() + task.due_days * 86400000).toISOString().split('T')[0] : null;
+              await db.prepare('INSERT INTO deal_tasks (deal_id, assigned_to, title, due_date) VALUES (?, ?, ?, ?)')
+                .run(deal.id, deal.owner_id, task.title, dueDate);
+            }
+          } catch (e) { console.error('Auto tasks parse error:', e); }
+        }
+      }
+    }
+
+    res.json({ ok: true, automations_triggered: automations.length, created_deals });
   } catch (err) {
     console.error('PATCH deal stage error:', err);
     res.status(500).json({ error: err.message });
@@ -222,6 +295,54 @@ router.delete('/deals/:id', authenticate, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('DELETE deal error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════
+// DEAL CONTACTS (multiple contacts per deal)
+// ══════════════════════════════════════════════
+
+// GET /deals/:dealId/contacts
+router.get('/deals/:dealId/contacts', authenticate, async (req, res) => {
+  try {
+    const db = getDatabase();
+    const rows = await db.prepare('SELECT * FROM deal_contacts WHERE deal_id = ? ORDER BY is_primary DESC, created_at').all(req.params.dealId);
+    res.json(rows);
+  } catch (err) {
+    console.error('GET contacts error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /deals/:dealId/contacts
+router.post('/deals/:dealId/contacts', authenticate, async (req, res) => {
+  try {
+    const db = getDatabase();
+    const { name, phone, email, role, is_primary } = req.body;
+    if (!name) return res.status(400).json({ error: 'Nome obrigatório' });
+    const id = uuidv4();
+    // If setting as primary, unset others
+    if (is_primary) {
+      await db.prepare('UPDATE deal_contacts SET is_primary = 0 WHERE deal_id = ?').run(req.params.dealId);
+    }
+    await db.prepare('INSERT INTO deal_contacts (id, deal_id, name, phone, email, role, is_primary) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(id, req.params.dealId, name, phone || null, email || null, role || null, is_primary ? 1 : 0);
+    res.status(201).json({ id, ok: true });
+  } catch (err) {
+    console.error('POST contact error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /deals/contacts/:id
+router.delete('/deals/contacts/:id', authenticate, async (req, res) => {
+  try {
+    const db = getDatabase();
+    await db.prepare('DELETE FROM deal_contacts WHERE id = ?').run(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('DELETE contact error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -337,6 +458,55 @@ router.get('/stats/summary', authenticate, async (req, res) => {
     });
   } catch (err) {
     console.error('GET stats error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════
+// PIPELINE AUTOMATIONS
+// ══════════════════════════════════════════════
+
+// GET /pipelines/:id/automations
+router.get('/:id/automations', authenticate, async (req, res) => {
+  try {
+    const db = getDatabase();
+    const rows = await db.prepare(`SELECT a.*, ps.name as stage_name, tp.name as target_pipeline_name
+      FROM pipeline_automations a
+      LEFT JOIN pipeline_stages ps ON a.trigger_stage_id = ps.id
+      LEFT JOIN pipelines tp ON a.target_pipeline_id = tp.id
+      WHERE a.pipeline_id = ? ORDER BY a.created_at`).all(req.params.id);
+    res.json(rows);
+  } catch (err) {
+    console.error('GET automations error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /pipelines/:id/automations
+router.post('/:id/automations', authenticate, async (req, res) => {
+  try {
+    if (!hasPermission(req.user.role, 'gerente')) return res.status(403).json({ error: 'Sem permissão' });
+    const db = getDatabase();
+    const { trigger_stage_id, action_type, target_pipeline_id, target_stage_id, copy_history, auto_tasks } = req.body;
+    if (!trigger_stage_id || !action_type) return res.status(400).json({ error: 'Dados incompletos' });
+    const id = uuidv4();
+    await db.prepare(`INSERT INTO pipeline_automations (id, pipeline_id, trigger_stage_id, action_type, target_pipeline_id, target_stage_id, copy_history, auto_tasks) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, req.params.id, trigger_stage_id, action_type, target_pipeline_id || null, target_stage_id || null, copy_history ? 1 : 0, auto_tasks ? JSON.stringify(auto_tasks) : null);
+    res.status(201).json({ id, ok: true });
+  } catch (err) {
+    console.error('POST automation error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /automations/:id
+router.delete('/automations/:id', authenticate, async (req, res) => {
+  try {
+    const db = getDatabase();
+    await db.prepare('DELETE FROM pipeline_automations WHERE id = ?').run(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('DELETE automation error:', err);
     res.status(500).json({ error: err.message });
   }
 });

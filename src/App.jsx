@@ -2671,7 +2671,11 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
   const [showDealModal, setShowDealModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedDeal, setSelectedDeal] = useState(null);
-  const [dealForm, setDealForm] = useState({ title: "", company: "", value: "", priority: "medium", contact_name: "", contact_phone: "", contact_email: "", notes: "" });
+  const [dealForm, setDealForm] = useState({ title: "", company: "", value: "", priority: "medium", contact_name: "", contact_phone: "", contact_email: "", notes: "", cnpj: "" });
+  const [cnpjLoading, setCnpjLoading] = useState(false);
+  const [cnpjData, setCnpjData] = useState(null);
+  const [contacts, setContacts] = useState([]);
+  const [contactForm, setContactForm] = useState({ name: "", phone: "", email: "", role: "" });
   const [activities, setActivities] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [detailTab, setDetailTab] = useState("atividades");
@@ -2704,12 +2708,41 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
     setSelectedDeal(deal);
     setDetailTab("atividades");
     setShowDetailModal(true);
-    const [ar, tr] = await Promise.all([
+    const [ar, tr, cr] = await Promise.all([
       dealsApi.getActivities(deal.id).catch(() => ({ data: [] })),
       dealsApi.getTasks(deal.id).catch(() => ({ data: [] })),
+      dealsApi.getContacts(deal.id).catch(() => ({ data: [] })),
     ]);
     setActivities(ar.data);
     setTasks(tr.data);
+    setContacts(cr.data);
+  };
+
+  const handleCnpjLookup = async () => {
+    const cnpj = dealForm.cnpj.replace(/\D/g, "");
+    if (cnpj.length !== 14) return;
+    setCnpjLoading(true);
+    try {
+      const r = await cnpjAgentApi.lookup(cnpj);
+      const d = r.data;
+      setCnpjData(d);
+      setDealForm(prev => ({
+        ...prev,
+        title: prev.title || d.razao_social || "",
+        company: d.nome_fantasia || d.razao_social || prev.company,
+        contact_phone: d.telefone || prev.contact_phone,
+        contact_email: d.email || prev.contact_email,
+      }));
+    } catch (e) { console.error("CNPJ lookup error:", e); }
+    setCnpjLoading(false);
+  };
+
+  const handleAddContact = async () => {
+    if (!contactForm.name || !selectedDeal) return;
+    await dealsApi.addContact(selectedDeal.id, contactForm);
+    const r = await dealsApi.getContacts(selectedDeal.id);
+    setContacts(r.data);
+    setContactForm({ name: "", phone: "", email: "", role: "" });
   };
 
   const handleCreateDeal = async () => {
@@ -2719,7 +2752,8 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
       const r = await pipelinesApi.getDeals(selectedPipeline.id);
       setDeals(r.data);
       setShowDealModal(false);
-      setDealForm({ title: "", company: "", value: "", priority: "medium", contact_name: "", contact_phone: "", contact_email: "", notes: "" });
+      setDealForm({ title: "", company: "", value: "", priority: "medium", contact_name: "", contact_phone: "", contact_email: "", notes: "", cnpj: "" });
+      setCnpjData(null);
     } catch (e) { console.error(e); }
   };
 
@@ -2864,6 +2898,21 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
       {/* CREATE DEAL MODAL */}
       <Modal open={showDealModal} onClose={() => setShowDealModal(false)} title="Nova Negociação" footer={<Btn onClick={handleCreateDeal} disabled={!dealForm.title}>Criar Negociação</Btn>}>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+            <div style={{ flex: 1 }}>
+              <Inp label="CNPJ (busca automática)" value={dealForm.cnpj} onChange={v => setDealForm({ ...dealForm, cnpj: v })} placeholder="00.000.000/0000-00" />
+            </div>
+            <Btn sm onClick={handleCnpjLookup} disabled={cnpjLoading || dealForm.cnpj.replace(/\D/g, "").length !== 14} style={{ marginBottom: 2 }}>{cnpjLoading ? "Buscando..." : "🔍 Buscar"}</Btn>
+          </div>
+          {cnpjData && (
+            <div style={{ padding: 10, background: T.ok + "15", border: `1px solid ${T.ok}40`, borderRadius: 8, fontSize: 12 }}>
+              <div style={{ fontWeight: 700, marginBottom: 4, color: T.ok }}>✓ Dados encontrados</div>
+              <div><strong>Razão Social:</strong> {cnpjData.razao_social}</div>
+              {cnpjData.nome_fantasia && <div><strong>Fantasia:</strong> {cnpjData.nome_fantasia}</div>}
+              {cnpjData.situacao && <div><strong>Situação:</strong> {cnpjData.situacao}</div>}
+              {cnpjData.cnae_principal && <div><strong>CNAE:</strong> {cnpjData.cnae_principal}</div>}
+            </div>
+          )}
           <Inp label="Título *" value={dealForm.title} onChange={v => setDealForm({ ...dealForm, title: v })} placeholder="Nome da negociação" />
           <Inp label="Empresa" value={dealForm.company} onChange={v => setDealForm({ ...dealForm, company: v })} placeholder="Nome da empresa" />
           <div style={{ display: "flex", gap: 12 }}>
@@ -2906,7 +2955,7 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
 
             {/* Tabs: Atividades / Tarefas */}
             <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${T.bor}`, marginBottom: 16 }}>
-              {["atividades", "tarefas"].map(t => (
+              {["atividades", "contatos", "tarefas"].map(t => (
                 <button key={t} onClick={() => setDetailTab(t)}
                   style={{ padding: "8px 16px", fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: "none", color: detailTab === t ? T.ac : T.tm, borderBottom: `2px solid ${detailTab === t ? T.ac : "transparent"}`, marginBottom: -1, textTransform: "capitalize" }}>{t}</button>
               ))}
@@ -2946,6 +2995,43 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
                     );
                   })}
                   {activities.length === 0 && <div style={{ padding: 20, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhuma atividade registrada</div>}
+                </div>
+              </div>
+            )}
+
+            {/* CONTACTS TAB */}
+            {detailTab === "contatos" && (
+              <div>
+                {canEdit && (
+                  <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+                    <input value={contactForm.name} onChange={e => setContactForm({ ...contactForm, name: e.target.value })} placeholder="Nome *"
+                      style={{ flex: 1, minWidth: 140, padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12, fontFamily: "'DM Sans',sans-serif" }} />
+                    <input value={contactForm.phone} onChange={e => setContactForm({ ...contactForm, phone: e.target.value })} placeholder="Telefone"
+                      style={{ width: 130, padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12, fontFamily: "'DM Sans',sans-serif" }} />
+                    <input value={contactForm.email} onChange={e => setContactForm({ ...contactForm, email: e.target.value })} placeholder="E-mail"
+                      style={{ width: 180, padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12, fontFamily: "'DM Sans',sans-serif" }} />
+                    <input value={contactForm.role} onChange={e => setContactForm({ ...contactForm, role: e.target.value })} placeholder="Cargo"
+                      style={{ width: 120, padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12, fontFamily: "'DM Sans',sans-serif" }} />
+                    <Btn sm onClick={handleAddContact} disabled={!contactForm.name}>Adicionar</Btn>
+                  </div>
+                )}
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {contacts.map(c => (
+                    <div key={c.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "10px 12px", background: T.bg2, borderRadius: 8, border: `1px solid ${T.bor}` }}>
+                      <div style={{ width: 32, height: 32, borderRadius: "50%", background: T.ac + "22", color: T.ac, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700 }}>{c.name[0]}</div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>{c.name} {Number(c.is_primary) ? <span style={{ fontSize: 10, color: T.ok, marginLeft: 4 }}>★ Principal</span> : ""}</div>
+                        <div style={{ fontSize: 11, color: T.tm }}>
+                          {c.role && <span>{c.role} · </span>}
+                          {c.phone && <span>{c.phone} · </span>}
+                          {c.email && <span>{c.email}</span>}
+                        </div>
+                      </div>
+                      {canEdit && <button onClick={() => dealsApi.deleteContact(c.id).then(() => setContacts(prev => prev.filter(x => x.id !== c.id)))}
+                        style={{ background: "none", border: "none", color: T.tm, cursor: "pointer", fontSize: 14 }}>✕</button>}
+                    </div>
+                  ))}
+                  {contacts.length === 0 && <div style={{ padding: 20, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhum contato adicionado</div>}
                 </div>
               </div>
             )}
@@ -3010,6 +3096,9 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
   const [editPipe, setEditPipe] = useState(null);
   const defaultStages = [{ name: "Novo", color: "#6366f1", is_win: false, is_lost: false }, { name: "Em Andamento", color: "#f59e0b", is_win: false, is_lost: false }, { name: "Ganho", color: "#10b981", is_win: true, is_lost: false }, { name: "Perdido", color: "#ef4444", is_win: false, is_lost: true }];
   const [pipeForm, setPipeForm] = useState({ name: "", team_id: "", stages: defaultStages });
+  const [pipeAutomations, setPipeAutomations] = useState([]);
+  const [autoForm, setAutoForm] = useState({ trigger_stage_id: "", action_type: "copy_to_pipeline", target_pipeline_id: "", target_stage_id: "", copy_history: true, auto_tasks: [] });
+  const [autoTaskForm, setAutoTaskForm] = useState({ title: "", due_days: "" });
   // Teams config state
   const [cfgTeams, setCfgTeams] = useState([]);
   const [teamModal, setTeamModal] = useState(false);
@@ -3048,10 +3137,33 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
   };
 
   const handleEditPipeline = async (pipe) => {
-    const sr = await pipelinesApi.getStages(pipe.id);
+    const [sr, ar] = await Promise.all([
+      pipelinesApi.getStages(pipe.id),
+      pipelinesApi.getAutomations(pipe.id).catch(() => ({ data: [] })),
+    ]);
     setEditPipe(pipe);
     setPipeForm({ name: pipe.name, team_id: pipe.team_id || "", stages: sr.data.map(s => ({ ...s, is_win: !!Number(s.is_win), is_lost: !!Number(s.is_lost) })) });
+    setPipeAutomations(ar.data);
+    setAutoForm({ trigger_stage_id: "", action_type: "copy_to_pipeline", target_pipeline_id: "", target_stage_id: "", copy_history: true, auto_tasks: [] });
     setPipeModal(true);
+  };
+
+  const handleAddAutomation = async () => {
+    if (!autoForm.trigger_stage_id || !editPipe) return;
+    try {
+      await pipelinesApi.createAutomation(editPipe.id, {
+        ...autoForm,
+        auto_tasks: autoForm.auto_tasks.length > 0 ? autoForm.auto_tasks : null,
+      });
+      const r = await pipelinesApi.getAutomations(editPipe.id);
+      setPipeAutomations(r.data);
+      setAutoForm({ trigger_stage_id: "", action_type: "copy_to_pipeline", target_pipeline_id: "", target_stage_id: "", copy_history: true, auto_tasks: [] });
+    } catch (e) { console.error(e); }
+  };
+
+  const handleDeleteAutomation = async (id) => {
+    await pipelinesApi.deleteAutomation(id);
+    setPipeAutomations(prev => prev.filter(a => a.id !== id));
   };
 
   const handleDeletePipeline = async (id) => {
@@ -3134,13 +3246,14 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
   const [userModal, setUserModal] = useState(false);
   const [uf, setUf] = useState({ name: "", email: "", pw: "", role: "gerente", dId: "", eId: "" });
   const [ufConvIds, setUfConvIds] = useState([]);
+  const [ufTeamIds, setUfTeamIds] = useState([]);
   const [cfgConvenios, setCfgConvenios] = useState([]);
   const [cfgConvParMap, setCfgConvParMap] = useState({});
   const [delUserConf, setDelUserConf] = useState(null);
   const [uSearch, setUSearch] = useState("");
   const [uRoleFilter, setURoleFilter] = useState("");
   const [editUser, setEditUser] = useState(null);
-  const [euF, setEuF] = useState({ name: "", role: "", managerId: "", isActive: true });
+  const [euF, setEuF] = useState({ name: "", role: "", managerId: "", isActive: true, teamIds: [] });
   const [euSaving, setEuSaving] = useState(false);
   const [euResetPw, setEuResetPw] = useState(null);
   // Parceiros tab state
@@ -3219,10 +3332,14 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
     } catch (e) { alert(e.response?.data?.error || "Erro ao excluir parceiro"); }
   };
 
-  const openEditUser = (u) => {
-    setEuF({ name: u.name, role: u.role, managerId: u.dId || u.eId || "", isActive: true });
+  const openEditUser = async (u) => {
+    setEuF({ name: u.name, role: u.role, managerId: u.dId || u.eId || "", isActive: true, teamIds: [] });
     setEditUser(u);
     setEuResetPw(null);
+    try {
+      const r = await usersApi.getById(u.id);
+      if (r.data.user?.team_ids) setEuF(prev => ({ ...prev, teamIds: r.data.user.team_ids }));
+    } catch {}
   };
 
   const saveEditUser = async () => {
@@ -3232,7 +3349,8 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
       const managerId = euF.role === "gerente" ? euF.managerId : euF.role === "diretor" ? euF.managerId : undefined;
       await usersApi.update(editUser.id, {
         name: euF.name, role: euF.role, manager_id: managerId,
-        is_active: euF.isActive
+        is_active: euF.isActive,
+        team_ids: ["gerente", "diretor", "executivo"].includes(euF.role) ? euF.teamIds : undefined
       });
       setUsers(prev => prev.map(u => u.id === editUser.id ? { ...u, name: euF.name, role: euF.role, eId: euF.role === "diretor" ? euF.managerId : u.eId, dId: euF.role === "gerente" ? euF.managerId : u.dId } : u));
       setEditUser(null);
@@ -3300,13 +3418,15 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
       const res = await usersApi.create({
         email: uf.email, password: uf.pw, name: uf.name, role: uf.role,
         manager_id: managerId,
-        convenio_ids: uf.role === "convenio" ? ufConvIds : undefined
+        convenio_ids: uf.role === "convenio" ? ufConvIds : undefined,
+        team_ids: ["gerente", "diretor", "executivo"].includes(uf.role) ? ufTeamIds : undefined
       });
       const u = res.data.user;
       setUsers(prev => [...prev, transformUser(u)]);
       setUserModal(false);
       setUf({ name: "", email: "", pw: "", role: "gerente", dId: "", eId: "" });
       setUfConvIds([]);
+      setUfTeamIds([]);
     } catch (e) { console.error("Erro ao criar usuário:", e); alert(e.response?.data?.error || "Erro ao criar usuário"); }
     setAddingUser(false);
   };
@@ -3797,6 +3917,19 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
                   {ufConvIds.length === 0 && <div style={{ fontSize: 11, color: T.wn, marginTop: 6 }}>Selecione ao menos um convênio</div>}
                 </div>
               )}
+              {["gerente", "diretor", "executivo"].includes(uf.role) && cfgTeams.length > 0 && (
+                <div style={{ gridColumn: "1/-1", padding: 14, background: T.ac + "08", border: `1px solid ${T.ac}20`, borderRadius: 8 }}>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.ac, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>👥 Equipes</label>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    {cfgTeams.map(t => (
+                      <label key={t.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 6, border: `1px solid ${ufTeamIds.includes(t.id) ? T.ac : T.bor}`, background: ufTeamIds.includes(t.id) ? T.ac + "15" : T.inp, cursor: "pointer", fontSize: 12, color: ufTeamIds.includes(t.id) ? T.ac : T.txt, fontWeight: ufTeamIds.includes(t.id) ? 600 : 400 }}>
+                        <input type="checkbox" checked={ufTeamIds.includes(t.id)} onChange={() => setUfTeamIds(prev => prev.includes(t.id) ? prev.filter(x => x !== t.id) : [...prev, t.id])} style={{ accentColor: T.ac }} />
+                        {t.name}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </Modal>
 
@@ -3843,6 +3976,19 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
                     <option value="">Selecione...</option>
                     {users.filter(u => u.role === "executivo").map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
                   </select>
+                </div>
+              )}
+              {["gerente", "diretor", "executivo"].includes(euF.role) && cfgTeams.length > 0 && (
+                <div style={{ padding: 14, background: T.ac + "08", border: `1px solid ${T.ac}20`, borderRadius: 8, marginBottom: 14 }}>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.ac, marginBottom: 8, textTransform: "uppercase" }}>Equipes</label>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    {cfgTeams.map(t => (
+                      <label key={t.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 6, border: `1px solid ${euF.teamIds.includes(t.id) ? T.ac : T.bor}`, background: euF.teamIds.includes(t.id) ? T.ac + "15" : T.inp, cursor: "pointer", fontSize: 12, color: euF.teamIds.includes(t.id) ? T.ac : T.txt, fontWeight: euF.teamIds.includes(t.id) ? 600 : 400 }}>
+                        <input type="checkbox" checked={euF.teamIds.includes(t.id)} onChange={() => setEuF(prev => ({ ...prev, teamIds: prev.teamIds.includes(t.id) ? prev.teamIds.filter(x => x !== t.id) : [...prev.teamIds, t.id] }))} style={{ accentColor: T.ac }} />
+                        {t.name}
+                      </label>
+                    ))}
+                  </div>
                 </div>
               )}
               <div style={{ padding: 14, background: T.er + "0A", border: `1px solid ${T.er}25`, borderRadius: 8 }}>
@@ -4161,6 +4307,78 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
                 <button onClick={() => setPipeForm({ ...pipeForm, stages: [...pipeForm.stages, { name: "", color: "#6366f1", is_win: false, is_lost: false }] })}
                   style={{ marginTop: 8, padding: "6px 14px", fontSize: 12, background: "transparent", border: `1px dashed ${T.bor}`, borderRadius: 6, color: T.t2, cursor: "pointer", width: "100%" }}>＋ Adicionar Etapa</button>
               </div>
+
+              {/* AUTOMATIONS - only visible when editing */}
+              {editPipe && (
+                <div>
+                  <label style={{ fontSize: 12, color: T.t2, textTransform: "uppercase", fontWeight: 600, marginBottom: 8, display: "block" }}>⚡ Automações</label>
+
+                  {/* Existing automations */}
+                  {pipeAutomations.map(a => (
+                    <div key={a.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: 10, background: T.bg2, borderRadius: 8, border: `1px solid ${T.bor}`, marginBottom: 8 }}>
+                      <div style={{ flex: 1, fontSize: 12 }}>
+                        <span style={{ fontWeight: 600 }}>Quando chegar em "{a.stage_name}"</span>
+                        <span style={{ color: T.tm }}> → </span>
+                        {a.action_type === "copy_to_pipeline" && <span>Copiar para "{a.target_pipeline_name}" {Number(a.copy_history) ? "(com histórico)" : ""}</span>}
+                        {a.action_type === "create_tasks" && <span>Criar tarefas automáticas</span>}
+                        {a.auto_tasks && (() => { try { const tasks = JSON.parse(a.auto_tasks); return tasks.length > 0 ? <span style={{ color: T.tm }}> ({tasks.length} tarefas)</span> : null; } catch { return null; } })()}
+                      </div>
+                      <button onClick={() => handleDeleteAutomation(a.id)} style={{ background: "none", border: "none", color: T.er, cursor: "pointer", fontSize: 14 }}>✕</button>
+                    </div>
+                  ))}
+
+                  {/* Add automation form */}
+                  <div style={{ padding: 12, background: T.bg2, borderRadius: 8, border: `1px dashed ${T.bor}` }}>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                      <select value={autoForm.trigger_stage_id} onChange={e => setAutoForm({ ...autoForm, trigger_stage_id: e.target.value })}
+                        style={{ flex: 1, minWidth: 140, padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }}>
+                        <option value="">Quando chegar em...</option>
+                        {pipeForm.stages.filter(s => s.id).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                      <select value={autoForm.action_type} onChange={e => setAutoForm({ ...autoForm, action_type: e.target.value })}
+                        style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }}>
+                        <option value="copy_to_pipeline">Copiar para outro funil</option>
+                        <option value="create_tasks">Criar tarefas automáticas</option>
+                      </select>
+                    </div>
+
+                    {autoForm.action_type === "copy_to_pipeline" && (
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                        <select value={autoForm.target_pipeline_id} onChange={e => setAutoForm({ ...autoForm, target_pipeline_id: e.target.value })}
+                          style={{ flex: 1, minWidth: 140, padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }}>
+                          <option value="">Funil destino...</option>
+                          {cfgPipelines.filter(p => p.id !== editPipe?.id).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                        <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: T.t2, cursor: "pointer" }}>
+                          <input type="checkbox" checked={autoForm.copy_history} onChange={e => setAutoForm({ ...autoForm, copy_history: e.target.checked })} /> Copiar histórico
+                        </label>
+                      </div>
+                    )}
+
+                    {/* Auto tasks */}
+                    <div style={{ marginBottom: 8 }}>
+                      <div style={{ fontSize: 11, color: T.t2, fontWeight: 600, marginBottom: 6 }}>Tarefas automáticas:</div>
+                      {autoForm.auto_tasks.map((t, i) => (
+                        <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
+                          <span style={{ fontSize: 12, flex: 1 }}>• {t.title} {t.due_days ? `(prazo: ${t.due_days}d)` : ""}</span>
+                          <button onClick={() => setAutoForm({ ...autoForm, auto_tasks: autoForm.auto_tasks.filter((_, j) => j !== i) })}
+                            style={{ background: "none", border: "none", color: T.er, cursor: "pointer", fontSize: 12 }}>✕</button>
+                        </div>
+                      ))}
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <input value={autoTaskForm.title} onChange={e => setAutoTaskForm({ ...autoTaskForm, title: e.target.value })} placeholder="Título da tarefa"
+                          style={{ flex: 1, padding: "6px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 4, color: T.txt, fontSize: 11, fontFamily: "'DM Sans',sans-serif" }} />
+                        <input value={autoTaskForm.due_days} onChange={e => setAutoTaskForm({ ...autoTaskForm, due_days: e.target.value })} placeholder="Dias" type="number"
+                          style={{ width: 60, padding: "6px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 4, color: T.txt, fontSize: 11 }} />
+                        <button onClick={() => { if (autoTaskForm.title) { setAutoForm({ ...autoForm, auto_tasks: [...autoForm.auto_tasks, { title: autoTaskForm.title, due_days: parseInt(autoTaskForm.due_days) || null }] }); setAutoTaskForm({ title: "", due_days: "" }); } }}
+                          style={{ padding: "4px 8px", background: T.ac + "22", border: `1px solid ${T.ac}40`, borderRadius: 4, color: T.ac, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>＋</button>
+                      </div>
+                    </div>
+
+                    <Btn sm onClick={handleAddAutomation} disabled={!autoForm.trigger_stage_id || (autoForm.action_type === "copy_to_pipeline" && !autoForm.target_pipeline_id)}>Adicionar Automação</Btn>
+                  </div>
+                </div>
+              )}
             </div>
           </Modal>
         </div>
