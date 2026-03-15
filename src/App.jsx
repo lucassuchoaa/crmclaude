@@ -3182,277 +3182,388 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
   );
 }
 
-// ===== BI / ANALYTICS =====
-const BI_WIDGETS = [
-  { id: "overview", label: "Resumo Geral", icon: "📊", wide: false },
-  { id: "by_owner", label: "Ranking por Responsável", icon: "👤", wide: false },
-  { id: "by_stage", label: "Deals por Etapa", icon: "🔄", wide: false },
-  { id: "loss_reasons", label: "Motivos de Perda", icon: "❌", wide: false },
-  { id: "activity_ranking", label: "Ranking de Atividades", icon: "⚡", wide: false },
-  { id: "timeline", label: "Evolução no Tempo", icon: "📈", wide: true },
+// ===== BI / ANALYTICS - Dashboard Builder =====
+const BI_METRICS = [
+  { id: "overview", label: "Resumo Geral", desc: "Cards com totais, ganhos, perdidos, taxa de conversão" },
+  { id: "by_owner", label: "Por Responsável", desc: "Ranking de quem criou/ganhou mais oportunidades" },
+  { id: "by_stage", label: "Por Etapa", desc: "Distribuição de deals por etapa do funil" },
+  { id: "loss_reasons", label: "Motivos de Perda", desc: "Análise dos motivos de perda de negociações" },
+  { id: "activity_ranking", label: "Atividades", desc: "Ranking de atividades por pessoa" },
+  { id: "timeline", label: "Evolução Temporal", desc: "Deals criados ao longo do tempo" },
 ];
+const BI_CHART_TYPES = [
+  { id: "bar", label: "Barras", icon: "▐" },
+  { id: "horizontal_bar", label: "Barras Horizontais", icon: "▬" },
+  { id: "cards", label: "Cards", icon: "▦" },
+  { id: "table", label: "Tabela", icon: "▤" },
+  { id: "donut", label: "Rosca", icon: "◉" },
+];
+const BI_COLORS = ["#f97316", "#22c55e", "#3b82f6", "#8b5cf6", "#ef4444", "#14b8a6", "#f59e0b", "#ec4899"];
 
 function BIPage({ users, selectedTeam, myTeams }) {
   const { user } = useAuth();
   const [pipelines, setPipelines] = useState([]);
-  const [selPipeline, setSelPipeline] = useState("");
-  const [period, setPeriod] = useState("30");
-  const [overview, setOverview] = useState(null);
-  const [byOwner, setByOwner] = useState([]);
-  const [byStage, setByStage] = useState([]);
-  const [lossReasons, setLossReasons] = useState([]);
-  const [timeline, setTimeline] = useState([]);
-  const [actRanking, setActRanking] = useState([]);
+  const [allData, setAllData] = useState({});
   const [loading, setLoading] = useState(true);
 
-  // Custom views system
-  const storageKey = `bi_views_${user.id}`;
-  const [savedViews, setSavedViews] = useState(() => {
+  // Dashboard builder
+  const storageKey = `bi_dashboards_${user.id}`;
+  const [dashboards, setDashboards] = useState(() => {
     try { return JSON.parse(localStorage.getItem(storageKey)) || []; } catch { return []; }
   });
-  const [activeWidgets, setActiveWidgets] = useState(() => BI_WIDGETS.map(w => w.id));
-  const [showViewConfig, setShowViewConfig] = useState(false);
-  const [viewName, setViewName] = useState("");
-  const [selectedView, setSelectedView] = useState("");
+  const [activeDash, setActiveDash] = useState(null);
+  const [showBuilder, setShowBuilder] = useState(false);
+  const [dashName, setDashName] = useState("");
+  const [widgetModal, setWidgetModal] = useState(false);
+  const [editWidgetIdx, setEditWidgetIdx] = useState(null);
+  const [wForm, setWForm] = useState({ metric: "overview", chart: "cards", title: "", color: "#f97316", pipeline: "", period: "30", size: "half" });
 
-  useEffect(() => { pipelinesApi.getAll().then(r => { setPipelines(r.data); if (r.data.length > 0) setSelPipeline(r.data[0].id); }).catch(() => {}); }, []);
+  useEffect(() => { pipelinesApi.getAll().then(r => { setPipelines(r.data); }).catch(() => {}); }, []);
 
-  const loadBI = useCallback(async () => {
-    if (!selPipeline) return;
-    setLoading(true);
-    const params = { pipeline_id: selPipeline, days: period };
+  const loadData = useCallback(async (pipelineId, period) => {
+    const key = `${pipelineId}_${period}`;
+    if (allData[key]) return allData[key];
+    const params = { pipeline_id: pipelineId, days: period };
     try {
       const [ov, bo, bs, lr, tl, ar] = await Promise.all([
         pipelinesApi.biOverview(params), pipelinesApi.biByOwner(params), pipelinesApi.biByStage(params),
         pipelinesApi.biLossReasons(params), pipelinesApi.biTimeline(params), pipelinesApi.biActivityRanking(params),
       ]);
-      setOverview(ov.data); setByOwner(bo.data); setByStage(bs.data);
-      setLossReasons(lr.data); setTimeline(tl.data); setActRanking(ar.data);
-    } catch (e) { console.error(e); }
-    setLoading(false);
-  }, [selPipeline, period]);
+      const d = { overview: ov.data, by_owner: bo.data, by_stage: bs.data, loss_reasons: lr.data, timeline: tl.data, activity_ranking: ar.data };
+      setAllData(prev => ({ ...prev, [key]: d }));
+      return d;
+    } catch (e) { console.error(e); return null; }
+  }, [allData]);
 
-  useEffect(() => { loadBI(); }, [loadBI]);
+  // Load data for all widgets in active dashboard
+  useEffect(() => {
+    if (!activeDash || pipelines.length === 0) { setLoading(false); return; }
+    setLoading(true);
+    const needed = new Set();
+    activeDash.widgets.forEach(w => {
+      const pid = w.pipeline || pipelines[0]?.id;
+      if (pid) needed.add(`${pid}_${w.period || "30"}`);
+    });
+    Promise.all([...needed].map(k => { const [pid, per] = k.split("_"); return loadData(pid, per); }))
+      .finally(() => setLoading(false));
+  }, [activeDash, pipelines]);
 
-  const saveView = () => {
-    if (!viewName.trim()) return;
-    const newView = { id: Date.now().toString(), name: viewName, widgets: [...activeWidgets], pipeline: selPipeline, period };
-    const updated = [...savedViews, newView];
-    setSavedViews(updated);
-    localStorage.setItem(storageKey, JSON.stringify(updated));
-    setViewName("");
-    setSelectedView(newView.id);
+  const saveDashboards = (list) => { setDashboards(list); localStorage.setItem(storageKey, JSON.stringify(list)); };
+
+  const createDashboard = () => {
+    if (!dashName.trim()) return;
+    const d = { id: Date.now().toString(), name: dashName, widgets: [] };
+    const updated = [...dashboards, d];
+    saveDashboards(updated);
+    setActiveDash(d);
+    setDashName("");
+    setShowBuilder(true);
   };
 
-  const loadView = (viewId) => {
-    const view = savedViews.find(v => v.id === viewId);
-    if (!view) { setSelectedView(""); setActiveWidgets(BI_WIDGETS.map(w => w.id)); return; }
-    setSelectedView(viewId);
-    setActiveWidgets(view.widgets);
-    if (view.pipeline && pipelines.find(p => p.id === view.pipeline)) setSelPipeline(view.pipeline);
-    if (view.period) setPeriod(view.period);
+  const deleteDashboard = (id) => {
+    if (!confirm("Excluir este dashboard?")) return;
+    const updated = dashboards.filter(d => d.id !== id);
+    saveDashboards(updated);
+    if (activeDash?.id === id) setActiveDash(null);
   };
 
-  const deleteView = (viewId) => {
-    const updated = savedViews.filter(v => v.id !== viewId);
-    setSavedViews(updated);
-    localStorage.setItem(storageKey, JSON.stringify(updated));
-    if (selectedView === viewId) { setSelectedView(""); setActiveWidgets(BI_WIDGETS.map(w => w.id)); }
+  const addWidget = () => {
+    if (!activeDash) return;
+    const widget = { ...wForm, title: wForm.title || BI_METRICS.find(m => m.id === wForm.metric)?.label || "Widget" };
+    let updated;
+    if (editWidgetIdx !== null) {
+      const ws = [...activeDash.widgets]; ws[editWidgetIdx] = widget; updated = { ...activeDash, widgets: ws };
+    } else {
+      updated = { ...activeDash, widgets: [...activeDash.widgets, widget] };
+    }
+    setActiveDash(updated);
+    saveDashboards(dashboards.map(d => d.id === updated.id ? updated : d));
+    setWidgetModal(false);
+    setEditWidgetIdx(null);
+    setWForm({ metric: "overview", chart: "cards", title: "", color: "#f97316", pipeline: "", period: "30", size: "half" });
   };
 
-  const toggleWidget = (wId) => {
-    setActiveWidgets(prev => prev.includes(wId) ? prev.filter(id => id !== wId) : [...prev, wId]);
+  const removeWidget = (idx) => {
+    const updated = { ...activeDash, widgets: activeDash.widgets.filter((_, i) => i !== idx) };
+    setActiveDash(updated);
+    saveDashboards(dashboards.map(d => d.id === updated.id ? updated : d));
+  };
+
+  const moveWidget = (idx, dir) => {
+    const ws = [...activeDash.widgets];
+    const ni = idx + dir;
+    if (ni < 0 || ni >= ws.length) return;
+    [ws[idx], ws[ni]] = [ws[ni], ws[idx]];
+    const updated = { ...activeDash, widgets: ws };
+    setActiveDash(updated);
+    saveDashboards(dashboards.map(d => d.id === updated.id ? updated : d));
   };
 
   const maxBar = (arr, key) => Math.max(...arr.map(a => Number(a[key]) || 0), 1);
 
-  if (loading && !overview) return <div style={{ padding: 40, textAlign: "center", color: T.tm }}>Carregando dados...</div>;
+  const selS = { padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12, fontFamily: "'DM Sans',sans-serif" };
 
-  const isActive = (wId) => activeWidgets.includes(wId);
+  // Render a single widget
+  const renderWidget = (w, idx) => {
+    const pid = w.pipeline || pipelines[0]?.id;
+    const data = allData[`${pid}_${w.period || "30"}`];
+    if (!data) return <div key={idx} style={{ padding: 20, textAlign: "center", color: T.tm, fontSize: 12 }}>Carregando...</div>;
+    const wColor = w.color || T.ac;
 
+    const cardStyle = { background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 16, position: "relative", gridColumn: w.size === "full" ? "1 / -1" : undefined };
+    const headerStyle = { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 };
+
+    const widgetHeader = (title) => (
+      <div style={headerStyle}>
+        <h4 style={{ fontSize: 13, fontWeight: 700, margin: 0 }}>{title}</h4>
+        {showBuilder && (
+          <div style={{ display: "flex", gap: 4 }}>
+            <button onClick={() => moveWidget(idx, -1)} style={{ background: "none", border: "none", color: T.tm, cursor: "pointer", fontSize: 11 }}>&#9650;</button>
+            <button onClick={() => moveWidget(idx, 1)} style={{ background: "none", border: "none", color: T.tm, cursor: "pointer", fontSize: 11 }}>&#9660;</button>
+            <button onClick={() => { setEditWidgetIdx(idx); setWForm({ ...w }); setWidgetModal(true); }} style={{ background: "none", border: "none", color: T.ac, cursor: "pointer", fontSize: 11 }}>Editar</button>
+            <button onClick={() => removeWidget(idx)} style={{ background: "none", border: "none", color: T.er, cursor: "pointer", fontSize: 11 }}>Remover</button>
+          </div>
+        )}
+      </div>
+    );
+
+    const pName = pipelines.find(p => p.id === pid)?.name || "";
+    const subLabel = <div style={{ fontSize: 10, color: T.tm, marginBottom: 8 }}>{pName} · {w.period || 30} dias</div>;
+
+    // Overview - cards
+    if (w.metric === "overview") {
+      const ov = data.overview;
+      if (!ov) return null;
+      const items = [
+        { l: "Total Deals", v: ov.total_deals, c: T.ac }, { l: "Ganhos", v: ov.won_deals, c: T.ok },
+        { l: "Perdidos", v: ov.lost_deals, c: T.er }, { l: "Em Aberto", v: ov.open_deals, c: T.inf },
+        { l: "Colaboradores", v: ov.total_employees || 0, c: "#8b5cf6" },
+        { l: "Conversão", v: `${Number(ov.win_rate || 0).toFixed(1)}%`, c: T.ok },
+      ];
+      if (w.chart === "table") {
+        return <div key={idx} style={cardStyle}>{widgetHeader(w.title)}{subLabel}
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <tbody>{items.map((it, i) => <tr key={i}><td style={{ padding: "6px 0", fontSize: 13, borderBottom: `1px solid ${T.bor}` }}>{it.l}</td><td style={{ padding: "6px 0", fontSize: 15, fontWeight: 700, color: it.c, textAlign: "right", borderBottom: `1px solid ${T.bor}` }}>{it.v}</td></tr>)}</tbody>
+          </table></div>;
+      }
+      return <div key={idx} style={cardStyle}>{widgetHeader(w.title)}{subLabel}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8 }}>
+          {items.map((c, i) => <div key={i} style={{ padding: 10, background: c.c + "11", borderRadius: 8, borderLeft: `3px solid ${c.c}` }}>
+            <div style={{ fontSize: 10, color: T.tm, marginBottom: 2 }}>{c.l}</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: c.c }}>{c.v}</div>
+          </div>)}
+        </div></div>;
+    }
+
+    // Bar/horizontal data renderers
+    const renderBarChart = (arr, labelKey, valueKey, secondaryInfo) => {
+      if (!arr || arr.length === 0) return <div style={{ color: T.tm, fontSize: 12 }}>Sem dados</div>;
+      const mx = maxBar(arr, valueKey);
+      if (w.chart === "table") {
+        return <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr>{[labelKey === "owner_name" ? "Responsável" : labelKey === "stage_name" ? "Etapa" : labelKey === "loss_reason" ? "Motivo" : "Nome", "Valor", "Info"].map(h => <th key={h} style={{ textAlign: "left", padding: "6px 8px", fontSize: 10, color: T.tm, borderBottom: `1px solid ${T.bor}`, textTransform: "uppercase" }}>{h}</th>)}</tr></thead>
+          <tbody>{arr.map((item, i) => <tr key={i}><td style={{ padding: "6px 8px", fontSize: 13, borderBottom: `1px solid ${T.bor}` }}>{item[labelKey] || "N/A"}</td><td style={{ padding: "6px 8px", fontSize: 13, fontWeight: 700, borderBottom: `1px solid ${T.bor}`, color: wColor }}>{item[valueKey]}</td><td style={{ padding: "6px 8px", fontSize: 11, color: T.tm, borderBottom: `1px solid ${T.bor}` }}>{secondaryInfo?.(item) || ""}</td></tr>)}</tbody>
+        </table>;
+      }
+      if (w.chart === "donut") {
+        const total = arr.reduce((s, a) => s + (Number(a[valueKey]) || 0), 0) || 1;
+        let acc = 0;
+        const segs = arr.map((item, i) => {
+          const pct = (Number(item[valueKey]) || 0) / total;
+          const start = acc; acc += pct;
+          return { ...item, pct, start, color: BI_COLORS[i % BI_COLORS.length] };
+        });
+        const svgSize = 140;
+        return <div style={{ display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
+          <svg width={svgSize} height={svgSize} viewBox="0 0 100 100">
+            {segs.map((seg, i) => {
+              const r = 40, cx = 50, cy = 50;
+              const startA = seg.start * 2 * Math.PI - Math.PI / 2;
+              const endA = (seg.start + seg.pct) * 2 * Math.PI - Math.PI / 2;
+              const large = seg.pct > 0.5 ? 1 : 0;
+              const x1 = cx + r * Math.cos(startA), y1 = cy + r * Math.sin(startA);
+              const x2 = cx + r * Math.cos(endA), y2 = cy + r * Math.sin(endA);
+              if (seg.pct < 0.005) return null;
+              return <path key={i} d={`M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${large} 1 ${x2},${y2} Z`} fill={seg.color} stroke={T.card} strokeWidth="0.5" />;
+            })}
+            <circle cx="50" cy="50" r="22" fill={T.card} />
+            <text x="50" y="52" textAnchor="middle" fill={T.txt} fontSize="10" fontWeight="700">{total}</text>
+          </svg>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {segs.map((seg, i) => <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+              <div style={{ width: 10, height: 10, borderRadius: 2, background: seg.color, flexShrink: 0 }} />
+              <span>{seg[labelKey] || "N/A"}</span>
+              <span style={{ color: T.tm, marginLeft: "auto" }}>{seg[valueKey]} ({(seg.pct * 100).toFixed(0)}%)</span>
+            </div>)}
+          </div>
+        </div>;
+      }
+      if (w.chart === "bar") {
+        return <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 160 }}>
+          {arr.map((item, i) => <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
+            <div style={{ fontSize: 10, color: T.tm, marginBottom: 2 }}>{item[valueKey]}</div>
+            <div style={{ width: "100%", maxWidth: 40, background: BI_COLORS[i % BI_COLORS.length], borderRadius: "4px 4px 0 0", height: `${(Number(item[valueKey]) / mx) * 140}px`, minHeight: 2 }} />
+            <div style={{ fontSize: 9, color: T.tm, marginTop: 4, textAlign: "center", maxWidth: 60, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(item[labelKey] || "N/A").split(" ")[0]}</div>
+          </div>)}
+        </div>;
+      }
+      // horizontal_bar (default)
+      return arr.map((item, i) => <div key={i} style={{ marginBottom: 8 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 3 }}>
+          <span style={{ fontWeight: 600 }}>{item[labelKey] || "N/A"}</span>
+          <span style={{ color: T.tm }}>{item[valueKey]} {secondaryInfo?.(item) || ""}</span>
+        </div>
+        <div style={{ height: 8, background: T.bg2, borderRadius: 4, overflow: "hidden" }}>
+          <div style={{ height: "100%", width: `${(Number(item[valueKey]) / mx) * 100}%`, background: BI_COLORS[i % BI_COLORS.length], borderRadius: 4 }} />
+        </div>
+      </div>);
+    };
+
+    if (w.metric === "by_owner") {
+      return <div key={idx} style={cardStyle}>{widgetHeader(w.title)}{subLabel}
+        {renderBarChart(data.by_owner, "owner_name", "total_deals", o => `${o.won_deals} ganhos · ${o.total_employees || 0} colab.`)}
+      </div>;
+    }
+    if (w.metric === "by_stage") {
+      return <div key={idx} style={cardStyle}>{widgetHeader(w.title)}{subLabel}
+        {renderBarChart(data.by_stage, "stage_name", "deal_count", s => `${s.total_employees || 0} colab. · ${Number(s.avg_days_in_stage || 0).toFixed(0)}d média`)}
+      </div>;
+    }
+    if (w.metric === "loss_reasons") {
+      return <div key={idx} style={cardStyle}>{widgetHeader(w.title)}{subLabel}
+        {renderBarChart(data.loss_reasons, "loss_reason", "count", lr => `(${Number(lr.percentage || 0).toFixed(1)}%)`)}
+      </div>;
+    }
+    if (w.metric === "activity_ranking") {
+      return <div key={idx} style={cardStyle}>{widgetHeader(w.title)}{subLabel}
+        {renderBarChart(data.activity_ranking, "owner_name", "total_activities", a => `${a.calls || 0} lig. · ${a.meetings || 0} reuniões`)}
+      </div>;
+    }
+    if (w.metric === "timeline") {
+      return <div key={idx} style={cardStyle}>{widgetHeader(w.title)}{subLabel}
+        {renderBarChart(data.timeline, "period", "deals_created")}
+      </div>;
+    }
+    return null;
+  };
+
+  // Main render
   return (
     <div>
-      {/* Filters + View controls */}
-      <div style={{ display: "flex", gap: 12, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
-        <select value={selPipeline} onChange={e => setSelPipeline(e.target.value)} style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 8, color: T.txt, fontSize: 13, fontFamily: "'DM Sans',sans-serif" }}>
-          {pipelines.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
-        <select value={period} onChange={e => setPeriod(e.target.value)} style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 8, color: T.txt, fontSize: 13, fontFamily: "'DM Sans',sans-serif" }}>
-          {[["7", "7 dias"], ["15", "15 dias"], ["30", "30 dias"], ["60", "60 dias"], ["90", "90 dias"], ["180", "6 meses"], ["365", "1 ano"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
-        <Btn sm onClick={loadBI}>Atualizar</Btn>
-        <div style={{ flex: 1 }} />
-        {savedViews.length > 0 && (
-          <select value={selectedView} onChange={e => loadView(e.target.value)} style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 8, color: T.txt, fontSize: 13, fontFamily: "'DM Sans',sans-serif" }}>
-            <option value="">Todas as visões</option>
-            {savedViews.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-          </select>
-        )}
-        <Btn sm v="secondary" onClick={() => setShowViewConfig(!showViewConfig)}>Personalizar</Btn>
-      </div>
-
-      {/* View configuration panel */}
-      {showViewConfig && (
-        <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 16, marginBottom: 16 }}>
-          <h4 style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Personalizar Visão</h4>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-            {BI_WIDGETS.map(w => (
-              <button key={w.id} onClick={() => toggleWidget(w.id)}
-                style={{ padding: "6px 12px", fontSize: 12, border: `1px solid ${isActive(w.id) ? T.ac : T.bor}`, background: isActive(w.id) ? T.ac + "22" : "transparent", color: isActive(w.id) ? T.ac : T.tm, borderRadius: 6, cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
-                {w.icon} {w.label}
-              </button>
-            ))}
-          </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <input value={viewName} onChange={e => setViewName(e.target.value)} placeholder="Nome da visão..."
-              style={{ flex: 1, maxWidth: 250, padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12, fontFamily: "'DM Sans',sans-serif" }}
-              onKeyDown={e => e.key === "Enter" && saveView()} />
-            <Btn sm onClick={saveView} disabled={!viewName.trim()}>Salvar Visão</Btn>
-            {selectedView && <Btn sm v="danger" onClick={() => deleteView(selectedView)}>Excluir Visão</Btn>}
-          </div>
-          {savedViews.length > 0 && (
-            <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {savedViews.map(v => (
-                <div key={v.id} style={{ display: "flex", gap: 4, alignItems: "center", padding: "4px 10px", background: selectedView === v.id ? T.ac + "22" : T.bg2, border: `1px solid ${selectedView === v.id ? T.ac : T.bor}`, borderRadius: 6 }}>
-                  <button onClick={() => loadView(v.id)} style={{ background: "none", border: "none", color: T.txt, cursor: "pointer", fontSize: 12, fontFamily: "'DM Sans',sans-serif" }}>{v.name}</button>
-                  <button onClick={() => deleteView(v.id)} style={{ background: "none", border: "none", color: T.er, cursor: "pointer", fontSize: 11 }}>✕</button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Overview cards */}
-      {isActive("overview") && overview && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 24 }}>
-          {[
-            { l: "Total Deals", v: overview.total_deals, c: T.ac },
-            { l: "Ganhos", v: overview.won_deals, c: T.ok },
-            { l: "Perdidos", v: overview.lost_deals, c: T.er },
-            { l: "Em Aberto", v: overview.open_deals, c: T.inf },
-            { l: "Total Colaboradores", v: overview.total_employees || 0, c: "#8b5cf6" },
-            { l: "Taxa Conversão", v: `${Number(overview.win_rate || 0).toFixed(1)}%`, c: T.ok },
-          ].map((c, i) => (
-            <div key={i} style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 16 }}>
-              <div style={{ fontSize: 11, color: T.tm, fontWeight: 600, textTransform: "uppercase", marginBottom: 6 }}>{c.l}</div>
-              <div style={{ fontSize: 24, fontWeight: 700, color: c.c }}>{c.v}</div>
-            </div>
+      {/* Dashboard selector + controls */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", flex: 1 }}>
+          {dashboards.map(d => (
+            <button key={d.id} onClick={() => { setActiveDash(d); setShowBuilder(false); }}
+              style={{ padding: "8px 16px", fontSize: 13, fontWeight: activeDash?.id === d.id ? 700 : 500, border: `1px solid ${activeDash?.id === d.id ? T.ac : T.bor}`, background: activeDash?.id === d.id ? T.ac + "15" : T.card, color: activeDash?.id === d.id ? T.ac : T.txt, borderRadius: 8, cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+              {d.name} <span style={{ fontSize: 10, color: T.tm }}>({d.widgets.length})</span>
+            </button>
           ))}
         </div>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <input value={dashName} onChange={e => setDashName(e.target.value)} placeholder="Nome do dashboard..."
+            style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12, fontFamily: "'DM Sans',sans-serif", width: 180 }}
+            onKeyDown={e => e.key === "Enter" && createDashboard()} />
+          <Btn sm onClick={createDashboard} disabled={!dashName.trim()}>Criar Dashboard</Btn>
+        </div>
+      </div>
+
+      {/* No dashboard selected */}
+      {!activeDash && (
+        <div style={{ padding: 60, textAlign: "center" }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>📊</div>
+          <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Monte seu Dashboard</h3>
+          <p style={{ color: T.tm, fontSize: 13, maxWidth: 400, margin: "0 auto" }}>
+            Crie um dashboard e adicione os widgets que quiser: escolha a métrica, o tipo de gráfico, o funil e o período.
+            Cada visão é salva automaticamente.
+          </p>
+        </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(400px, 1fr))", gap: 16 }}>
-        {/* By Owner - ranking */}
-        {isActive("by_owner") && (
-        <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>Ranking por Responsável</h3>
-          {byOwner.length === 0 && <div style={{ color: T.tm, fontSize: 13 }}>Sem dados</div>}
-          {byOwner.map((o, i) => {
-            const mx = maxBar(byOwner, "total_deals");
-            return (
-              <div key={i} style={{ marginBottom: 10 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
-                  <span style={{ fontWeight: 600 }}>{o.owner_name || "Sem responsável"}</span>
-                  <span>{o.total_deals} deals · {o.won_deals} ganhos · {o.total_employees || 0} colab.</span>
-                </div>
-                <div style={{ height: 8, background: T.bg2, borderRadius: 4, overflow: "hidden" }}>
-                  <div style={{ height: "100%", width: `${(Number(o.total_deals) / mx) * 100}%`, background: T.ac, borderRadius: 4 }} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        )}
+      {/* Active dashboard */}
+      {activeDash && (
+        <div>
+          {/* Dashboard header */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 16 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>{activeDash.name}</h3>
+            <div style={{ flex: 1 }} />
+            <Btn sm v={showBuilder ? "primary" : "secondary"} onClick={() => setShowBuilder(!showBuilder)}>
+              {showBuilder ? "Concluir Edição" : "Editar Dashboard"}
+            </Btn>
+            {showBuilder && <Btn sm onClick={() => { setEditWidgetIdx(null); setWForm({ metric: "overview", chart: "cards", title: "", color: "#f97316", pipeline: "", period: "30", size: "half" }); setWidgetModal(true); }}>+ Adicionar Widget</Btn>}
+            {showBuilder && <Btn sm v="danger" onClick={() => deleteDashboard(activeDash.id)}>Excluir</Btn>}
+          </div>
 
-        {/* By Stage - funnel */}
-        {isActive("by_stage") && (
-        <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>Deals por Etapa</h3>
-          {byStage.length === 0 && <div style={{ color: T.tm, fontSize: 13 }}>Sem dados</div>}
-          {byStage.map((s, i) => {
-            const mx = maxBar(byStage, "deal_count");
-            return (
-              <div key={i} style={{ marginBottom: 10 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
-                  <span style={{ fontWeight: 600 }}>{s.stage_name}</span>
-                  <span>{s.deal_count} deals · {s.total_employees || 0} colab. · Média {Number(s.avg_days_in_stage || 0).toFixed(0)}d</span>
-                </div>
-                <div style={{ height: 8, background: T.bg2, borderRadius: 4, overflow: "hidden" }}>
-                  <div style={{ height: "100%", width: `${(Number(s.deal_count) / mx) * 100}%`, background: s.stage_color || T.ac, borderRadius: 4 }} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        )}
+          {loading && <div style={{ padding: 20, textAlign: "center", color: T.tm }}>Carregando dados...</div>}
 
-        {/* Loss Reasons */}
-        {isActive("loss_reasons") && (
-        <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>Motivos de Perda</h3>
-          {lossReasons.length === 0 && <div style={{ color: T.tm, fontSize: 13 }}>Sem dados</div>}
-          {lossReasons.map((lr, i) => {
-            const mx = maxBar(lossReasons, "count");
-            return (
-              <div key={i} style={{ marginBottom: 10 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
-                  <span style={{ fontWeight: 600 }}>{lr.loss_reason || "Não informado"}</span>
-                  <span>{lr.count} ({Number(lr.percentage || 0).toFixed(1)}%)</span>
+          {/* Widgets grid */}
+          {!loading && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))", gap: 14 }}>
+              {activeDash.widgets.map((w, idx) => renderWidget(w, idx))}
+              {activeDash.widgets.length === 0 && showBuilder && (
+                <div style={{ padding: 40, textAlign: "center", color: T.tm, gridColumn: "1 / -1", border: `2px dashed ${T.bor}`, borderRadius: 10 }}>
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>+</div>
+                  <div style={{ fontSize: 13 }}>Clique em "Adicionar Widget" para montar seu dashboard</div>
                 </div>
-                <div style={{ height: 8, background: T.bg2, borderRadius: 4, overflow: "hidden" }}>
-                  <div style={{ height: "100%", width: `${(Number(lr.count) / mx) * 100}%`, background: T.er, borderRadius: 4 }} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        )}
-
-        {/* Activity Ranking */}
-        {isActive("activity_ranking") && (
-        <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>Ranking de Atividades</h3>
-          {actRanking.length === 0 && <div style={{ color: T.tm, fontSize: 13 }}>Sem dados</div>}
-          {actRanking.map((a, i) => {
-            const mx = maxBar(actRanking, "total_activities");
-            return (
-              <div key={i} style={{ marginBottom: 10 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
-                  <span style={{ fontWeight: 600 }}>{a.owner_name || "Sem responsável"}</span>
-                  <span>{a.total_activities} atividades · {a.calls || 0} ligações · {a.meetings || 0} reuniões</span>
-                </div>
-                <div style={{ height: 8, background: T.bg2, borderRadius: 4, overflow: "hidden" }}>
-                  <div style={{ height: "100%", width: `${(Number(a.total_activities) / mx) * 100}%`, background: "#8b5cf6", borderRadius: 4 }} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        )}
-
-        {/* Timeline */}
-        {isActive("timeline") && (
-        <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20, gridColumn: "1 / -1" }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>Evolução no Tempo</h3>
-          {timeline.length === 0 && <div style={{ color: T.tm, fontSize: 13 }}>Sem dados</div>}
-          {timeline.length > 0 && (
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 160 }}>
-              {(() => {
-                const mx = maxBar(timeline, "deals_created");
-                return timeline.map((t, i) => (
-                  <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
-                    <div style={{ fontSize: 10, color: T.tm, marginBottom: 4 }}>{t.deals_created}</div>
-                    <div style={{ width: "100%", maxWidth: 40, background: T.ac, borderRadius: "4px 4px 0 0", height: `${(Number(t.deals_created) / mx) * 140}px`, minHeight: 2 }} />
-                    <div style={{ fontSize: 9, color: T.tm, marginTop: 4, textAlign: "center" }}>{t.period?.slice(5) || ""}</div>
-                  </div>
-                ));
-              })()}
+              )}
             </div>
           )}
         </div>
-        )}
-      </div>
+      )}
+
+      {/* Widget creation/edit modal */}
+      <Modal open={widgetModal} onClose={() => { setWidgetModal(false); setEditWidgetIdx(null); }} title={editWidgetIdx !== null ? "Editar Widget" : "Novo Widget"} footer={<Btn onClick={addWidget}>Salvar Widget</Btn>}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <Inp label="Título (opcional)" value={wForm.title} onChange={v => setWForm({ ...wForm, title: v })} placeholder="Ex: Ranking da minha equipe" />
+
+          <div className="input-group">
+            <label style={{ fontSize: 12, color: T.t2, textTransform: "uppercase", fontWeight: 600, marginBottom: 6 }}>Métrica / Dados</label>
+            <select value={wForm.metric} onChange={e => setWForm({ ...wForm, metric: e.target.value })} style={selS}>
+              {BI_METRICS.map(m => <option key={m.id} value={m.id}>{m.label} — {m.desc}</option>)}
+            </select>
+          </div>
+
+          <div className="input-group">
+            <label style={{ fontSize: 12, color: T.t2, textTransform: "uppercase", fontWeight: 600, marginBottom: 6 }}>Tipo de Visualização</label>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {BI_CHART_TYPES.map(ct => (
+                <button key={ct.id} onClick={() => setWForm({ ...wForm, chart: ct.id })}
+                  style={{ padding: "8px 14px", fontSize: 12, border: `1px solid ${wForm.chart === ct.id ? T.ac : T.bor}`, background: wForm.chart === ct.id ? T.ac + "22" : "transparent", color: wForm.chart === ct.id ? T.ac : T.tm, borderRadius: 6, cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+                  {ct.icon} {ct.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 12 }}>
+            <div className="input-group" style={{ flex: 1 }}>
+              <label style={{ fontSize: 12, color: T.t2, textTransform: "uppercase", fontWeight: 600, marginBottom: 6 }}>Funil</label>
+              <select value={wForm.pipeline} onChange={e => setWForm({ ...wForm, pipeline: e.target.value })} style={selS}>
+                <option value="">Primeiro funil</option>
+                {pipelines.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+            <div className="input-group" style={{ flex: 1 }}>
+              <label style={{ fontSize: 12, color: T.t2, textTransform: "uppercase", fontWeight: 600, marginBottom: 6 }}>Período</label>
+              <select value={wForm.period} onChange={e => setWForm({ ...wForm, period: e.target.value })} style={selS}>
+                {[["7", "7 dias"], ["15", "15 dias"], ["30", "30 dias"], ["60", "60 dias"], ["90", "90 dias"], ["180", "6 meses"], ["365", "1 ano"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div className="input-group">
+            <label style={{ fontSize: 12, color: T.t2, textTransform: "uppercase", fontWeight: 600, marginBottom: 6 }}>Tamanho</label>
+            <div style={{ display: "flex", gap: 6 }}>
+              {[["half", "Metade"], ["full", "Largura Total"]].map(([v, l]) => (
+                <button key={v} onClick={() => setWForm({ ...wForm, size: v })}
+                  style={{ padding: "6px 14px", fontSize: 12, border: `1px solid ${wForm.size === v ? T.ac : T.bor}`, background: wForm.size === v ? T.ac + "22" : "transparent", color: wForm.size === v ? T.ac : T.tm, borderRadius: 6, cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>
+                  {l}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
