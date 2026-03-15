@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback } from "react";
-import { authApi, usersApi, indicationsApi, commissionsApi, nfesApi, materialsApi, notificationsApi, hubspotApi, groupsApi, cnpjAgentApi, diretoriaApi, whatsappApi, conveniosApi, pipelinesApi, dealsApi, teamsApi, setTokens, clearTokens } from "./services/api";
+import { authApi, usersApi, indicationsApi, commissionsApi, nfesApi, materialsApi, notificationsApi, hubspotApi, groupsApi, cnpjAgentApi, diretoriaApi, whatsappApi, conveniosApi, pipelinesApi, dealsApi, teamsApi, productsApi, setTokens, clearTokens } from "./services/api";
 import { useBreakpoint } from "./hooks/useBreakpoint";
 
 const AuthCtx = createContext(null);
@@ -2671,7 +2671,8 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
   const [showDealModal, setShowDealModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedDeal, setSelectedDeal] = useState(null);
-  const [dealForm, setDealForm] = useState({ title: "", company: "", value: "", priority: "medium", contact_name: "", contact_phone: "", contact_email: "", notes: "", cnpj: "" });
+  const [dealForm, setDealForm] = useState({ title: "", company: "", value: "", num_employees: "", priority: "medium", contact_name: "", contact_phone: "", contact_email: "", notes: "", cnpj: "", product_id: "" });
+  const [products, setProducts] = useState([]);
   const [cnpjLoading, setCnpjLoading] = useState(false);
   const [cnpjData, setCnpjData] = useState(null);
   const [contacts, setContacts] = useState([]);
@@ -2691,6 +2692,7 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
       if (r.data.length > 0) setSelectedPipeline(r.data[0]);
       else setSelectedPipeline(null);
     }).catch(() => {}).finally(() => setLoading(false));
+    productsApi.getAll().then(r => setProducts(r.data)).catch(() => {});
   }, [selectedTeam]);
 
   useEffect(() => {
@@ -2732,6 +2734,7 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
         company: d.nome_fantasia || d.razao_social || prev.company,
         contact_phone: d.telefone || prev.contact_phone,
         contact_email: d.email || prev.contact_email,
+        num_employees: d.num_funcionarios || prev.num_employees,
       }));
     } catch (e) { console.error("CNPJ lookup error:", e); }
     setCnpjLoading(false);
@@ -2748,11 +2751,11 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
   const handleCreateDeal = async () => {
     if (!dealForm.title || !selectedPipeline) return;
     try {
-      await pipelinesApi.createDeal(selectedPipeline.id, { ...dealForm, value: parseFloat(dealForm.value) || 0 });
+      await pipelinesApi.createDeal(selectedPipeline.id, { ...dealForm, value: parseFloat(dealForm.value) || 0, num_employees: parseInt(dealForm.num_employees) || null, product_id: dealForm.product_id || null });
       const r = await pipelinesApi.getDeals(selectedPipeline.id);
       setDeals(r.data);
       setShowDealModal(false);
-      setDealForm({ title: "", company: "", value: "", priority: "medium", contact_name: "", contact_phone: "", contact_email: "", notes: "", cnpj: "" });
+      setDealForm({ title: "", company: "", value: "", num_employees: "", priority: "medium", contact_name: "", contact_phone: "", contact_email: "", notes: "", cnpj: "", product_id: "" });
       setCnpjData(null);
     } catch (e) { console.error(e); }
   };
@@ -2798,9 +2801,9 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
     </div>
   );
 
-  const totalValue = deals.reduce((s, d) => s + Number(d.value || 0), 0);
+  const totalEmps = deals.reduce((s, d) => s + Number(d.num_employees || 0), 0);
   const wonDeals = deals.filter(d => { const st = stages.find(s => s.id === d.stage_id); return st && Number(st.is_win); });
-  const wonValue = wonDeals.reduce((s, d) => s + Number(d.value || 0), 0);
+  const wonEmps = wonDeals.reduce((s, d) => s + Number(d.num_employees || 0), 0);
 
   return (
     <div>
@@ -2819,8 +2822,8 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
         <div style={{ flex: 1 }} />
         <div style={{ display: "flex", gap: 12, fontSize: 12, color: T.t2 }}>
           <span>{deals.length} negociações</span>
-          <span>R$ {totalValue.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
-          {wonDeals.length > 0 && <span style={{ color: T.ok }}>✓ {wonDeals.length} ganhos (R$ {wonValue.toLocaleString("pt-BR", { minimumFractionDigits: 2 })})</span>}
+          {totalEmps > 0 && <span>👥 {totalEmps} colaboradores</span>}
+          {wonDeals.length > 0 && <span style={{ color: T.ok }}>✓ {wonDeals.length} ganhos{wonEmps > 0 ? ` (${wonEmps} colab.)` : ""}</span>}
         </div>
         {canEdit && <Btn onClick={() => setShowDealModal(true)} sm>＋ Nova Negociação</Btn>}
       </div>
@@ -2838,7 +2841,7 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
                 <div style={{ background: stage.color + "22", borderRadius: "8px 8px 0 0", padding: "10px 14px", borderLeft: `3px solid ${stage.color}` }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <span style={{ fontSize: 13, fontWeight: 700, color: stage.color }}>{stage.name}</span>
-                    <span style={{ fontSize: 11, color: T.tm }}>{stageDeals.length} · R$ {stageValue.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}</span>
+                    <span style={{ fontSize: 11, color: T.tm }}>{stageDeals.length} negociações</span>
                   </div>
                   {Number(stage.is_win) ? <span style={{ fontSize: 10, color: T.ok }}>✓ Ganho</span> : null}
                   {Number(stage.is_lost) ? <span style={{ fontSize: 10, color: T.er }}>✗ Perdido</span> : null}
@@ -2855,8 +2858,9 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
                         <span style={{ fontSize: 10, background: PRIORITY_COLORS[deal.priority] + "22", color: PRIORITY_COLORS[deal.priority], padding: "2px 6px", borderRadius: 4, fontWeight: 600 }}>{PRIORITY_LABELS[deal.priority]}</span>
                       </div>
                       {deal.company && <div style={{ fontSize: 11, color: T.t2, marginBottom: 4 }}>{deal.company}</div>}
+                      {deal.product_name && <div style={{ fontSize: 10, color: T.ac, marginBottom: 4 }}>📦 {deal.product_name}</div>}
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: T.ac }}>R$ {Number(deal.value || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</span>
+                        <span style={{ fontSize: 11, color: T.t2 }}>{deal.num_employees ? `👥 ${deal.num_employees} colab.` : ""}</span>
                         <span style={{ fontSize: 10, color: T.tm }}>{deal.owner_name}</span>
                       </div>
                     </div>
@@ -2873,7 +2877,7 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
-              <tr>{["Título", "Empresa", "Valor", "Etapa", "Prioridade", "Responsável"].map(h => <th key={h} style={{ textAlign: "left", padding: "12px 14px", fontSize: 10, fontWeight: 600, color: T.tm, textTransform: "uppercase", borderBottom: `1px solid ${T.bor}`, background: T.bg2 }}>{h}</th>)}</tr>
+              <tr>{["Título", "Empresa", "Produto", "Nº Colab.", "Etapa", "Prioridade", "Responsável"].map(h => <th key={h} style={{ textAlign: "left", padding: "12px 14px", fontSize: 10, fontWeight: 600, color: T.tm, textTransform: "uppercase", borderBottom: `1px solid ${T.bor}`, background: T.bg2 }}>{h}</th>)}</tr>
             </thead>
             <tbody>
               {deals.map(deal => {
@@ -2882,14 +2886,15 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
                   <tr key={deal.id} onClick={() => loadDealDetails(deal)} style={{ cursor: "pointer" }} onMouseEnter={e => e.currentTarget.style.background = T.bg2} onMouseLeave={e => e.currentTarget.style.background = ""}>
                     <td style={{ padding: "12px 14px", fontSize: 13, borderBottom: `1px solid ${T.bor}`, fontWeight: 600 }}>{deal.title}</td>
                     <td style={{ padding: "12px 14px", fontSize: 13, borderBottom: `1px solid ${T.bor}`, color: T.t2 }}>{deal.company || "—"}</td>
-                    <td style={{ padding: "12px 14px", fontSize: 13, borderBottom: `1px solid ${T.bor}`, color: T.ac, fontWeight: 600 }}>R$ {Number(deal.value || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</td>
+                    <td style={{ padding: "12px 14px", fontSize: 13, borderBottom: `1px solid ${T.bor}`, color: T.ac }}>{deal.product_name || "—"}</td>
+                    <td style={{ padding: "12px 14px", fontSize: 13, borderBottom: `1px solid ${T.bor}` }}>{deal.num_employees || "—"}</td>
                     <td style={{ padding: "12px 14px", fontSize: 13, borderBottom: `1px solid ${T.bor}` }}><span style={{ background: (stage?.color || "#666") + "22", color: stage?.color || "#666", padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600 }}>{stage?.name || "—"}</span></td>
                     <td style={{ padding: "12px 14px", fontSize: 13, borderBottom: `1px solid ${T.bor}` }}><span style={{ color: PRIORITY_COLORS[deal.priority] }}>{PRIORITY_LABELS[deal.priority]}</span></td>
                     <td style={{ padding: "12px 14px", fontSize: 13, borderBottom: `1px solid ${T.bor}`, color: T.t2 }}>{deal.owner_name}</td>
                   </tr>
                 );
               })}
-              {deals.length === 0 && <tr><td colSpan={6} style={{ padding: 40, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhuma negociação neste funil</td></tr>}
+              {deals.length === 0 && <tr><td colSpan={7} style={{ padding: 40, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhuma negociação neste funil</td></tr>}
             </tbody>
           </table>
         </div>
@@ -2915,6 +2920,17 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
           )}
           <Inp label="Título *" value={dealForm.title} onChange={v => setDealForm({ ...dealForm, title: v })} placeholder="Nome da negociação" />
           <Inp label="Empresa" value={dealForm.company} onChange={v => setDealForm({ ...dealForm, company: v })} placeholder="Nome da empresa" />
+          <div style={{ display: "flex", gap: 12 }}>
+            <div className="input-group" style={{ flex: 1 }}>
+              <label style={{ fontSize: 12, color: T.t2, textTransform: "uppercase", fontWeight: 600, marginBottom: 6 }}>Produto *</label>
+              <select value={dealForm.product_id} onChange={e => setDealForm({ ...dealForm, product_id: e.target.value })}
+                style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+                <option value="">Selecione o produto...</option>
+                {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+            <Inp label="Nº Colaboradores" value={dealForm.num_employees} onChange={v => setDealForm({ ...dealForm, num_employees: v })} type="number" placeholder="Ex: 150" style={{ flex: 1 }} />
+          </div>
           <div style={{ display: "flex", gap: 12 }}>
             <Inp label="Valor (R$)" value={dealForm.value} onChange={v => setDealForm({ ...dealForm, value: v })} type="number" placeholder="0.00" style={{ flex: 1 }} />
             <div className="input-group" style={{ flex: 1 }}>
@@ -2945,7 +2961,8 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
             {/* Deal info header */}
             <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginBottom: 16, padding: 12, background: T.bg2, borderRadius: 8 }}>
               <div><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>Empresa</span><div style={{ fontSize: 13, fontWeight: 600 }}>{selectedDeal.company || "—"}</div></div>
-              <div><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>Valor</span><div style={{ fontSize: 13, fontWeight: 700, color: T.ac }}>R$ {Number(selectedDeal.value || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}</div></div>
+              {selectedDeal.product_name && <div><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>Produto</span><div style={{ fontSize: 13, fontWeight: 600, color: T.ac }}>{selectedDeal.product_name}</div></div>}
+              <div><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>Nº Colaboradores</span><div style={{ fontSize: 13, fontWeight: 700 }}>{selectedDeal.num_employees || "—"}</div></div>
               <div><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>Prioridade</span><div style={{ fontSize: 13, color: PRIORITY_COLORS[selectedDeal.priority] }}>{PRIORITY_LABELS[selectedDeal.priority]}</div></div>
               <div><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>Responsável</span><div style={{ fontSize: 13 }}>{selectedDeal.owner_name}</div></div>
               {selectedDeal.contact_name && <div><span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>Contato</span><div style={{ fontSize: 13 }}>{selectedDeal.contact_name} {selectedDeal.contact_phone ? `· ${selectedDeal.contact_phone}` : ""}</div></div>}
@@ -3081,6 +3098,180 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
   );
 }
 
+// ===== BI / ANALYTICS =====
+function BIPage({ users, selectedTeam, myTeams }) {
+  const { user } = useAuth();
+  const [pipelines, setPipelines] = useState([]);
+  const [selPipeline, setSelPipeline] = useState("");
+  const [period, setPeriod] = useState("30");
+  const [overview, setOverview] = useState(null);
+  const [byOwner, setByOwner] = useState([]);
+  const [byStage, setByStage] = useState([]);
+  const [lossReasons, setLossReasons] = useState([]);
+  const [timeline, setTimeline] = useState([]);
+  const [actRanking, setActRanking] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => { pipelinesApi.getAll().then(r => { setPipelines(r.data); if (r.data.length > 0) setSelPipeline(r.data[0].id); }).catch(() => {}); }, []);
+
+  const loadBI = useCallback(async () => {
+    if (!selPipeline) return;
+    setLoading(true);
+    const params = { pipeline_id: selPipeline, days: period };
+    try {
+      const [ov, bo, bs, lr, tl, ar] = await Promise.all([
+        pipelinesApi.biOverview(params), pipelinesApi.biByOwner(params), pipelinesApi.biByStage(params),
+        pipelinesApi.biLossReasons(params), pipelinesApi.biTimeline(params), pipelinesApi.biActivityRanking(params),
+      ]);
+      setOverview(ov.data); setByOwner(bo.data); setByStage(bs.data);
+      setLossReasons(lr.data); setTimeline(tl.data); setActRanking(ar.data);
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  }, [selPipeline, period]);
+
+  useEffect(() => { loadBI(); }, [loadBI]);
+
+  const maxBar = (arr, key) => Math.max(...arr.map(a => Number(a[key]) || 0), 1);
+
+  if (loading && !overview) return <div style={{ padding: 40, textAlign: "center", color: T.tm }}>Carregando dados...</div>;
+
+  return (
+    <div>
+      {/* Filters */}
+      <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
+        <select value={selPipeline} onChange={e => setSelPipeline(e.target.value)} style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 8, color: T.txt, fontSize: 13, fontFamily: "'DM Sans',sans-serif" }}>
+          {pipelines.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <select value={period} onChange={e => setPeriod(e.target.value)} style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 8, color: T.txt, fontSize: 13, fontFamily: "'DM Sans',sans-serif" }}>
+          {[["7", "7 dias"], ["15", "15 dias"], ["30", "30 dias"], ["60", "60 dias"], ["90", "90 dias"], ["180", "6 meses"], ["365", "1 ano"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <Btn sm onClick={loadBI}>Atualizar</Btn>
+      </div>
+
+      {/* Overview cards */}
+      {overview && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 24 }}>
+          {[
+            { l: "Total Deals", v: overview.total_deals, c: T.ac },
+            { l: "Ganhos", v: overview.won_deals, c: T.ok },
+            { l: "Perdidos", v: overview.lost_deals, c: T.er },
+            { l: "Em Aberto", v: overview.open_deals, c: T.inf },
+            { l: "Total Colaboradores", v: overview.total_employees || 0, c: "#8b5cf6" },
+            { l: "Taxa Conversão", v: `${Number(overview.win_rate || 0).toFixed(1)}%`, c: T.ok },
+          ].map((c, i) => (
+            <div key={i} style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 16 }}>
+              <div style={{ fontSize: 11, color: T.tm, fontWeight: 600, textTransform: "uppercase", marginBottom: 6 }}>{c.l}</div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: c.c }}>{c.v}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(400px, 1fr))", gap: 16 }}>
+        {/* By Owner - ranking */}
+        <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>Ranking por Responsável</h3>
+          {byOwner.length === 0 && <div style={{ color: T.tm, fontSize: 13 }}>Sem dados</div>}
+          {byOwner.map((o, i) => {
+            const mx = maxBar(byOwner, "total_deals");
+            return (
+              <div key={i} style={{ marginBottom: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
+                  <span style={{ fontWeight: 600 }}>{o.owner_name || "Sem responsável"}</span>
+                  <span>{o.total_deals} deals · {o.won_deals} ganhos · {o.total_employees || 0} colab.</span>
+                </div>
+                <div style={{ height: 8, background: T.bg2, borderRadius: 4, overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${(Number(o.total_deals) / mx) * 100}%`, background: T.ac, borderRadius: 4 }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* By Stage - funnel */}
+        <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>Deals por Etapa</h3>
+          {byStage.length === 0 && <div style={{ color: T.tm, fontSize: 13 }}>Sem dados</div>}
+          {byStage.map((s, i) => {
+            const mx = maxBar(byStage, "deal_count");
+            return (
+              <div key={i} style={{ marginBottom: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
+                  <span style={{ fontWeight: 600 }}>{s.stage_name}</span>
+                  <span>{s.deal_count} deals · {s.total_employees || 0} colab. · Média {Number(s.avg_days_in_stage || 0).toFixed(0)}d</span>
+                </div>
+                <div style={{ height: 8, background: T.bg2, borderRadius: 4, overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${(Number(s.deal_count) / mx) * 100}%`, background: s.stage_color || T.ac, borderRadius: 4 }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Loss Reasons */}
+        <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>Motivos de Perda</h3>
+          {lossReasons.length === 0 && <div style={{ color: T.tm, fontSize: 13 }}>Sem dados</div>}
+          {lossReasons.map((lr, i) => {
+            const mx = maxBar(lossReasons, "count");
+            return (
+              <div key={i} style={{ marginBottom: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
+                  <span style={{ fontWeight: 600 }}>{lr.loss_reason || "Não informado"}</span>
+                  <span>{lr.count} ({Number(lr.percentage || 0).toFixed(1)}%)</span>
+                </div>
+                <div style={{ height: 8, background: T.bg2, borderRadius: 4, overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${(Number(lr.count) / mx) * 100}%`, background: T.er, borderRadius: 4 }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Activity Ranking */}
+        <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>Ranking de Atividades</h3>
+          {actRanking.length === 0 && <div style={{ color: T.tm, fontSize: 13 }}>Sem dados</div>}
+          {actRanking.map((a, i) => {
+            const mx = maxBar(actRanking, "total_activities");
+            return (
+              <div key={i} style={{ marginBottom: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
+                  <span style={{ fontWeight: 600 }}>{a.owner_name || "Sem responsável"}</span>
+                  <span>{a.total_activities} atividades · {a.calls || 0} ligações · {a.meetings || 0} reuniões</span>
+                </div>
+                <div style={{ height: 8, background: T.bg2, borderRadius: 4, overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${(Number(a.total_activities) / mx) * 100}%`, background: "#8b5cf6", borderRadius: 4 }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Timeline */}
+        <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20, gridColumn: "1 / -1" }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>Evolução no Tempo</h3>
+          {timeline.length === 0 && <div style={{ color: T.tm, fontSize: 13 }}>Sem dados</div>}
+          {timeline.length > 0 && (
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 160 }}>
+              {(() => {
+                const mx = maxBar(timeline, "deals_created");
+                return timeline.map((t, i) => (
+                  <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
+                    <div style={{ fontSize: 10, color: T.tm, marginBottom: 4 }}>{t.deals_created}</div>
+                    <div style={{ width: "100%", maxWidth: 40, background: T.ac, borderRadius: "4px 4px 0 0", height: `${(Number(t.deals_created) / mx) * 140}px`, minHeight: 2 }} />
+                    <div style={{ fontSize: 9, color: T.tm, marginTop: 4, textAlign: "center" }}>{t.period?.slice(5) || ""}</div>
+                  </div>
+                ));
+              })()}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ===== CONFIG =====
 function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias, notifs, setNotifs, cadenceRules, setCadenceRules, myTeams, setMyTeams }) {
   const { user } = useAuth();
@@ -3104,11 +3295,16 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
   const [teamModal, setTeamModal] = useState(false);
   const [editTeam, setEditTeam] = useState(null);
   const AVAILABLE_MODULES = [
-    { id: "kanban", l: "Funil/Pipeline" }, { id: "negocios", l: "Negociações" }, { id: "parcs", l: "Parceiros" },
-    { id: "groups", l: "WhatsApp" }, { id: "diretoria", l: "Visão Diretoria" }, { id: "fin", l: "Financeiro" },
-    { id: "mats", l: "Material de Apoio" },
+    { id: "kanban", l: "Funil/Pipeline" }, { id: "negocios", l: "Negociações" }, { id: "bi", l: "BI / Analytics" },
+    { id: "parcs", l: "Parceiros" }, { id: "groups", l: "WhatsApp" }, { id: "diretoria", l: "Visão Diretoria" },
+    { id: "fin", l: "Financeiro" }, { id: "mats", l: "Material de Apoio" },
   ];
   const [teamForm, setTeamForm] = useState({ name: "", description: "", modules: [], members: [] });
+  // Products config state
+  const [cfgProducts, setCfgProducts] = useState([]);
+  const [productModal, setProductModal] = useState(false);
+  const [editProduct, setEditProduct] = useState(null);
+  const [productForm, setProductForm] = useState({ name: "", description: "" });
   const [hsStatus, setHsStatus] = useState({ connected: null, message: "" });
   const [hsPipelines, setHsPipelines] = useState([]);
   const [hsLoading, setHsLoading] = useState(false);
@@ -3212,6 +3408,33 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
     if (!confirm("Desativar esta equipe?")) return;
     await teamsApi.delete(id);
     loadCfgTeams();
+  };
+
+  // Load products
+  const loadCfgProducts = useCallback(() => {
+    if (isSA) productsApi.getAll().then(r => setCfgProducts(r.data)).catch(() => {});
+  }, [isSA]);
+  useEffect(() => { loadCfgProducts(); }, [loadCfgProducts]);
+
+  const handleSaveProduct = async () => {
+    if (!productForm.name) return;
+    try {
+      if (editProduct) {
+        await productsApi.update(editProduct.id, productForm);
+      } else {
+        await productsApi.create(productForm);
+      }
+      loadCfgProducts();
+      setProductModal(false);
+      setEditProduct(null);
+      setProductForm({ name: "", description: "" });
+    } catch (e) { console.error(e); }
+  };
+
+  const handleDeleteProduct = async (id) => {
+    if (!confirm("Desativar este produto?")) return;
+    await productsApi.delete(id);
+    loadCfgProducts();
   };
 
   // Load HubSpot config on mount
@@ -3446,7 +3669,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
   return (
     <div>
       <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${T.bor}`, marginBottom: 20 }}>
-        {(isSA ? ["geral", "hubspot", "notificações", "usuários", "parceiros", "convênios", "equipes", "funis", "materiais", "auditoria"] : ["funis"]).map(t => <button key={t} onClick={() => { setTab(t); if (t === "auditoria" && auditData.length === 0 && !auditLoading) loadAudit(0, auditFilters); }} style={{ padding: "10px 16px", fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: "none", color: tab === t ? T.ac : T.tm, fontFamily: "'DM Sans',sans-serif", borderBottom: `2px solid ${tab === t ? T.ac : "transparent"}`, marginBottom: -1, textTransform: "capitalize" }}>{t}</button>)}
+        {(isSA ? ["geral", "hubspot", "notificações", "usuários", "parceiros", "convênios", "equipes", "produtos", "funis", "materiais", "auditoria"] : ["funis"]).map(t => <button key={t} onClick={() => { setTab(t); if (t === "auditoria" && auditData.length === 0 && !auditLoading) loadAudit(0, auditFilters); }} style={{ padding: "10px 16px", fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: "none", color: tab === t ? T.ac : T.tm, fontFamily: "'DM Sans',sans-serif", borderBottom: `2px solid ${tab === t ? T.ac : "transparent"}`, marginBottom: -1, textTransform: "capitalize" }}>{t}</button>)}
       </div>
       {tab === "geral" && <div>
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20, marginBottom: 16 }}>
@@ -4235,6 +4458,40 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
                 </div>
               </div>
             </div>
+          </Modal>
+        </div>
+      )}
+
+      {/* PRODUTOS TAB */}
+      {tab === "produtos" && isSA && (
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 700 }}>Produtos</h3>
+            <Btn sm onClick={() => { setEditProduct(null); setProductForm({ name: "", description: "" }); setProductModal(true); }}>+ Novo Produto</Btn>
+          </div>
+          <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead><tr>{["Nome", "Descrição", "Ações"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
+              <tbody>
+                {cfgProducts.length === 0 && <tr><td colSpan={3} style={{ ...tdS, textAlign: "center", color: T.tm }}>Nenhum produto cadastrado</td></tr>}
+                {cfgProducts.map(p => (
+                  <tr key={p.id}>
+                    <td style={tdS}><span style={{ fontWeight: 600 }}>{p.name}</span></td>
+                    <td style={tdS}>{p.description || "—"}</td>
+                    <td style={tdS}>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button onClick={() => { setEditProduct(p); setProductForm({ name: p.name, description: p.description || "" }); setProductModal(true); }} style={{ background: "none", border: "none", cursor: "pointer", color: T.ac, fontSize: 13 }}>Editar</button>
+                        <button onClick={() => handleDeleteProduct(p.id)} style={{ background: "none", border: "none", cursor: "pointer", color: T.er, fontSize: 13 }}>Excluir</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Modal open={productModal} onClose={() => setProductModal(false)} title={editProduct ? "Editar Produto" : "Novo Produto"} footer={<Btn onClick={handleSaveProduct}>Salvar</Btn>}>
+            <Inp label="Nome" value={productForm.name} onChange={e => setProductForm({ ...productForm, name: e.target.value })} placeholder="Nome do produto" />
+            <Inp label="Descrição" value={productForm.description} onChange={e => setProductForm({ ...productForm, description: e.target.value })} placeholder="Descrição (opcional)" />
           </Modal>
         </div>
       )}
@@ -5562,6 +5819,7 @@ const NAV = [
   { id: "dash", l: "Dashboard", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro", "convenio"] },
   { id: "kanban", l: "Funil/Pipeline", r: ["super_admin", "executivo", "diretor", "gerente"] },
   { id: "negocios", l: "Negociações", r: ["super_admin", "executivo", "diretor", "gerente"] },
+  { id: "bi", l: "BI / Analytics", r: ["super_admin", "executivo", "diretor", "gerente"] },
   { id: "inds", l: "Minhas Indicações", r: ["parceiro"] },
   { id: "convenio", l: "Meu Convênio", r: ["convenio"] },
   { id: "parcs", l: "Parceiros", r: ["super_admin", "executivo", "diretor", "gerente"] },
@@ -5572,8 +5830,8 @@ const NAV = [
   { id: "notifs", l: "Notificações", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro", "convenio"] },
   { id: "cfg", l: "Configurações", r: ["super_admin", "executivo", "gerente"] },
 ];
-const TIT = { dash: "Dashboard", kanban: "Funil / Pipeline", negocios: "Negociações", inds: "Minhas Indicações", convenio: "Meu Convênio", parcs: "Parceiros Indicadores", groups: "WhatsApp - Conversas", diretoria: "Visão Diretoria", fin: "Financeiro", mats: "Material de Apoio", notifs: "Central de Notificações", cfg: "Configurações" };
-const EMO = { dash: "📊", kanban: "📋", negocios: "💼", inds: "🏢", convenio: "🤝", parcs: "👥", groups: "📱", diretoria: "📈", fin: "💰", mats: "📁", notifs: "🔔", cfg: "⚙️" };
+const TIT = { dash: "Dashboard", kanban: "Funil / Pipeline", negocios: "Negociações", bi: "BI / Analytics", inds: "Minhas Indicações", convenio: "Meu Convênio", parcs: "Parceiros Indicadores", groups: "WhatsApp - Conversas", diretoria: "Visão Diretoria", fin: "Financeiro", mats: "Material de Apoio", notifs: "Central de Notificações", cfg: "Configurações" };
+const EMO = { dash: "📊", kanban: "📋", negocios: "💼", bi: "📈", inds: "🏢", convenio: "🤝", parcs: "👥", groups: "📱", diretoria: "📈", fin: "💰", mats: "📁", notifs: "🔔", cfg: "⚙️" };
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -5934,6 +6192,7 @@ export default function App() {
             {pg === "dash" && <Dash inds={inds} users={users} comms={comms} nfes={nfes} activity={activity} />}
             {pg === "kanban" && <KanbanPage inds={inds} setInds={setInds} users={users} travaDias={travaDias} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} />}
             {pg === "negocios" && <NegociosPage users={users} selectedTeam={selectedTeam} myTeams={myTeams} />}
+            {pg === "bi" && <BIPage users={users} selectedTeam={selectedTeam} myTeams={myTeams} />}
             {pg === "inds" && <MinhasInd inds={inds} setInds={setInds} notifs={notifs} setNotifs={setNotifs} users={users} cadenceRules={cadenceRules} />}
             {pg === "convenio" && <ConvenioPage />}
             {pg === "parcs" && <ParcPage users={users} setUsers={setUsers} inds={inds} />}

@@ -19,22 +19,16 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           script_stop: true
           script: |
-            echo "=== Connected ==="
-            whoami
-            pwd
+            cd /opt/crm-somapay || exit 1
 
-            cd /opt/crm-somapay || { echo "Directory not found"; exit 1; }
+            git fetch origin main
+            git reset --hard origin/main
 
-            echo "=== Pulling latest code ==="
-            git pull origin main
-
-            echo "=== Rebuilding staging only ==="
             docker compose --profile staging up -d --build
+            docker compose --profile prod up -d --build
 
-            echo "=== Cleaning old images ==="
             docker image prune -f
 
-            echo "=== Verifying ==="
             sleep 5
-            docker compose --profile staging ps
+            docker compose ps
             echo "Deploy complete!"

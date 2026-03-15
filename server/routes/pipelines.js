@@ -144,7 +144,7 @@ router.get('/:id/stages', authenticate, async (req, res) => {
 router.get('/:id/deals', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
-    let query = `SELECT d.*, u.name as owner_name FROM deals d LEFT JOIN users u ON d.owner_id = u.id WHERE d.pipeline_id = ?`;
+    let query = `SELECT d.*, u.name as owner_name, pr.name as product_name FROM deals d LEFT JOIN users u ON d.owner_id = u.id LEFT JOIN products pr ON d.product_id = pr.id WHERE d.pipeline_id = ?`;
     const params = [req.params.id];
     query = addOwnerFilter(query, params, req.user);
     query += ` ORDER BY d.created_at DESC`;
@@ -163,7 +163,7 @@ router.post('/:pipelineId/deals', authenticate, async (req, res) => {
       return res.status(403).json({ error: 'Sem permissão' });
     }
     const db = getDatabase();
-    const { title, company, value, priority, stage_id, contact_name, contact_phone, contact_email, notes } = req.body;
+    const { title, company, value, priority, stage_id, contact_name, contact_phone, contact_email, notes, num_employees, product_id } = req.body;
     if (!title) return res.status(400).json({ error: 'Título obrigatório' });
 
     // If no stage_id provided, use first stage of pipeline
@@ -175,9 +175,9 @@ router.post('/:pipelineId/deals', authenticate, async (req, res) => {
     }
 
     const id = uuidv4();
-    await db.prepare(`INSERT INTO deals (id, pipeline_id, stage_id, title, company, value, owner_id, priority, contact_name, contact_phone, contact_email, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, req.params.pipelineId, stageId, title, company || null, value || 0, req.user.id, priority || 'medium', contact_name || null, contact_phone || null, contact_email || null, notes || null);
+    await db.prepare(`INSERT INTO deals (id, pipeline_id, stage_id, title, company, value, owner_id, priority, contact_name, contact_phone, contact_email, notes, num_employees, product_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, req.params.pipelineId, stageId, title, company || null, value || 0, req.user.id, priority || 'medium', contact_name || null, contact_phone || null, contact_email || null, notes || null, num_employees || null, product_id || null);
 
     res.status(201).json({ id, title, stage_id: stageId });
   } catch (err) {
@@ -190,9 +190,9 @@ router.post('/:pipelineId/deals', authenticate, async (req, res) => {
 router.put('/deals/:id', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
-    const { title, company, value, priority, stage_id, contact_name, contact_phone, contact_email, notes } = req.body;
-    await db.prepare(`UPDATE deals SET title = ?, company = ?, value = ?, priority = ?, stage_id = ?, contact_name = ?, contact_phone = ?, contact_email = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-      .run(title, company || null, value || 0, priority || 'medium', stage_id, contact_name || null, contact_phone || null, contact_email || null, notes || null, req.params.id);
+    const { title, company, value, priority, stage_id, contact_name, contact_phone, contact_email, notes, num_employees, product_id } = req.body;
+    await db.prepare(`UPDATE deals SET title = ?, company = ?, value = ?, priority = ?, stage_id = ?, contact_name = ?, contact_phone = ?, contact_email = ?, notes = ?, num_employees = ?, product_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(title, company || null, value || 0, priority || 'medium', stage_id, contact_name || null, contact_phone || null, contact_email || null, notes || null, num_employees || null, product_id || null, req.params.id);
     res.json({ ok: true });
   } catch (err) {
     console.error('PUT deal error:', err);
@@ -204,7 +204,7 @@ router.put('/deals/:id', authenticate, async (req, res) => {
 router.patch('/deals/:id/stage', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
-    const { stage_id } = req.body;
+    const { stage_id, loss_reason } = req.body;
     if (!stage_id) return res.status(400).json({ error: 'stage_id obrigatório' });
 
     // Get deal info before move
@@ -213,6 +213,12 @@ router.patch('/deals/:id/stage', authenticate, async (req, res) => {
 
     // Move deal
     await db.prepare('UPDATE deals SET stage_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(stage_id, req.params.id);
+
+    // If moving to a lost stage, save loss reason
+    const targetStage = await db.prepare('SELECT is_lost FROM pipeline_stages WHERE id = ?').get(stage_id);
+    if (targetStage && Number(targetStage.is_lost) && loss_reason) {
+      await db.prepare('UPDATE deals SET loss_reason = ? WHERE id = ?').run(loss_reason, req.params.id);
+    }
 
     // Check for automations on this stage
     const automations = await db.prepare('SELECT * FROM pipeline_automations WHERE pipeline_id = ? AND trigger_stage_id = ? AND is_active = 1').all(deal.pipeline_id, stage_id);
@@ -230,9 +236,9 @@ router.patch('/deals/:id/stage', authenticate, async (req, res) => {
 
         // Copy deal to target pipeline
         const newId = uuidv4();
-        await db.prepare(`INSERT INTO deals (id, pipeline_id, stage_id, title, company, value, owner_id, priority, contact_name, contact_phone, contact_email, notes)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-          .run(newId, auto.target_pipeline_id, targetStageId, deal.title, deal.company, deal.value, deal.owner_id, deal.priority, deal.contact_name, deal.contact_phone, deal.contact_email, deal.notes);
+        await db.prepare(`INSERT INTO deals (id, pipeline_id, stage_id, title, company, value, owner_id, priority, contact_name, contact_phone, contact_email, notes, num_employees, product_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(newId, auto.target_pipeline_id, targetStageId, deal.title, deal.company, deal.value, deal.owner_id, deal.priority, deal.contact_name, deal.contact_phone, deal.contact_email, deal.notes, deal.num_employees, deal.product_id);
 
         // Copy contacts
         const contacts = await db.prepare('SELECT * FROM deal_contacts WHERE deal_id = ?').all(deal.id);
@@ -507,6 +513,227 @@ router.delete('/automations/:id', authenticate, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('DELETE automation error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════
+// BI / ANALYTICS
+// ══════════════════════════════════════════════
+
+// GET /pipelines/bi/overview - General metrics
+router.get('/bi/overview', authenticate, async (req, res) => {
+  try {
+    const db = getDatabase();
+    const { pipeline_id, date_from, date_to, owner_id } = req.query;
+    let dateFilter = '';
+    let ownerFilter = '';
+    const params = [];
+
+    if (date_from) { dateFilter += ' AND d.created_at >= ?'; params.push(date_from); }
+    if (date_to) { dateFilter += ' AND d.created_at <= ?'; params.push(date_to + 'T23:59:59'); }
+    if (owner_id) { ownerFilter = ' AND d.owner_id = ?'; params.push(owner_id); }
+
+    let pipeFilter = '';
+    if (pipeline_id) { pipeFilter = ' AND d.pipeline_id = ?'; params.push(pipeline_id); }
+
+    // Apply visibility filter
+    let visFilter = '';
+    const visParams = [];
+    if (req.user.role !== 'super_admin') {
+      if (req.user.role === 'executivo') {
+        // sees all in their teams
+      } else if (req.user.role === 'diretor') {
+        visFilter = ' AND (d.owner_id = ? OR d.owner_id IN (SELECT id FROM users WHERE manager_id = ?))';
+        visParams.push(req.user.id, req.user.id);
+      } else if (req.user.role === 'gerente') {
+        visFilter = ' AND d.owner_id = ?';
+        visParams.push(req.user.id);
+      }
+    }
+
+    const allParams = [...params, ...visParams];
+
+    const total = await db.prepare(`SELECT COUNT(*) as count, COALESCE(SUM(value),0) as total_value FROM deals d WHERE 1=1 ${dateFilter} ${ownerFilter} ${pipeFilter} ${visFilter}`).get(...allParams);
+    const won = await db.prepare(`SELECT COUNT(*) as count, COALESCE(SUM(d.value),0) as total_value FROM deals d INNER JOIN pipeline_stages s ON d.stage_id = s.id WHERE s.is_win = 1 ${dateFilter} ${ownerFilter} ${pipeFilter} ${visFilter}`).get(...allParams);
+    const lost = await db.prepare(`SELECT COUNT(*) as count, COALESCE(SUM(d.value),0) as total_value FROM deals d INNER JOIN pipeline_stages s ON d.stage_id = s.id WHERE s.is_lost = 1 ${dateFilter} ${ownerFilter} ${pipeFilter} ${visFilter}`).get(...allParams);
+    const open = await db.prepare(`SELECT COUNT(*) as count, COALESCE(SUM(d.value),0) as total_value FROM deals d INNER JOIN pipeline_stages s ON d.stage_id = s.id WHERE s.is_win = 0 AND s.is_lost = 0 ${dateFilter} ${ownerFilter} ${pipeFilter} ${visFilter}`).get(...allParams);
+
+    const conversionRate = Number(total.count) > 0 ? (Number(won.count) / Number(total.count) * 100).toFixed(1) : 0;
+
+    res.json({
+      total: { count: Number(total.count), value: Number(total.total_value) },
+      won: { count: Number(won.count), value: Number(won.total_value) },
+      lost: { count: Number(lost.count), value: Number(lost.total_value) },
+      open: { count: Number(open.count), value: Number(open.total_value) },
+      conversion_rate: Number(conversionRate),
+    });
+  } catch (err) {
+    console.error('BI overview error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /pipelines/bi/by-owner - Deals grouped by owner
+router.get('/bi/by-owner', authenticate, async (req, res) => {
+  try {
+    const db = getDatabase();
+    const { pipeline_id, date_from, date_to } = req.query;
+    let filters = '';
+    const params = [];
+    if (pipeline_id) { filters += ' AND d.pipeline_id = ?'; params.push(pipeline_id); }
+    if (date_from) { filters += ' AND d.created_at >= ?'; params.push(date_from); }
+    if (date_to) { filters += ' AND d.created_at <= ?'; params.push(date_to + 'T23:59:59'); }
+
+    const rows = await db.prepare(`
+      SELECT d.owner_id, u.name as owner_name,
+        COUNT(*) as total,
+        SUM(CASE WHEN s.is_win = 1 THEN 1 ELSE 0 END) as won,
+        SUM(CASE WHEN s.is_lost = 1 THEN 1 ELSE 0 END) as lost,
+        SUM(CASE WHEN s.is_win = 0 AND s.is_lost = 0 THEN 1 ELSE 0 END) as open,
+        COALESCE(SUM(d.value),0) as total_value,
+        COALESCE(SUM(CASE WHEN s.is_win = 1 THEN d.value ELSE 0 END),0) as won_value
+      FROM deals d
+      LEFT JOIN users u ON d.owner_id = u.id
+      LEFT JOIN pipeline_stages s ON d.stage_id = s.id
+      WHERE 1=1 ${filters}
+      GROUP BY d.owner_id
+      ORDER BY won DESC, total DESC
+    `).all(...params);
+
+    res.json(rows.map(r => ({ ...r, total: Number(r.total), won: Number(r.won), lost: Number(r.lost), open: Number(r.open), total_value: Number(r.total_value), won_value: Number(r.won_value) })));
+  } catch (err) {
+    console.error('BI by-owner error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /pipelines/bi/by-stage - Deals grouped by stage (funnel view)
+router.get('/bi/by-stage', authenticate, async (req, res) => {
+  try {
+    const db = getDatabase();
+    const { pipeline_id, date_from, date_to } = req.query;
+    let filters = '';
+    const params = [];
+    if (pipeline_id) { filters += ' AND d.pipeline_id = ?'; params.push(pipeline_id); }
+    if (date_from) { filters += ' AND d.created_at >= ?'; params.push(date_from); }
+    if (date_to) { filters += ' AND d.created_at <= ?'; params.push(date_to + 'T23:59:59'); }
+
+    const rows = await db.prepare(`
+      SELECT s.id as stage_id, s.name as stage_name, s.color, s.display_order, s.is_win, s.is_lost,
+        COUNT(d.id) as count,
+        COALESCE(SUM(d.value),0) as total_value,
+        AVG(JULIANDAY(d.updated_at) - JULIANDAY(d.created_at)) as avg_days
+      FROM pipeline_stages s
+      LEFT JOIN deals d ON d.stage_id = s.id ${filters ? 'AND 1=1 ' + filters : ''}
+      WHERE s.pipeline_id = ?
+      GROUP BY s.id
+      ORDER BY s.display_order
+    `).all(...params, pipeline_id || '');
+
+    res.json(rows.map(r => ({ ...r, count: Number(r.count), total_value: Number(r.total_value), avg_days: r.avg_days ? Number(Number(r.avg_days).toFixed(1)) : 0, is_win: Number(r.is_win), is_lost: Number(r.is_lost) })));
+  } catch (err) {
+    console.error('BI by-stage error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /pipelines/bi/loss-reasons - Loss reasons breakdown
+router.get('/bi/loss-reasons', authenticate, async (req, res) => {
+  try {
+    const db = getDatabase();
+    const { pipeline_id, date_from, date_to } = req.query;
+    let filters = '';
+    const params = [];
+    if (pipeline_id) { filters += ' AND d.pipeline_id = ?'; params.push(pipeline_id); }
+    if (date_from) { filters += ' AND d.created_at >= ?'; params.push(date_from); }
+    if (date_to) { filters += ' AND d.created_at <= ?'; params.push(date_to + 'T23:59:59'); }
+
+    const rows = await db.prepare(`
+      SELECT COALESCE(d.loss_reason, 'Não informado') as reason, COUNT(*) as count, COALESCE(SUM(d.value),0) as lost_value
+      FROM deals d
+      INNER JOIN pipeline_stages s ON d.stage_id = s.id
+      WHERE s.is_lost = 1 ${filters}
+      GROUP BY COALESCE(d.loss_reason, 'Não informado')
+      ORDER BY count DESC
+    `).all(...params);
+
+    res.json(rows.map(r => ({ ...r, count: Number(r.count), lost_value: Number(r.lost_value) })));
+  } catch (err) {
+    console.error('BI loss-reasons error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /pipelines/bi/timeline - Deals created/won/lost over time
+router.get('/bi/timeline', authenticate, async (req, res) => {
+  try {
+    const db = getDatabase();
+    const { pipeline_id, period, date_from, date_to } = req.query;
+    let filters = '';
+    const params = [];
+    if (pipeline_id) { filters += ' AND d.pipeline_id = ?'; params.push(pipeline_id); }
+    if (date_from) { filters += ' AND d.created_at >= ?'; params.push(date_from); }
+    if (date_to) { filters += ' AND d.created_at <= ?'; params.push(date_to + 'T23:59:59'); }
+
+    const groupBy = period === 'weekly' ? "STRFTIME('%Y-W%W', d.created_at)" : period === 'daily' ? "DATE(d.created_at)" : "STRFTIME('%Y-%m', d.created_at)";
+
+    const rows = await db.prepare(`
+      SELECT ${groupBy} as period,
+        COUNT(*) as created,
+        SUM(CASE WHEN s.is_win = 1 THEN 1 ELSE 0 END) as won,
+        SUM(CASE WHEN s.is_lost = 1 THEN 1 ELSE 0 END) as lost,
+        COALESCE(SUM(d.value),0) as total_value,
+        COALESCE(SUM(CASE WHEN s.is_win = 1 THEN d.value ELSE 0 END),0) as won_value
+      FROM deals d
+      LEFT JOIN pipeline_stages s ON d.stage_id = s.id
+      WHERE 1=1 ${filters}
+      GROUP BY ${groupBy}
+      ORDER BY period
+    `).all(...params);
+
+    res.json(rows.map(r => ({ ...r, created: Number(r.created), won: Number(r.won), lost: Number(r.lost), total_value: Number(r.total_value), won_value: Number(r.won_value) })));
+  } catch (err) {
+    console.error('BI timeline error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /pipelines/bi/activity-ranking - Most active users
+router.get('/bi/activity-ranking', authenticate, async (req, res) => {
+  try {
+    const db = getDatabase();
+    const { pipeline_id, date_from, date_to } = req.query;
+    let filters = '';
+    const params = [];
+    if (date_from) { filters += ' AND a.created_at >= ?'; params.push(date_from); }
+    if (date_to) { filters += ' AND a.created_at <= ?'; params.push(date_to + 'T23:59:59'); }
+
+    let pipeFilter = '';
+    if (pipeline_id) { pipeFilter = ' AND d.pipeline_id = ?'; params.push(pipeline_id); }
+
+    const rows = await db.prepare(`
+      SELECT a.user_id, u.name as user_name, a.type,
+        COUNT(*) as count
+      FROM deal_activities a
+      LEFT JOIN users u ON a.user_id = u.id
+      LEFT JOIN deals d ON a.deal_id = d.id
+      WHERE 1=1 ${filters} ${pipeFilter}
+      GROUP BY a.user_id, a.type
+      ORDER BY count DESC
+    `).all(...params);
+
+    // Group by user
+    const userMap = {};
+    for (const r of rows) {
+      if (!userMap[r.user_id]) userMap[r.user_id] = { user_id: r.user_id, user_name: r.user_name, total: 0, by_type: {} };
+      userMap[r.user_id].total += Number(r.count);
+      userMap[r.user_id].by_type[r.type] = Number(r.count);
+    }
+
+    res.json(Object.values(userMap).sort((a, b) => b.total - a.total));
+  } catch (err) {
+    console.error('BI activity-ranking error:', err);
     res.status(500).json({ error: err.message });
   }
 });

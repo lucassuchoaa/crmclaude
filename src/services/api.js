@@ -343,6 +343,20 @@ export const pipelinesApi = {
   getAutomations: (id) => api.get(`/pipelines/${id}/automations`),
   createAutomation: (id, data) => api.post(`/pipelines/${id}/automations`, data),
   deleteAutomation: (id) => api.delete(`/pipelines/automations/${id}`),
+  biOverview: (params) => api.get('/pipelines/bi/overview', { params }),
+  biByOwner: (params) => api.get('/pipelines/bi/by-owner', { params }),
+  biByStage: (params) => api.get('/pipelines/bi/by-stage', { params }),
+  biLossReasons: (params) => api.get('/pipelines/bi/loss-reasons', { params }),
+  biTimeline: (params) => api.get('/pipelines/bi/timeline', { params }),
+  biActivityRanking: (params) => api.get('/pipelines/bi/activity-ranking', { params }),
+};
+
+// Products API
+export const productsApi = {
+  getAll: () => api.get('/products'),
+  create: (data) => api.post('/products', data),
+  update: (id, data) => api.put(`/products/${id}`, data),
+  delete: (id) => api.delete(`/products/${id}`),
 };
 
 // Deals API

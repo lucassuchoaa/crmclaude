@@ -491,12 +491,15 @@ async function createTables(db) {
       title TEXT NOT NULL,
       company TEXT,
       value REAL DEFAULT 0,
+      num_employees INTEGER,
+      product_id TEXT,
       owner_id TEXT NOT NULL,
       priority TEXT DEFAULT 'medium',
       contact_name TEXT,
       contact_phone TEXT,
       contact_email TEXT,
       notes TEXT,
+      loss_reason TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
@@ -578,6 +581,19 @@ async function createTables(db) {
     )
   `);
 
+  // Products
+    await ddl(`
+      CREATE TABLE IF NOT EXISTS products (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        is_active INTEGER DEFAULT 1,
+        created_by TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
   // ── Indexes ──
   // PG and SQLite both support CREATE INDEX IF NOT EXISTS
   const indexes = `
@@ -645,6 +661,9 @@ async function createTables(db) {
     await pgSafeAddColumn('materials', 'file_data', 'BYTEA');
     await pgSafeAddColumn('materials', 'file_original_name', 'TEXT');
     await pgSafeAddColumn('pipelines', 'team_id', 'TEXT');
+    await pgSafeAddColumn('deals', 'loss_reason', 'TEXT');
+    await pgSafeAddColumn('deals', 'num_employees', 'INTEGER');
+    await pgSafeAddColumn('deals', 'product_id', 'TEXT');
   }
 
   // ── SQLite-only migrations ──
@@ -674,6 +693,11 @@ async function createTables(db) {
     await safeAddColumn('materials', 'file_data', 'BLOB');
     await safeAddColumn('materials', 'file_original_name', 'TEXT');
     await safeAddColumn('pipelines', 'team_id', 'TEXT');
+    await safeAddColumn('deals', 'loss_reason', 'TEXT');
+
+    // Add num_employees and product_id to deals
+    try { await ddl('ALTER TABLE deals ADD COLUMN num_employees INTEGER'); } catch {}
+    try { await ddl('ALTER TABLE deals ADD COLUMN product_id TEXT'); } catch {}
   }
 }
 
