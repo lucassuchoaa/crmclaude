@@ -2834,6 +2834,20 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
     } catch { setCalEvents([]); }
   };
 
+  const handleConnectGoogle = async () => {
+    try {
+      const r = await googleApi.getAuthUrl();
+      const popup = window.open(r.data.url, "google-auth", "width=500,height=600");
+      const onMsg = (e) => {
+        if (e.data === "google-connected") {
+          googleApi.getStatus().then(r2 => setGoogleConn(r2.data)).catch(() => {});
+          window.removeEventListener("message", onMsg);
+        }
+      };
+      window.addEventListener("message", onMsg);
+    } catch (e) { alert(e.response?.data?.error || "Erro ao conectar Google. Verifique se o administrador configurou o OAuth."); }
+  };
+
   const handleUpdateDeal = async () => {
     if (!selectedDeal) return;
     try {
