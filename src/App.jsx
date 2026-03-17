@@ -3718,7 +3718,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
   const defaultStages = [{ name: "Novo", color: "#6366f1", is_win: false, is_lost: false }, { name: "Em Andamento", color: "#f59e0b", is_win: false, is_lost: false }, { name: "Ganho", color: "#10b981", is_win: true, is_lost: false }, { name: "Perdido", color: "#ef4444", is_win: false, is_lost: true }];
   const [pipeForm, setPipeForm] = useState({ name: "", team_id: "", stages: defaultStages });
   const [pipeAutomations, setPipeAutomations] = useState([]);
-  const [autoForm, setAutoForm] = useState({ trigger_stage_id: "", action_type: "copy_to_pipeline", target_pipeline_id: "", target_stage_id: "", copy_history: true, auto_tasks: [] });
+  const [autoForm, setAutoForm] = useState({ trigger_stage_id: "", action_type: "create_tasks", target_pipeline_id: "", target_stage_id: "", copy_history: true, auto_tasks: [] });
   const [autoTaskForm, setAutoTaskForm] = useState({ title: "", due_days: "" });
   // Teams config state
   const [cfgTeams, setCfgTeams] = useState([]);
@@ -3788,7 +3788,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
       });
       const r = await pipelinesApi.getAutomations(editPipe.id);
       setPipeAutomations(r.data);
-      setAutoForm({ trigger_stage_id: "", action_type: "copy_to_pipeline", target_pipeline_id: "", target_stage_id: "", copy_history: true, auto_tasks: [] });
+      setAutoForm({ trigger_stage_id: "", action_type: "create_tasks", target_pipeline_id: "", target_stage_id: "", copy_history: true, auto_tasks: [] });
     } catch (e) { console.error(e); }
   };
 
@@ -5088,71 +5088,116 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
               {/* AUTOMATIONS - only visible when editing */}
               {editPipe && (
                 <div>
-                  <label style={{ fontSize: 12, color: T.t2, textTransform: "uppercase", fontWeight: 600, marginBottom: 8, display: "block" }}>⚡ Automações</label>
+                  <label style={{ fontSize: 12, color: T.t2, textTransform: "uppercase", fontWeight: 600, marginBottom: 4, display: "block" }}>⚡ Automações</label>
+                  <p style={{ fontSize: 11, color: T.tm, marginBottom: 12 }}>Defina ações automáticas quando um deal chegar em uma etapa específica.</p>
 
                   {/* Existing automations */}
-                  {pipeAutomations.map(a => (
-                    <div key={a.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: 10, background: T.bg2, borderRadius: 8, border: `1px solid ${T.bor}`, marginBottom: 8 }}>
-                      <div style={{ flex: 1, fontSize: 12 }}>
-                        <span style={{ fontWeight: 600 }}>Quando chegar em "{a.stage_name}"</span>
-                        <span style={{ color: T.tm }}> → </span>
-                        {a.action_type === "copy_to_pipeline" && <span>Copiar para "{a.target_pipeline_name}" {Number(a.copy_history) ? "(com histórico)" : ""}</span>}
-                        {a.action_type === "create_tasks" && <span>Criar tarefas automáticas</span>}
-                        {a.auto_tasks && (() => { try { const tasks = JSON.parse(a.auto_tasks); return tasks.length > 0 ? <span style={{ color: T.tm }}> ({tasks.length} tarefas)</span> : null; } catch { return null; } })()}
+                  {pipeAutomations.map(a => {
+                    let tasks = [];
+                    try { tasks = a.auto_tasks ? JSON.parse(a.auto_tasks) : []; } catch {}
+                    return (
+                      <div key={a.id} style={{ padding: 12, background: T.bg2, borderRadius: 8, border: `1px solid ${T.bor}`, marginBottom: 8 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                          <div style={{ flex: 1, fontSize: 12 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                              <span style={{ background: T.ac + "22", color: T.ac, padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600 }}>Etapa: {a.stage_name}</span>
+                              <span style={{ color: T.tm }}>→</span>
+                              <span style={{ background: a.action_type === "copy_to_pipeline" ? "#3b82f622" : "#10b98122", color: a.action_type === "copy_to_pipeline" ? "#3b82f6" : "#10b981", padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600 }}>
+                                {a.action_type === "copy_to_pipeline" ? `Copiar para "${a.target_pipeline_name}"${Number(a.copy_history) ? " (com histórico)" : ""}` : "Criar tarefas"}
+                              </span>
+                            </div>
+                            {tasks.length > 0 && (
+                              <div style={{ marginLeft: 4 }}>
+                                {tasks.map((t, i) => (
+                                  <div key={i} style={{ fontSize: 11, color: T.t2, padding: "2px 0" }}>
+                                    ✓ {t.title}{t.due_days ? <span style={{ color: T.tm }}> — prazo: {t.due_days} dia(s) após entrada</span> : ""}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          <button onClick={() => handleDeleteAutomation(a.id)} style={{ background: "none", border: "none", color: T.er, cursor: "pointer", fontSize: 14 }}>✕</button>
+                        </div>
                       </div>
-                      <button onClick={() => handleDeleteAutomation(a.id)} style={{ background: "none", border: "none", color: T.er, cursor: "pointer", fontSize: 14 }}>✕</button>
-                    </div>
-                  ))}
+                    );
+                  })}
+
+                  {pipeAutomations.length === 0 && (
+                    <div style={{ padding: 16, textAlign: "center", color: T.tm, fontSize: 12, background: T.bg2, borderRadius: 8, border: `1px solid ${T.bor}`, marginBottom: 12 }}>Nenhuma automação configurada</div>
+                  )}
 
                   {/* Add automation form */}
-                  <div style={{ padding: 12, background: T.bg2, borderRadius: 8, border: `1px dashed ${T.bor}` }}>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                  <div style={{ padding: 14, background: T.bg2, borderRadius: 8, border: `1px dashed ${T.bor}` }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: T.txt }}>Nova Automação</div>
+
+                    {/* Step 1: Select stage */}
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, color: T.t2, fontWeight: 600, marginBottom: 4 }}>1. Quando o deal chegar na etapa:</div>
                       <select value={autoForm.trigger_stage_id} onChange={e => setAutoForm({ ...autoForm, trigger_stage_id: e.target.value })}
-                        style={{ flex: 1, minWidth: 140, padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }}>
-                        <option value="">Quando chegar em...</option>
+                        style={{ width: "100%", padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }}>
+                        <option value="">Selecione a etapa...</option>
                         {pipeForm.stages.filter(s => s.id).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                      </select>
-                      <select value={autoForm.action_type} onChange={e => setAutoForm({ ...autoForm, action_type: e.target.value })}
-                        style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }}>
-                        <option value="copy_to_pipeline">Copiar para outro funil</option>
-                        <option value="create_tasks">Criar tarefas automáticas</option>
                       </select>
                     </div>
 
+                    {/* Step 2: Select action */}
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, color: T.t2, fontWeight: 600, marginBottom: 4 }}>2. Executar a ação:</div>
+                      <select value={autoForm.action_type} onChange={e => setAutoForm({ ...autoForm, action_type: e.target.value })}
+                        style={{ width: "100%", padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }}>
+                        <option value="create_tasks">Criar tarefas automáticas no deal</option>
+                        <option value="copy_to_pipeline">Copiar deal para outro funil</option>
+                      </select>
+                    </div>
+
+                    {/* Copy to pipeline options */}
                     {autoForm.action_type === "copy_to_pipeline" && (
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                      <div style={{ marginBottom: 10, padding: 10, background: T.bg + "80", borderRadius: 6, border: `1px solid ${T.bor}` }}>
+                        <div style={{ fontSize: 11, color: T.t2, fontWeight: 600, marginBottom: 4 }}>Funil de destino:</div>
                         <select value={autoForm.target_pipeline_id} onChange={e => setAutoForm({ ...autoForm, target_pipeline_id: e.target.value })}
-                          style={{ flex: 1, minWidth: 140, padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }}>
-                          <option value="">Funil destino...</option>
+                          style={{ width: "100%", padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12, marginBottom: 6 }}>
+                          <option value="">Selecione o funil...</option>
                           {cfgPipelines.filter(p => p.id !== editPipe?.id).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                         </select>
                         <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: T.t2, cursor: "pointer" }}>
-                          <input type="checkbox" checked={autoForm.copy_history} onChange={e => setAutoForm({ ...autoForm, copy_history: e.target.checked })} /> Copiar histórico
+                          <input type="checkbox" checked={autoForm.copy_history} onChange={e => setAutoForm({ ...autoForm, copy_history: e.target.checked })} /> Copiar atividades e tarefas junto
                         </label>
                       </div>
                     )}
 
-                    {/* Auto tasks */}
-                    <div style={{ marginBottom: 8 }}>
-                      <div style={{ fontSize: 11, color: T.t2, fontWeight: 600, marginBottom: 6 }}>Tarefas automáticas:</div>
-                      {autoForm.auto_tasks.map((t, i) => (
-                        <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
-                          <span style={{ fontSize: 12, flex: 1 }}>• {t.title} {t.due_days ? `(prazo: ${t.due_days}d)` : ""}</span>
-                          <button onClick={() => setAutoForm({ ...autoForm, auto_tasks: autoForm.auto_tasks.filter((_, j) => j !== i) })}
-                            style={{ background: "none", border: "none", color: T.er, cursor: "pointer", fontSize: 12 }}>✕</button>
-                        </div>
-                      ))}
-                      <div style={{ display: "flex", gap: 6 }}>
-                        <input value={autoTaskForm.title} onChange={e => setAutoTaskForm({ ...autoTaskForm, title: e.target.value })} placeholder="Título da tarefa"
-                          style={{ flex: 1, padding: "6px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 4, color: T.txt, fontSize: 11, fontFamily: "'DM Sans',sans-serif" }} />
-                        <input value={autoTaskForm.due_days} onChange={e => setAutoTaskForm({ ...autoTaskForm, due_days: e.target.value })} placeholder="Dias" type="number"
-                          style={{ width: 60, padding: "6px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 4, color: T.txt, fontSize: 11 }} />
-                        <button onClick={() => { if (autoTaskForm.title) { setAutoForm({ ...autoForm, auto_tasks: [...autoForm.auto_tasks, { title: autoTaskForm.title, due_days: parseInt(autoTaskForm.due_days) || null }] }); setAutoTaskForm({ title: "", due_days: "" }); } }}
-                          style={{ padding: "4px 8px", background: T.ac + "22", border: `1px solid ${T.ac}40`, borderRadius: 4, color: T.ac, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>＋</button>
+                    {/* Step 3: Tasks to create */}
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, color: T.t2, fontWeight: 600, marginBottom: 4 }}>
+                        {autoForm.action_type === "create_tasks" ? "3. Tarefas que serão criadas:" : "Tarefas adicionais (opcional):"}
                       </div>
+                      {autoForm.auto_tasks.length > 0 && (
+                        <div style={{ marginBottom: 6 }}>
+                          {autoForm.auto_tasks.map((t, i) => (
+                            <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", padding: "4px 8px", background: T.bg, borderRadius: 4, marginBottom: 3, border: `1px solid ${T.bor}` }}>
+                              <span style={{ fontSize: 11, color: "#10b981", fontWeight: 600 }}>✓</span>
+                              <span style={{ fontSize: 12, flex: 1 }}>{t.title}</span>
+                              {t.due_days && <span style={{ fontSize: 10, color: T.tm, background: T.bg2, padding: "1px 6px", borderRadius: 3 }}>prazo: {t.due_days}d</span>}
+                              <button onClick={() => setAutoForm({ ...autoForm, auto_tasks: autoForm.auto_tasks.filter((_, j) => j !== i) })}
+                                style={{ background: "none", border: "none", color: T.er, cursor: "pointer", fontSize: 12, padding: 0 }}>✕</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <input value={autoTaskForm.title} onChange={e => setAutoTaskForm({ ...autoTaskForm, title: e.target.value })} placeholder="Nome da tarefa"
+                          onKeyDown={e => { if (e.key === "Enter" && autoTaskForm.title) { setAutoForm({ ...autoForm, auto_tasks: [...autoForm.auto_tasks, { title: autoTaskForm.title, due_days: parseInt(autoTaskForm.due_days) || null }] }); setAutoTaskForm({ title: "", due_days: "" }); } }}
+                          style={{ flex: 1, padding: "7px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12, fontFamily: "'DM Sans',sans-serif" }} />
+                        <input value={autoTaskForm.due_days} onChange={e => setAutoTaskForm({ ...autoTaskForm, due_days: e.target.value })} placeholder="Prazo (dias)" type="number" min="0"
+                          style={{ width: 90, padding: "7px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }} />
+                        <button onClick={() => { if (autoTaskForm.title) { setAutoForm({ ...autoForm, auto_tasks: [...autoForm.auto_tasks, { title: autoTaskForm.title, due_days: parseInt(autoTaskForm.due_days) || null }] }); setAutoTaskForm({ title: "", due_days: "" }); } }}
+                          style={{ padding: "6px 12px", background: T.ac + "22", border: `1px solid ${T.ac}40`, borderRadius: 6, color: T.ac, cursor: "pointer", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>＋ Tarefa</button>
+                      </div>
+                      {autoForm.action_type === "create_tasks" && autoForm.auto_tasks.length === 0 && (
+                        <div style={{ fontSize: 10, color: T.tm, marginTop: 4 }}>Adicione pelo menos uma tarefa. O prazo é em dias a partir da entrada na etapa.</div>
+                      )}
                     </div>
 
-                    <Btn sm onClick={handleAddAutomation} disabled={!autoForm.trigger_stage_id || (autoForm.action_type === "copy_to_pipeline" && !autoForm.target_pipeline_id)}>Adicionar Automação</Btn>
+                    <Btn sm onClick={handleAddAutomation} disabled={!autoForm.trigger_stage_id || (autoForm.action_type === "create_tasks" && autoForm.auto_tasks.length === 0) || (autoForm.action_type === "copy_to_pipeline" && !autoForm.target_pipeline_id)}>Salvar Automação</Btn>
                   </div>
                 </div>
               )}
