@@ -578,12 +578,13 @@ router.get('/bi/overview', authenticate, async (req, res) => {
 router.get('/bi/by-owner', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
-    const { pipeline_id, date_from, date_to } = req.query;
+    const { pipeline_id, date_from, date_to, owner_id } = req.query;
     let filters = '';
     const params = [];
     if (pipeline_id) { filters += ' AND d.pipeline_id = ?'; params.push(pipeline_id); }
     if (date_from) { filters += ' AND d.created_at >= ?'; params.push(date_from); }
     if (date_to) { filters += ' AND d.created_at <= ?'; params.push(date_to + 'T23:59:59'); }
+    if (owner_id) { filters += ' AND d.owner_id = ?'; params.push(owner_id); }
 
     const rows = await db.prepare(`
       SELECT d.owner_id, u.name as owner_name,
@@ -612,12 +613,13 @@ router.get('/bi/by-owner', authenticate, async (req, res) => {
 router.get('/bi/by-stage', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
-    const { pipeline_id, date_from, date_to } = req.query;
+    const { pipeline_id, date_from, date_to, owner_id } = req.query;
     let filters = '';
     const params = [];
     if (pipeline_id) { filters += ' AND d.pipeline_id = ?'; params.push(pipeline_id); }
     if (date_from) { filters += ' AND d.created_at >= ?'; params.push(date_from); }
     if (date_to) { filters += ' AND d.created_at <= ?'; params.push(date_to + 'T23:59:59'); }
+    if (owner_id) { filters += ' AND d.owner_id = ?'; params.push(owner_id); }
 
     const rows = await db.prepare(`
       SELECT s.id as stage_id, s.name as stage_name, s.color, s.display_order, s.is_win, s.is_lost,
@@ -642,12 +644,13 @@ router.get('/bi/by-stage', authenticate, async (req, res) => {
 router.get('/bi/loss-reasons', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
-    const { pipeline_id, date_from, date_to } = req.query;
+    const { pipeline_id, date_from, date_to, owner_id } = req.query;
     let filters = '';
     const params = [];
     if (pipeline_id) { filters += ' AND d.pipeline_id = ?'; params.push(pipeline_id); }
     if (date_from) { filters += ' AND d.created_at >= ?'; params.push(date_from); }
     if (date_to) { filters += ' AND d.created_at <= ?'; params.push(date_to + 'T23:59:59'); }
+    if (owner_id) { filters += ' AND d.owner_id = ?'; params.push(owner_id); }
 
     const rows = await db.prepare(`
       SELECT COALESCE(d.loss_reason, 'Não informado') as reason, COUNT(*) as count, COALESCE(SUM(d.value),0) as lost_value
@@ -669,12 +672,13 @@ router.get('/bi/loss-reasons', authenticate, async (req, res) => {
 router.get('/bi/timeline', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
-    const { pipeline_id, period, date_from, date_to } = req.query;
+    const { pipeline_id, period, date_from, date_to, owner_id } = req.query;
     let filters = '';
     const params = [];
     if (pipeline_id) { filters += ' AND d.pipeline_id = ?'; params.push(pipeline_id); }
     if (date_from) { filters += ' AND d.created_at >= ?'; params.push(date_from); }
     if (date_to) { filters += ' AND d.created_at <= ?'; params.push(date_to + 'T23:59:59'); }
+    if (owner_id) { filters += ' AND d.owner_id = ?'; params.push(owner_id); }
 
     const groupBy = period === 'weekly' ? "STRFTIME('%Y-W%W', d.created_at)" : period === 'daily' ? "DATE(d.created_at)" : "STRFTIME('%Y-%m', d.created_at)";
 
@@ -703,7 +707,7 @@ router.get('/bi/timeline', authenticate, async (req, res) => {
 router.get('/bi/activity-ranking', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
-    const { pipeline_id, date_from, date_to } = req.query;
+    const { pipeline_id, date_from, date_to, owner_id } = req.query;
     let filters = '';
     const params = [];
     if (date_from) { filters += ' AND a.created_at >= ?'; params.push(date_from); }
@@ -711,6 +715,7 @@ router.get('/bi/activity-ranking', authenticate, async (req, res) => {
 
     let pipeFilter = '';
     if (pipeline_id) { pipeFilter = ' AND d.pipeline_id = ?'; params.push(pipeline_id); }
+    if (owner_id) { pipeFilter += ' AND d.owner_id = ?'; params.push(owner_id); }
 
     const rows = await db.prepare(`
       SELECT a.user_id, u.name as user_name, a.type,
