@@ -3020,7 +3020,7 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
           <div>
             {/* Tabs */}
             <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${T.bor}`, marginBottom: 16 }}>
-              {["detalhes", "atividades", "contatos", "tarefas", ...(googleConn.connected ? ["email", "agenda"] : [])].map(t => (
+              {["detalhes", "atividades", "contatos", "tarefas", "email", "agenda"].map(t => (
                 <button key={t} onClick={() => setDetailTab(t)}
                   style={{ padding: "8px 16px", fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: "none", color: detailTab === t ? T.ac : T.tm, borderBottom: `2px solid ${detailTab === t ? T.ac : "transparent"}`, marginBottom: -1, textTransform: "capitalize" }}>{t}</button>
               ))}
@@ -3220,57 +3220,79 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
             )}
 
             {/* EMAIL TAB */}
-            {detailTab === "email" && googleConn.connected && (
+            {detailTab === "email" && (
               <div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  <div style={{ fontSize: 11, color: T.tm }}>Enviando de: <strong>{googleConn.email}</strong></div>
-                  <input value={emailForm.to} onChange={e => setEmailForm({ ...emailForm, to: e.target.value })} placeholder="Para (email) *"
-                    style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 13, fontFamily: "'DM Sans',sans-serif" }} />
-                  <input value={emailForm.cc} onChange={e => setEmailForm({ ...emailForm, cc: e.target.value })} placeholder="CC (opcional)"
-                    style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 13, fontFamily: "'DM Sans',sans-serif" }} />
-                  <input value={emailForm.subject} onChange={e => setEmailForm({ ...emailForm, subject: e.target.value })} placeholder="Assunto *"
-                    style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 13, fontFamily: "'DM Sans',sans-serif" }} />
-                  <textarea value={emailForm.body} onChange={e => setEmailForm({ ...emailForm, body: e.target.value })} rows={6}
-                    placeholder="Corpo do email..."
-                    style={{ padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 13, fontFamily: "'DM Sans',sans-serif", resize: "vertical" }} />
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <Btn sm onClick={handleSendEmail} disabled={emailSending || !emailForm.to || !emailForm.subject || !emailForm.body}>
-                      {emailSending ? "Enviando..." : "Enviar Email"}
-                    </Btn>
-                    {selectedDeal?.contact_email && !emailForm.to && (
-                      <Btn sm v="secondary" onClick={() => setEmailForm({ ...emailForm, to: selectedDeal.contact_email })}>Usar contato do deal</Btn>
-                    )}
+                {!googleConn.connected ? (
+                  <div style={{ padding: 30, textAlign: "center" }}>
+                    <div style={{ fontSize: 40, marginBottom: 12 }}>✉️</div>
+                    <h4 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Enviar Email</h4>
+                    <p style={{ color: T.tm, fontSize: 13, marginBottom: 16, maxWidth: 360, margin: "0 auto 16px" }}>Envie emails diretamente pela sua conta Gmail sem sair do CRM. O email fica registrado como atividade no deal.</p>
+                    <Btn sm onClick={handleConnectGoogle}>Conectar Google</Btn>
+                    <div style={{ fontSize: 11, color: T.tm, marginTop: 10 }}>Requer configuração do Google OAuth pelo administrador</div>
                   </div>
-                </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div style={{ fontSize: 11, color: T.tm }}>Enviando de: <strong>{googleConn.email}</strong></div>
+                    <input value={emailForm.to} onChange={e => setEmailForm({ ...emailForm, to: e.target.value })} placeholder="Para (email) *"
+                      style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 13, fontFamily: "'DM Sans',sans-serif" }} />
+                    <input value={emailForm.cc} onChange={e => setEmailForm({ ...emailForm, cc: e.target.value })} placeholder="CC (opcional)"
+                      style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 13, fontFamily: "'DM Sans',sans-serif" }} />
+                    <input value={emailForm.subject} onChange={e => setEmailForm({ ...emailForm, subject: e.target.value })} placeholder="Assunto *"
+                      style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 13, fontFamily: "'DM Sans',sans-serif" }} />
+                    <textarea value={emailForm.body} onChange={e => setEmailForm({ ...emailForm, body: e.target.value })} rows={6}
+                      placeholder="Corpo do email..."
+                      style={{ padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 13, fontFamily: "'DM Sans',sans-serif", resize: "vertical" }} />
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <Btn sm onClick={handleSendEmail} disabled={emailSending || !emailForm.to || !emailForm.subject || !emailForm.body}>
+                        {emailSending ? "Enviando..." : "Enviar Email"}
+                      </Btn>
+                      {selectedDeal?.contact_email && !emailForm.to && (
+                        <Btn sm v="secondary" onClick={() => setEmailForm({ ...emailForm, to: selectedDeal.contact_email })}>Usar contato do deal</Btn>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
             {/* AGENDA TAB */}
-            {detailTab === "agenda" && googleConn.connected && (
+            {detailTab === "agenda" && (
               <div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                  <h4 style={{ fontSize: 13, fontWeight: 700 }}>Google Calendar</h4>
-                  <Btn sm onClick={loadCalendarEvents}>Carregar Eventos</Btn>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {calEvents.length === 0 && <div style={{ padding: 20, textAlign: "center", color: T.tm, fontSize: 13 }}>Clique em "Carregar Eventos" para ver sua agenda</div>}
-                  {calEvents.map((ev, i) => (
-                    <div key={i} style={{ display: "flex", gap: 10, padding: "10px 12px", background: T.bg2, borderRadius: 8, border: `1px solid ${T.bor}` }}>
-                      <div style={{ width: 4, background: "#4285f4", borderRadius: 2, flexShrink: 0 }} />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600 }}>{ev.summary || "(Sem título)"}</div>
-                        <div style={{ fontSize: 11, color: T.tm }}>
-                          {ev.start?.dateTime ? new Date(ev.start.dateTime).toLocaleString("pt-BR") : ev.start?.date || ""}
-                          {ev.end?.dateTime ? ` — ${new Date(ev.end.dateTime).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : ""}
-                        </div>
-                        {ev.description && <div style={{ fontSize: 11, color: T.tm, marginTop: 2 }}>{ev.description.slice(0, 100)}</div>}
-                      </div>
+                {!googleConn.connected ? (
+                  <div style={{ padding: 30, textAlign: "center" }}>
+                    <div style={{ fontSize: 40, marginBottom: 12 }}>📅</div>
+                    <h4 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Google Calendar</h4>
+                    <p style={{ color: T.tm, fontSize: 13, marginBottom: 16, maxWidth: 360, margin: "0 auto 16px" }}>Veja sua agenda, e ao agendar atividades no deal o evento é criado automaticamente no seu Google Calendar.</p>
+                    <Btn sm onClick={handleConnectGoogle}>Conectar Google</Btn>
+                    <div style={{ fontSize: 11, color: T.tm, marginTop: 10 }}>Requer configuração do Google OAuth pelo administrador</div>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                      <h4 style={{ fontSize: 13, fontWeight: 700 }}>Google Calendar — {googleConn.email}</h4>
+                      <Btn sm onClick={loadCalendarEvents}>Carregar Eventos</Btn>
                     </div>
-                  ))}
-                </div>
-                <div style={{ marginTop: 16, padding: 12, background: T.bg2, borderRadius: 8, fontSize: 12, color: T.tm }}>
-                  Ao <strong>Agendar</strong> uma atividade, o evento é criado automaticamente no seu Google Calendar.
-                </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {calEvents.length === 0 && <div style={{ padding: 20, textAlign: "center", color: T.tm, fontSize: 13 }}>Clique em "Carregar Eventos" para ver sua agenda</div>}
+                      {calEvents.map((ev, i) => (
+                        <div key={i} style={{ display: "flex", gap: 10, padding: "10px 12px", background: T.bg2, borderRadius: 8, border: `1px solid ${T.bor}` }}>
+                          <div style={{ width: 4, background: "#4285f4", borderRadius: 2, flexShrink: 0 }} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600 }}>{ev.summary || "(Sem título)"}</div>
+                            <div style={{ fontSize: 11, color: T.tm }}>
+                              {ev.start?.dateTime ? new Date(ev.start.dateTime).toLocaleString("pt-BR") : ev.start?.date || ""}
+                              {ev.end?.dateTime ? ` — ${new Date(ev.end.dateTime).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : ""}
+                            </div>
+                            {ev.description && <div style={{ fontSize: 11, color: T.tm, marginTop: 2 }}>{ev.description.slice(0, 100)}</div>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ marginTop: 16, padding: 12, background: T.bg2, borderRadius: 8, fontSize: 12, color: T.tm }}>
+                      Ao <strong>Agendar</strong> uma atividade, o evento é criado automaticamente no seu Google Calendar.
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
