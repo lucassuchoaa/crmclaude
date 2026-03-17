@@ -4267,10 +4267,42 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
   const thS = { textAlign: "left", padding: "12px 14px", fontSize: 10, fontWeight: 600, color: T.tm, textTransform: "uppercase", borderBottom: `1px solid ${T.bor}`, background: T.bg2 };
   const tdS = { padding: "12px 14px", fontSize: 13, borderBottom: `1px solid ${T.bor}` };
 
+  const cfgGroups = isSA ? [
+    { label: "Sistema", items: ["geral", "notificações", "auditoria"] },
+    { label: "Integrações", items: ["google", "hubspot"] },
+    { label: "Cadastros", items: ["usuários", "parceiros", "convênios", "equipes", "produtos"] },
+    { label: "Pipeline", items: ["funis", "materiais"] },
+  ] : [{ label: "Pipeline", items: ["funis"] }];
+  const [openGroup, setOpenGroup] = useState(null);
+
   return (
     <div>
-      <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${T.bor}`, marginBottom: 20 }}>
-        {(isSA ? ["geral", "google", "hubspot", "notificações", "usuários", "parceiros", "convênios", "equipes", "produtos", "funis", "materiais", "auditoria"] : ["funis"]).map(t => <button key={t} onClick={() => { setTab(t); if (t === "auditoria" && auditData.length === 0 && !auditLoading) loadAudit(0, auditFilters); }} style={{ padding: "10px 16px", fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: "none", color: tab === t ? T.ac : T.tm, fontFamily: "'DM Sans',sans-serif", borderBottom: `2px solid ${tab === t ? T.ac : "transparent"}`, marginBottom: -1, textTransform: "capitalize" }}>{t}</button>)}
+      <div style={{ display: "flex", gap: 2, borderBottom: `1px solid ${T.bor}`, marginBottom: 20, flexWrap: "wrap" }}>
+        {cfgGroups.map(g => {
+          const isActive = g.items.includes(tab);
+          const isOpen = openGroup === g.label;
+          if (g.items.length === 1) {
+            return <button key={g.label} onClick={() => { setTab(g.items[0]); setOpenGroup(null); }}
+              style={{ padding: "10px 16px", fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: "none", color: isActive ? T.ac : T.tm, fontFamily: "'DM Sans',sans-serif", borderBottom: `2px solid ${isActive ? T.ac : "transparent"}`, marginBottom: -1, textTransform: "capitalize" }}>{g.items[0]}</button>;
+          }
+          return <div key={g.label} style={{ position: "relative" }}>
+            <button onClick={() => setOpenGroup(isOpen ? null : g.label)}
+              style={{ padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer", border: "none", background: "none", color: isActive ? T.ac : T.tm, fontFamily: "'DM Sans',sans-serif", borderBottom: `2px solid ${isActive ? T.ac : "transparent"}`, marginBottom: -1, display: "flex", alignItems: "center", gap: 4 }}>
+              {g.label} <span style={{ fontSize: 9, opacity: 0.6 }}>{isOpen ? "▲" : "▼"}</span>
+            </button>
+            {isOpen && <>
+              <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 99 }} onClick={() => setOpenGroup(null)} />
+              <div style={{ position: "absolute", top: "100%", left: 0, background: T.card, border: `1px solid ${T.bor}`, borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.15)", zIndex: 100, minWidth: 170, padding: "4px 0", marginTop: 4 }}>
+                {g.items.map(t => (
+                  <button key={t} onClick={() => { setTab(t); setOpenGroup(null); if (t === "auditoria" && auditData.length === 0 && !auditLoading) loadAudit(0, auditFilters); }}
+                    style={{ display: "block", width: "100%", padding: "10px 16px", fontSize: 13, fontWeight: tab === t ? 600 : 400, cursor: "pointer", border: "none", background: tab === t ? T.ac + "15" : "transparent", color: tab === t ? T.ac : T.txt, fontFamily: "'DM Sans',sans-serif", textAlign: "left", textTransform: "capitalize" }}>
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </>}
+          </div>;
+        })}
       </div>
       {tab === "geral" && <div>
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20, marginBottom: 16 }}>
