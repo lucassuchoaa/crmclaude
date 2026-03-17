@@ -18,6 +18,7 @@ const transformUser = (u) => ({
   empresa: u.empresa,
   tel: u.tel,
   cnpj: u.cnpj,
+  uf: u.uf,
   comTipo: u.com_tipo,
   comVal: u.com_val,
   eId: u.role === 'diretor' ? u.manager_id : undefined,
@@ -2046,13 +2047,14 @@ function ConvenioPage() {
       {tab === "parceiros" && (
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
           <div className="table-responsive"><table className="data-table" style={{ minWidth: 500 }}>
-            <thead><tr>{["Parceiro", "Empresa", "CNPJ", "Indicações", "Ativas"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
+            <thead><tr>{["Parceiro", "Empresa", "UF", "CNPJ", "Indicações", "Ativas"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
             <tbody>
-              {parceiros.length === 0 && <tr><td colSpan={5} style={{ ...tdS, textAlign: "center", color: T.t2 }}>Nenhum parceiro vinculado</td></tr>}
+              {parceiros.length === 0 && <tr><td colSpan={6} style={{ ...tdS, textAlign: "center", color: T.t2 }}>Nenhum parceiro vinculado</td></tr>}
               {parceiros.map(p => (
                 <tr key={p.id}>
                   <td style={{ ...tdS, fontWeight: 600 }}>{p.name}</td>
                   <td style={{ ...tdS, color: T.t2 }}>{p.empresa || "—"}</td>
+                  <td style={tdS}>{p.uf ? <Badge>{p.uf}</Badge> : <span style={{ color: T.tm }}>—</span>}</td>
                   <td style={{ ...tdS, fontFamily: "'Space Mono',monospace", fontSize: 11 }}>{p.cnpj || "—"}</td>
                   <td style={tdS}><Badge type="accent">{p.indication_count || 0}</Badge></td>
                   <td style={tdS}><Badge type="warning">{p.active_indications || 0}</Badge></td>
@@ -4083,6 +4085,8 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
   // Parceiros tab state
   const [pSearch, setPSearch] = useState("");
   const [pExecFilter, setPExecFilter] = useState("");
+  const [pUfFilter, setPUfFilter] = useState("");
+  const [populatingUf, setPopulatingUf] = useState(false);
   const [editParcCfg, setEditParcCfg] = useState(null);
   const [epF, setEpF] = useState({ name: "", email: "", empresa: "", cnpj: "", tel: "", comTipo: "pct", comVal: "", managerId: "" });
   const [epSaving, setEpSaving] = useState(false);
@@ -4913,26 +4917,43 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
         const executivos = users.filter(u => u.role === "gerente");
         const allParcs = users.filter(u => u.role === "parceiro").filter(p => {
           if (pExecFilter && p.gId !== pExecFilter) return false;
+          if (pUfFilter && (p.uf || "") !== pUfFilter) return false;
           if (pSearch) { const s = pSearch.toLowerCase(); return p.name.toLowerCase().includes(s) || (p.empresa || "").toLowerCase().includes(s) || (p.cnpj || "").includes(s); }
           return true;
         });
+        const allUfs = [...new Set(users.filter(u => u.role === "parceiro" && u.uf).map(u => u.uf))].sort();
+        const missingUfCount = users.filter(u => u.role === "parceiro" && u.cnpj && !u.uf).length;
         return <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
             <div style={{ fontSize: 13, color: T.t2 }}>{allParcs.length} parceiro(s)</div>
           </div>
-          <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
             <input value={pSearch} onChange={e => setPSearch(e.target.value)} placeholder="Buscar por nome, empresa ou CNPJ..." style={{ flex: 1, minWidth: 200, padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }} />
             <select value={pExecFilter} onChange={e => setPExecFilter(e.target.value)} style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13, minWidth: 160 }}>
               <option value="">Todos os executivos</option>
               {executivos.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
             </select>
-            {(pSearch || pExecFilter) && <Btn v="secondary" sm onClick={() => { setPSearch(""); setPExecFilter(""); }}>Limpar</Btn>}
+            <select value={pUfFilter} onChange={e => setPUfFilter(e.target.value)} style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13, minWidth: 100 }}>
+              <option value="">Todos UFs</option>
+              {allUfs.map(uf => <option key={uf} value={uf}>{uf}</option>)}
+            </select>
+            {(pSearch || pExecFilter || pUfFilter) && <Btn v="secondary" sm onClick={() => { setPSearch(""); setPExecFilter(""); setPUfFilter(""); }}>Limpar</Btn>}
+            {missingUfCount > 0 && <Btn sm v="secondary" disabled={populatingUf} onClick={async () => {
+              setPopulatingUf(true);
+              try {
+                const r = await usersApi.populateUf();
+                alert(`UF atualizado para ${r.data.updated} parceiro(s).${r.data.errors > 0 ? ` ${r.data.errors} erro(s).` : ""}`);
+                const ur = await usersApi.getAll();
+                setUsers(ur.data);
+              } catch (e) { alert(e.response?.data?.error || "Erro"); }
+              setPopulatingUf(false);
+            }}>{populatingUf ? "Buscando..." : `Popular UF (${missingUfCount})`}</Btn>}
           </div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
             <div className="table-responsive"><table className="data-table" style={{ minWidth: 800 }}>
-              <thead><tr>{["Parceiro", "Empresa", "CNPJ", "Telefone", "Comissão", "Executivo", "Indicações", "Ações"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
+              <thead><tr>{["Parceiro", "Empresa", "UF", "CNPJ", "Telefone", "Comissão", "Executivo", "Indicações", "Ações"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>{allParcs.length === 0 ? (
-                <tr><td colSpan={8} style={{ ...tdS, textAlign: "center", color: T.tm, padding: 30 }}>Nenhum parceiro encontrado</td></tr>
+                <tr><td colSpan={9} style={{ ...tdS, textAlign: "center", color: T.tm, padding: 30 }}>Nenhum parceiro encontrado</td></tr>
               ) : allParcs.map(p => {
                 const indCount = inds.filter(i => i.pId === p.id).length;
                 const exec = users.find(u => u.id === p.gId);
@@ -4944,6 +4965,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
                     </div>
                   </td>
                   <td style={{ ...tdS, fontSize: 12, color: T.t2 }}>{p.empresa || "—"}</td>
+                  <td style={{ ...tdS, fontSize: 12, textAlign: "center" }}>{p.uf ? <Badge>{p.uf}</Badge> : <span style={{ color: T.tm }}>—</span>}</td>
                   <td style={{ ...tdS, fontSize: 12, fontFamily: "'Space Mono',monospace" }}>{formatCnpjDisplay(p.cnpj)}</td>
                   <td style={{ ...tdS, fontSize: 12 }}>{p.tel || "—"}</td>
                   <td style={tdS}>

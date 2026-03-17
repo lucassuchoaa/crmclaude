@@ -21,7 +21,7 @@ router.get('/', authenticate, async (req, res) => {
 
     let query = `
       SELECT u.id, u.email, u.name, u.role, u.avatar, u.manager_id, u.is_active,
-             u.empresa, u.tel, u.com_tipo, u.com_val, u.cnpj, u.created_at,
+             u.empresa, u.tel, u.com_tipo, u.com_val, u.cnpj, u.uf, u.created_at,
              u.last_login_at, m.name as manager_name
       FROM users u
       LEFT JOIN users m ON u.manager_id = m.id
@@ -89,7 +89,7 @@ router.get('/:id', authenticate, async (req, res) => {
     const db = getDatabase();
     const user = await db.prepare(`
       SELECT u.id, u.email, u.name, u.role, u.avatar, u.manager_id, u.is_active,
-             u.empresa, u.tel, u.com_tipo, u.com_val, u.cnpj, u.created_at,
+             u.empresa, u.tel, u.com_tipo, u.com_val, u.cnpj, u.uf, u.created_at,
              u.last_login_at, m.name as manager_name
       FROM users u
       LEFT JOIN users m ON u.manager_id = m.id
@@ -405,6 +405,41 @@ router.get('/:id/team', authenticate, async (req, res) => {
   } catch (error) {
     console.error('Get team error:', error);
     res.status(500).json({ error: 'Failed to get team' });
+  }
+});
+
+// POST /populate-uf - Fetch UF from CNPJ for all parceiros missing UF
+router.post('/populate-uf', authenticate, async (req, res) => {
+  if (req.user.role !== 'super_admin') return res.status(403).json({ error: 'Sem permissão' });
+  try {
+    const db = getDatabase();
+    const { lookupCnpj } = await import('../utils/cnpjLookup.js');
+
+    const parceiros = await db.prepare(
+      "SELECT id, cnpj FROM users WHERE role = 'parceiro' AND cnpj IS NOT NULL AND cnpj != '' AND (uf IS NULL OR uf = '')"
+    ).all();
+
+    let updated = 0, errors = 0;
+    for (const p of parceiros) {
+      const clean = p.cnpj.replace(/\D/g, '');
+      if (clean.length !== 14) { errors++; continue; }
+      try {
+        const data = await lookupCnpj(clean);
+        if (data.endereco?.uf) {
+          await db.prepare('UPDATE users SET uf = ? WHERE id = ?').run(data.endereco.uf, p.id);
+          updated++;
+        }
+        // Rate limit: wait 1.5s between requests to avoid 429
+        await new Promise(r => setTimeout(r, 1500));
+      } catch {
+        errors++;
+      }
+    }
+
+    res.json({ ok: true, total: parceiros.length, updated, errors });
+  } catch (e) {
+    console.error('Populate UF error:', e);
+    res.status(500).json({ error: e.message });
   }
 });
 

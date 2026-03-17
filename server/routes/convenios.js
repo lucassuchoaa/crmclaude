@@ -149,7 +149,7 @@ router.get('/:id/parceiros', authenticate, async (req, res) => {
     }
 
     const parceiros = await db.prepare(`
-      SELECT u.id, u.name, u.email, u.empresa, u.cnpj, u.tel, u.is_active, u.created_at,
+      SELECT u.id, u.name, u.email, u.empresa, u.cnpj, u.tel, u.uf, u.is_active, u.created_at,
         (SELECT COUNT(*) FROM indications i WHERE i.owner_id = u.id) as indication_count,
         (SELECT COUNT(*) FROM indications i WHERE i.owner_id = u.id AND i.status NOT IN ('perdido', 'fechado')) as active_indications
       FROM users u

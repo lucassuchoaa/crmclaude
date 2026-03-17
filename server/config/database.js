@@ -720,6 +720,9 @@ async function createTables(db) {
     // Add num_employees and product_id to deals
     try { await ddl('ALTER TABLE deals ADD COLUMN num_employees INTEGER'); } catch {}
     try { await ddl('ALTER TABLE deals ADD COLUMN product_id TEXT'); } catch {}
+
+    // Add uf (estado) to users for parceiro location tracking
+    await safeAddColumn('users', 'uf', 'TEXT');
   }
 }
 

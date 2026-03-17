@@ -125,6 +125,9 @@ export const usersApi = {
 
   resetPassword: (id) =>
     api.post(`/users/${id}/reset-password`),
+
+  populateUf: () =>
+    api.post('/users/populate-uf'),
 };
 
 // Indications API
