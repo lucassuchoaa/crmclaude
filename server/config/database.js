@@ -594,6 +594,28 @@ async function createTables(db) {
       )
     `);
 
+  // App-level settings (key-value)
+  await ddl(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+  // Google OAuth tokens per user
+  await ddl(`
+      CREATE TABLE IF NOT EXISTS google_tokens (
+        user_id TEXT PRIMARY KEY,
+        access_token TEXT NOT NULL,
+        refresh_token TEXT NOT NULL,
+        token_expiry TEXT,
+        email TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
   // ── Indexes ──
   // PG and SQLite both support CREATE INDEX IF NOT EXISTS
   const indexes = `

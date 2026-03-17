@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback } from "react";
-import { authApi, usersApi, indicationsApi, commissionsApi, nfesApi, materialsApi, notificationsApi, hubspotApi, groupsApi, cnpjAgentApi, diretoriaApi, whatsappApi, conveniosApi, pipelinesApi, dealsApi, teamsApi, productsApi, setTokens, clearTokens } from "./services/api";
+import { authApi, usersApi, indicationsApi, commissionsApi, nfesApi, materialsApi, notificationsApi, hubspotApi, groupsApi, cnpjAgentApi, diretoriaApi, whatsappApi, conveniosApi, pipelinesApi, dealsApi, teamsApi, productsApi, googleApi, setTokens, clearTokens } from "./services/api";
 import { useBreakpoint } from "./hooks/useBreakpoint";
 
 const AuthCtx = createContext(null);
@@ -2686,6 +2686,13 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
   const [taskForm, setTaskForm] = useState({ title: "", assigned_to: "", due_date: "" });
   const [loading, setLoading] = useState(true);
   const canEdit = ["gerente", "super_admin", "executivo"].includes(user.role);
+  // Google integration
+  const [googleConn, setGoogleConn] = useState({ connected: false, email: null });
+  const [emailForm, setEmailForm] = useState({ to: "", subject: "", body: "", cc: "" });
+  const [emailSending, setEmailSending] = useState(false);
+  const [calEvents, setCalEvents] = useState([]);
+
+  useEffect(() => { googleApi.getStatus().then(r => setGoogleConn(r.data)).catch(() => {}); }, []);
 
   useEffect(() => {
     const params = selectedTeam ? { team_id: selectedTeam } : {};
@@ -2789,6 +2796,42 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
   const handleToggleTask = async (taskId, current) => {
     await dealsApi.completeTask(taskId, !current);
     setTasks(prev => prev.map(t => Number(t.id) === Number(taskId) ? { ...t, is_completed: !current ? 1 : 0 } : t));
+  };
+
+  const handleSendEmail = async () => {
+    if (!emailForm.to || !emailForm.subject || !emailForm.body) return;
+    setEmailSending(true);
+    try {
+      await googleApi.sendEmail(emailForm);
+      // Also register as activity
+      if (selectedDeal) {
+        await dealsApi.createActivity(selectedDeal.id, { type: "email", description: `Email para ${emailForm.to}: ${emailForm.subject}` });
+        const r = await dealsApi.getActivities(selectedDeal.id);
+        setActivities(r.data);
+      }
+      setEmailForm({ to: "", subject: "", body: "", cc: "" });
+      setDetailTab("atividades");
+    } catch (e) { alert(e.response?.data?.error || "Erro ao enviar email"); }
+    setEmailSending(false);
+  };
+
+  const handleCreateCalEvent = async () => {
+    if (!actForm.description || !actForm.scheduled_at) return;
+    try {
+      await googleApi.createCalendarEvent({
+        summary: `${actForm.description} - ${selectedDeal?.title || ""}`,
+        description: `Deal: ${selectedDeal?.title}\nEmpresa: ${selectedDeal?.company || ""}`,
+        startDateTime: new Date(actForm.scheduled_at).toISOString(),
+      });
+    } catch { /* calendar optional */ }
+  };
+
+  const loadCalendarEvents = async () => {
+    if (!googleConn.connected) return;
+    try {
+      const r = await googleApi.getCalendarEvents({ maxResults: 10 });
+      setCalEvents(r.data);
+    } catch { setCalEvents([]); }
   };
 
   const handleUpdateDeal = async () => {
@@ -2977,7 +3020,7 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
           <div>
             {/* Tabs */}
             <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${T.bor}`, marginBottom: 16 }}>
-              {["detalhes", "atividades", "contatos", "tarefas"].map(t => (
+              {["detalhes", "atividades", "contatos", "tarefas", ...(googleConn.connected ? ["email", "agenda"] : [])].map(t => (
                 <button key={t} onClick={() => setDetailTab(t)}
                   style={{ padding: "8px 16px", fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: "none", color: detailTab === t ? T.ac : T.tm, borderBottom: `2px solid ${detailTab === t ? T.ac : "transparent"}`, marginBottom: -1, textTransform: "capitalize" }}>{t}</button>
               ))}
@@ -3069,7 +3112,7 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
                     <input type="datetime-local" value={actForm.scheduled_at} onChange={e => setActForm({ ...actForm, scheduled_at: e.target.value })}
                       style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }} />
                     <Btn sm onClick={() => handleAddActivity(true)} disabled={!actForm.description}>Registrar</Btn>
-                    <Btn sm v="secondary" onClick={() => { if (!actForm.scheduled_at) { alert("Selecione data/hora para agendar"); return; } handleAddActivity(false); }} disabled={!actForm.description}>Agendar</Btn>
+                    <Btn sm v="secondary" onClick={async () => { if (!actForm.scheduled_at) { alert("Selecione data/hora para agendar"); return; } if (googleConn.connected) await handleCreateCalEvent(); handleAddActivity(false); }} disabled={!actForm.description}>Agendar</Btn>
                   </div>
                 )}
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -3172,6 +3215,61 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
                     </div>
                   ))}
                   {tasks.length === 0 && <div style={{ padding: 20, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhuma tarefa</div>}
+                </div>
+              </div>
+            )}
+
+            {/* EMAIL TAB */}
+            {detailTab === "email" && googleConn.connected && (
+              <div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={{ fontSize: 11, color: T.tm }}>Enviando de: <strong>{googleConn.email}</strong></div>
+                  <input value={emailForm.to} onChange={e => setEmailForm({ ...emailForm, to: e.target.value })} placeholder="Para (email) *"
+                    style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 13, fontFamily: "'DM Sans',sans-serif" }} />
+                  <input value={emailForm.cc} onChange={e => setEmailForm({ ...emailForm, cc: e.target.value })} placeholder="CC (opcional)"
+                    style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 13, fontFamily: "'DM Sans',sans-serif" }} />
+                  <input value={emailForm.subject} onChange={e => setEmailForm({ ...emailForm, subject: e.target.value })} placeholder="Assunto *"
+                    style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 13, fontFamily: "'DM Sans',sans-serif" }} />
+                  <textarea value={emailForm.body} onChange={e => setEmailForm({ ...emailForm, body: e.target.value })} rows={6}
+                    placeholder="Corpo do email..."
+                    style={{ padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 13, fontFamily: "'DM Sans',sans-serif", resize: "vertical" }} />
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Btn sm onClick={handleSendEmail} disabled={emailSending || !emailForm.to || !emailForm.subject || !emailForm.body}>
+                      {emailSending ? "Enviando..." : "Enviar Email"}
+                    </Btn>
+                    {selectedDeal?.contact_email && !emailForm.to && (
+                      <Btn sm v="secondary" onClick={() => setEmailForm({ ...emailForm, to: selectedDeal.contact_email })}>Usar contato do deal</Btn>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* AGENDA TAB */}
+            {detailTab === "agenda" && googleConn.connected && (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <h4 style={{ fontSize: 13, fontWeight: 700 }}>Google Calendar</h4>
+                  <Btn sm onClick={loadCalendarEvents}>Carregar Eventos</Btn>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {calEvents.length === 0 && <div style={{ padding: 20, textAlign: "center", color: T.tm, fontSize: 13 }}>Clique em "Carregar Eventos" para ver sua agenda</div>}
+                  {calEvents.map((ev, i) => (
+                    <div key={i} style={{ display: "flex", gap: 10, padding: "10px 12px", background: T.bg2, borderRadius: 8, border: `1px solid ${T.bor}` }}>
+                      <div style={{ width: 4, background: "#4285f4", borderRadius: 2, flexShrink: 0 }} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>{ev.summary || "(Sem título)"}</div>
+                        <div style={{ fontSize: 11, color: T.tm }}>
+                          {ev.start?.dateTime ? new Date(ev.start.dateTime).toLocaleString("pt-BR") : ev.start?.date || ""}
+                          {ev.end?.dateTime ? ` — ${new Date(ev.end.dateTime).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : ""}
+                        </div>
+                        {ev.description && <div style={{ fontSize: 11, color: T.tm, marginTop: 2 }}>{ev.description.slice(0, 100)}</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ marginTop: 16, padding: 12, background: T.bg2, borderRadius: 8, fontSize: 12, color: T.tm }}>
+                  Ao <strong>Agendar</strong> uma atividade, o evento é criado automaticamente no seu Google Calendar.
                 </div>
               </div>
             )}
@@ -3601,6 +3699,11 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
   const [productModal, setProductModal] = useState(false);
   const [editProduct, setEditProduct] = useState(null);
   const [productForm, setProductForm] = useState({ name: "", description: "" });
+  // Google config state
+  const [googleCfg, setGoogleCfg] = useState({ clientId: "", clientSecret: "", redirectUri: "" });
+  const [googleCfgLoaded, setGoogleCfgLoaded] = useState(false);
+  const [googleStatus, setGoogleStatus] = useState({ connected: false, email: null });
+  const [googleSaving, setGoogleSaving] = useState(false);
   const [hsStatus, setHsStatus] = useState({ connected: null, message: "" });
   const [hsPipelines, setHsPipelines] = useState([]);
   const [hsLoading, setHsLoading] = useState(false);
@@ -3731,6 +3834,47 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
     if (!confirm("Desativar este produto?")) return;
     await productsApi.delete(id);
     loadCfgProducts();
+  };
+
+  // Google config
+  const loadGoogleConfig = useCallback(() => {
+    if (isSA && !googleCfgLoaded) {
+      googleApi.getConfig().then(r => {
+        setGoogleCfg({ clientId: r.data.clientId || "", clientSecret: "", redirectUri: r.data.redirectUri || "" });
+        setGoogleCfgLoaded(true);
+      }).catch(() => {});
+    }
+    googleApi.getStatus().then(r => setGoogleStatus(r.data)).catch(() => {});
+  }, [isSA, googleCfgLoaded]);
+  useEffect(() => { loadGoogleConfig(); }, [loadGoogleConfig]);
+
+  const handleSaveGoogleConfig = async () => {
+    setGoogleSaving(true);
+    try {
+      await googleApi.saveConfig(googleCfg);
+      setGoogleCfgLoaded(false);
+    } catch (e) { console.error(e); }
+    setGoogleSaving(false);
+  };
+
+  const handleConnectGoogle = async () => {
+    try {
+      const r = await googleApi.getAuthUrl();
+      const popup = window.open(r.data.url, "google-auth", "width=600,height=700");
+      const handler = (e) => {
+        if (e.data === "google-connected") {
+          window.removeEventListener("message", handler);
+          googleApi.getStatus().then(r => setGoogleStatus(r.data)).catch(() => {});
+        }
+      };
+      window.addEventListener("message", handler);
+    } catch (e) { alert(e.response?.data?.error || "Erro ao conectar"); }
+  };
+
+  const handleDisconnectGoogle = async () => {
+    if (!confirm("Desconectar sua conta Google?")) return;
+    await googleApi.disconnect();
+    setGoogleStatus({ connected: false, email: null });
   };
 
   // Load HubSpot config on mount
@@ -3965,7 +4109,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
   return (
     <div>
       <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${T.bor}`, marginBottom: 20 }}>
-        {(isSA ? ["geral", "hubspot", "notificações", "usuários", "parceiros", "convênios", "equipes", "produtos", "funis", "materiais", "auditoria"] : ["funis"]).map(t => <button key={t} onClick={() => { setTab(t); if (t === "auditoria" && auditData.length === 0 && !auditLoading) loadAudit(0, auditFilters); }} style={{ padding: "10px 16px", fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: "none", color: tab === t ? T.ac : T.tm, fontFamily: "'DM Sans',sans-serif", borderBottom: `2px solid ${tab === t ? T.ac : "transparent"}`, marginBottom: -1, textTransform: "capitalize" }}>{t}</button>)}
+        {(isSA ? ["geral", "google", "hubspot", "notificações", "usuários", "parceiros", "convênios", "equipes", "produtos", "funis", "materiais", "auditoria"] : ["funis"]).map(t => <button key={t} onClick={() => { setTab(t); if (t === "auditoria" && auditData.length === 0 && !auditLoading) loadAudit(0, auditFilters); }} style={{ padding: "10px 16px", fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: "none", color: tab === t ? T.ac : T.tm, fontFamily: "'DM Sans',sans-serif", borderBottom: `2px solid ${tab === t ? T.ac : "transparent"}`, marginBottom: -1, textTransform: "capitalize" }}>{t}</button>)}
       </div>
       {tab === "geral" && <div>
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20, marginBottom: 16 }}>
@@ -4033,6 +4177,50 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
           </div>
         </div>
       </div>}
+      {/* GOOGLE TAB */}
+      {tab === "google" && isSA && (
+        <div>
+          {/* Admin config */}
+          <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20, marginBottom: 16 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Configuração Google OAuth</h3>
+            <p style={{ fontSize: 12, color: T.tm, marginBottom: 16 }}>Configure as credenciais OAuth2 do Google Cloud Console para habilitar Calendar e Gmail.</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <Inp label="Client ID" value={googleCfg.clientId} onChange={v => setGoogleCfg({ ...googleCfg, clientId: v })} placeholder="xxxxxxxxx.apps.googleusercontent.com" />
+              <Inp label="Client Secret" value={googleCfg.clientSecret} onChange={v => setGoogleCfg({ ...googleCfg, clientSecret: v })} placeholder="Deixe vazio para manter o atual" />
+              <Inp label="Redirect URI (Callback)" value={googleCfg.redirectUri} onChange={v => setGoogleCfg({ ...googleCfg, redirectUri: v })} placeholder="https://seudominio.com/api/google/callback" />
+              <div style={{ fontSize: 11, color: T.tm, background: T.bg2, padding: 10, borderRadius: 6 }}>
+                <strong>Como configurar:</strong><br />
+                1. Acesse <em>console.cloud.google.com</em> → Criar projeto<br />
+                2. Ative as APIs: <strong>Google Calendar API</strong> e <strong>Gmail API</strong><br />
+                3. Credenciais → Criar credencial OAuth 2.0 (tipo Web Application)<br />
+                4. Adicione o Redirect URI acima nas "URIs de redirecionamento autorizadas"<br />
+                5. Copie Client ID e Client Secret aqui
+              </div>
+              <Btn onClick={handleSaveGoogleConfig} disabled={googleSaving}>{googleSaving ? "Salvando..." : "Salvar Configuração"}</Btn>
+            </div>
+          </div>
+
+          {/* Connection status */}
+          <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Sua Conta Google</h3>
+            {googleStatus.connected ? (
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                  <span style={{ width: 10, height: 10, borderRadius: "50%", background: T.ok, display: "inline-block" }} />
+                  <span style={{ fontSize: 13 }}>Conectado: <strong>{googleStatus.email}</strong></span>
+                </div>
+                <Btn sm v="danger" onClick={handleDisconnectGoogle}>Desconectar</Btn>
+              </div>
+            ) : (
+              <div>
+                <p style={{ fontSize: 13, color: T.tm, marginBottom: 12 }}>Conecte sua conta Google para usar Calendar e Gmail nos deals.</p>
+                <Btn sm onClick={handleConnectGoogle}>Conectar Google</Btn>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {tab === "hubspot" && <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20 }}>
         <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 16 }}>Integração HubSpot</h3>
 

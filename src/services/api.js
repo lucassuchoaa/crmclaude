@@ -307,6 +307,18 @@ export const conveniosApi = {
   getParceiroConvenios: (parceiroId) => api.get(`/convenios/parceiro/${parceiroId}/convenios`),
 };
 
+// Google Integration API
+export const googleApi = {
+  getConfig: () => api.get('/google/config'),
+  saveConfig: (data) => api.post('/google/config', data),
+  getAuthUrl: () => api.get('/google/auth-url'),
+  getStatus: () => api.get('/google/status'),
+  disconnect: () => api.post('/google/disconnect'),
+  getCalendarEvents: (params) => api.get('/google/calendar/events', { params }),
+  createCalendarEvent: (data) => api.post('/google/calendar/events', data),
+  sendEmail: (data) => api.post('/google/gmail/send', data),
+};
+
 // Diretoria API
 export const diretoriaApi = {
   getSummary: () => api.get('/diretoria/summary'),
