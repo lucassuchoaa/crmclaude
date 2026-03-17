@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { getDatabase } from '../config/database.js';
-import { authMiddleware, requireRole } from './auth.js';
+import { authenticate } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -93,7 +93,8 @@ async function getValidToken(userId) {
 
 // ── Admin: Get/Save Google config ──
 
-router.get('/config', authMiddleware, requireRole('super_admin'), async (req, res) => {
+router.get('/config', authenticate, async (req, res) => {
+  if (req.user.role !== 'super_admin') return res.status(403).json({ error: 'Sem permissão' });
   try {
     const clientId = await getSetting('google_client_id');
     const clientSecret = await getSetting('google_client_secret');
@@ -109,7 +110,8 @@ router.get('/config', authMiddleware, requireRole('super_admin'), async (req, re
   }
 });
 
-router.post('/config', authMiddleware, requireRole('super_admin'), async (req, res) => {
+router.post('/config', authenticate, async (req, res) => {
+  if (req.user.role !== 'super_admin') return res.status(403).json({ error: 'Sem permissão' });
   try {
     const { clientId, clientSecret, redirectUri } = req.body;
     if (clientId !== undefined) await setSetting('google_client_id', clientId);
@@ -124,7 +126,7 @@ router.post('/config', authMiddleware, requireRole('super_admin'), async (req, r
 // ── OAuth flow ──
 
 // Step 1: Get auth URL (user clicks "Conectar Google")
-router.get('/auth-url', authMiddleware, async (req, res) => {
+router.get('/auth-url', authenticate, async (req, res) => {
   try {
     const config = await getGoogleConfig();
     if (!config.clientId || !config.redirectUri) {
@@ -197,7 +199,7 @@ router.get('/callback', async (req, res) => {
 
 // ── User: Check connection status ──
 
-router.get('/status', authMiddleware, async (req, res) => {
+router.get('/status', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
     const tokens = await db.get('SELECT email, created_at FROM google_tokens WHERE user_id = ?', [req.user.id]);
@@ -209,7 +211,7 @@ router.get('/status', authMiddleware, async (req, res) => {
 
 // ── User: Disconnect ──
 
-router.post('/disconnect', authMiddleware, async (req, res) => {
+router.post('/disconnect', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
     await db.run('DELETE FROM google_tokens WHERE user_id = ?', [req.user.id]);
@@ -221,7 +223,7 @@ router.post('/disconnect', authMiddleware, async (req, res) => {
 
 // ── Calendar: List events ──
 
-router.get('/calendar/events', authMiddleware, async (req, res) => {
+router.get('/calendar/events', authenticate, async (req, res) => {
   try {
     const token = await getValidToken(req.user.id);
     if (!token) return res.status(401).json({ error: 'Google não conectado' });
@@ -244,7 +246,7 @@ router.get('/calendar/events', authMiddleware, async (req, res) => {
 
 // ── Calendar: Create event ──
 
-router.post('/calendar/events', authMiddleware, async (req, res) => {
+router.post('/calendar/events', authenticate, async (req, res) => {
   try {
     const token = await getValidToken(req.user.id);
     if (!token) return res.status(401).json({ error: 'Google não conectado' });
@@ -278,7 +280,7 @@ router.post('/calendar/events', authMiddleware, async (req, res) => {
 
 // ── Gmail: Send email ──
 
-router.post('/gmail/send', authMiddleware, async (req, res) => {
+router.post('/gmail/send', authenticate, async (req, res) => {
   try {
     const token = await getValidToken(req.user.id);
     if (!token) return res.status(401).json({ error: 'Google não conectado' });
