@@ -322,6 +322,46 @@ export const googleApi = {
   sendEmail: (data) => api.post('/google/gmail/send', data),
 };
 
+// Proposals API
+export const proposalsApi = {
+  getTemplates: () => api.get('/proposals/templates'),
+  createTemplate: (formData) => api.post('/proposals/templates', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  updateTemplate: (id, data) => api.put(`/proposals/templates/${id}`, data),
+  deleteTemplate: (id) => api.delete(`/proposals/templates/${id}`),
+  downloadTemplate: (id) => api.get(`/proposals/templates/${id}/download`, { responseType: 'blob' }),
+  generate: (data) => api.post('/proposals/generate', data),
+  getByEntity: (type, id) => api.get(`/proposals/entity/${type}/${id}`),
+  updateStatus: (id, status) => api.patch(`/proposals/${id}/status`, { status }),
+  delete: (id) => api.delete(`/proposals/${id}`),
+};
+
+// Contracts API
+export const contractsApi = {
+  getTemplates: () => api.get('/contracts/templates'),
+  createTemplate: (formData) => api.post('/contracts/templates', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  updateTemplate: (id, data) => api.put(`/contracts/templates/${id}`, data),
+  deleteTemplate: (id) => api.delete(`/contracts/templates/${id}`),
+  downloadTemplate: (id) => api.get(`/contracts/templates/${id}/download`, { responseType: 'blob' }),
+  generate: (data) => api.post('/contracts/generate', data),
+  getByEntity: (type, id) => api.get(`/contracts/entity/${type}/${id}`),
+  updateStatus: (id, status) => api.patch(`/contracts/${id}/status`, { status }),
+  delete: (id) => api.delete(`/contracts/${id}`),
+  // ClickSign
+  getClickSignConfig: () => api.get('/contracts/clicksign/config'),
+  saveClickSignConfig: (data) => api.post('/contracts/clicksign/config', data),
+  testClickSign: () => api.post('/contracts/clicksign/test'),
+  sendToClickSign: (data) => api.post('/contracts/clicksign/send', data),
+  checkClickSignStatus: (contractId) => api.post('/contracts/clicksign/status', { contract_id: contractId }),
+};
+
+// Permissions API
+export const permissionsApi = {
+  getAll: () => api.get('/permissions'),
+  getMy: () => api.get('/permissions/my'),
+  update: (role, data) => api.put(`/permissions/${role}`, data),
+  reset: (role) => api.post(`/permissions/reset/${role}`),
+};
+
 // Diretoria API
 export const diretoriaApi = {
   getSummary: () => api.get('/diretoria/summary'),

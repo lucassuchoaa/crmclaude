@@ -27,6 +27,9 @@ import pipelinesRoutes from './routes/pipelines.js';
 import teamsRoutes from './routes/teams.js';
 import productsRoutes from './routes/products.js';
 import googleRoutes from './routes/google.js';
+import proposalsRoutes from './routes/proposals.js';
+import contractsRoutes from './routes/contracts.js';
+import permissionsRoutes from './routes/permissions.js';
 import { startHubSpotScheduler } from './services/hubspotSync.js';
 
 dotenv.config();
@@ -97,6 +100,9 @@ app.use('/api/pipelines', pipelinesRoutes);
 app.use('/api/teams', teamsRoutes);
 app.use('/api/products', productsRoutes);
 app.use('/api/google', googleRoutes);
+app.use('/api/proposals', proposalsRoutes);
+app.use('/api/contracts', contractsRoutes);
+app.use('/api/permissions', permissionsRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

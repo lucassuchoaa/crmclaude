@@ -136,17 +136,22 @@ router.post('/logout', authenticate, async (req, res) => {
 
 // Get current user
 router.get('/me', authenticate, async (req, res) => {
-  const db = getDatabase();
-  const user = await db.prepare(`
-    SELECT id, email, name, role, avatar, manager_id, must_change_password, created_at
-    FROM users WHERE id = ?
-  `).get(req.user.id);
+  try {
+    const db = getDatabase();
+    const user = await db.prepare(`
+      SELECT id, email, name, role, avatar, manager_id, must_change_password, created_at
+      FROM users WHERE id = ?
+    `).get(req.user.id);
 
-  if (!user) {
-    return res.status(404).json({ error: 'User not found' });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({ user });
+  } catch (error) {
+    console.error('Get current user error:', error);
+    res.status(500).json({ error: 'Failed to get user' });
   }
-
-  res.json({ user });
 });
 
 // Change password

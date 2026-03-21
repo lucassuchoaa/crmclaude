@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback } from "react";
-import { authApi, usersApi, indicationsApi, commissionsApi, nfesApi, materialsApi, notificationsApi, hubspotApi, groupsApi, cnpjAgentApi, diretoriaApi, whatsappApi, conveniosApi, pipelinesApi, dealsApi, teamsApi, productsApi, googleApi, setTokens, clearTokens } from "./services/api";
+import { authApi, usersApi, indicationsApi, commissionsApi, nfesApi, materialsApi, notificationsApi, hubspotApi, groupsApi, cnpjAgentApi, diretoriaApi, whatsappApi, conveniosApi, pipelinesApi, dealsApi, teamsApi, productsApi, googleApi, proposalsApi, contractsApi, permissionsApi, setTokens, clearTokens } from "./services/api";
 import { useBreakpoint } from "./hooks/useBreakpoint";
 
 const AuthCtx = createContext(null);
@@ -379,7 +379,7 @@ function MultiSelectParceiro({ parceiros, selected, onToggle, selS }) {
 }
 
 // ===== DASHBOARD =====
-function Dash({ inds, users, comms, nfes, activity = [] }) {
+function Dash({ inds, users, comms, nfes, activity = [], setPg }) {
   const { user } = useAuth();
   const { breakpoint } = useBreakpoint();
   const isParceiro = user.role === "parceiro";
@@ -605,12 +605,14 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
         {/* KPIs Row */}
         <div className="grid r-grid-kpi" style={{ gap: 12, marginBottom: 12 }}>
           {[
-            { l: "Total", v: pTotal, co: T.ac, ic: "📋" },
-            { l: "Em Andamento", v: pPipeline, co: T.inf, ic: "🔄" },
-            { l: "Aprovadas", v: pAprov, co: T.ok, ic: "✅" },
-            { l: "Ativas", v: pAtivas, co: T.wn, ic: "🏢" },
+            { l: "Total", v: pTotal, co: T.ac, ic: "📋", pg: "inds" },
+            { l: "Em Andamento", v: pPipeline, co: T.inf, ic: "🔄", pg: "inds" },
+            { l: "Aprovadas", v: pAprov, co: T.ok, ic: "✅", pg: "inds" },
+            { l: "Ativas", v: pAtivas, co: T.wn, ic: "🏢", pg: "inds" },
           ].map((s, i) => (
-            <div key={i} style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 14, borderLeft: `3px solid ${s.co}` }}>
+            <div key={i} onClick={() => setPg(s.pg)} style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 14, borderLeft: `3px solid ${s.co}`, cursor: "pointer", transition: "transform 0.15s" }}
+              onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = `0 4px 12px ${s.co}22`; }}
+              onMouseLeave={e => { e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = ""; }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>{s.l}</div>
@@ -623,12 +625,14 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
         </div>
         <div className="grid r-grid-kpi" style={{ gap: 12, marginBottom: 20 }}>
           {[
-            { l: "Recusadas", v: pRecusadas, co: T.er, ic: "❌" },
-            { l: "Total Funcionários", v: pTotalFunc.toLocaleString('pt-BR'), co: T.inf, ic: "👥" },
-            { l: "Vencidas", v: pVencidas, co: pVencidas > 0 ? T.er : T.ok, ic: pVencidas > 0 ? "⚠️" : "✓" },
-            { l: "Comissão Acum.", v: fmtBRL(totalComm), co: T.ac, ic: "💰" },
+            { l: "Recusadas", v: pRecusadas, co: T.er, ic: "❌", pg: "inds" },
+            { l: "Total Funcionários", v: pTotalFunc.toLocaleString('pt-BR'), co: T.inf, ic: "👥", pg: "inds" },
+            { l: "Vencidas", v: pVencidas, co: pVencidas > 0 ? T.er : T.ok, ic: pVencidas > 0 ? "⚠️" : "✓", pg: "inds" },
+            { l: "Comissão Acum.", v: fmtBRL(totalComm), co: T.ac, ic: "💰", pg: "fin" },
           ].map((s, i) => (
-            <div key={i} style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 14, borderLeft: `3px solid ${s.co}` }}>
+            <div key={i} onClick={() => setPg(s.pg)} style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 14, borderLeft: `3px solid ${s.co}`, cursor: "pointer", transition: "transform 0.15s" }}
+              onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = `0 4px 12px ${s.co}22`; }}
+              onMouseLeave={e => { e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = ""; }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>{s.l}</div>
@@ -814,67 +818,42 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
   }
 
   // ======= GERENTE / DIRETOR DASHBOARD =======
+
+  // Monthly trend data (last 6 months)
+  const monthlyTrend = (() => {
+    const months = [];
+    const now = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = d.toISOString().slice(0, 7);
+      const label = d.toLocaleDateString("pt-BR", { month: "short" }).replace(".", "");
+      const mi = baseInds.filter(ind => ind.dt && ind.dt.startsWith(key));
+      months.push({ key, label, total: mi.length, ativas: mi.filter(ind => ind.st === "ativo").length, recusadas: mi.filter(ind => ind.st === "recusado").length });
+    }
+    return months;
+  })();
+  const trendMax = Math.max(...monthlyTrend.map(m => m.total), 1);
+
+  // Month-over-month variation
+  const prevMonth = monthlyTrend[monthlyTrend.length - 2];
+  const curMonth = monthlyTrend[monthlyTrend.length - 1];
+  const calcVar = (cur, prev) => prev > 0 ? Math.round(((cur - prev) / prev) * 100) : cur > 0 ? 100 : 0;
+  const totalVar = calcVar(curMonth.total, prevMonth.total);
+  const ativasVar = calcVar(curMonth.ativas, prevMonth.ativas);
+
+  // Funnel conversion rates between stages
+  const funnelWithConv = funnelData.map((f, idx) => {
+    const prev = idx > 0 ? funnelData[idx - 1].count : null;
+    const convRate = prev && prev > 0 ? Math.round((f.count / prev) * 100) : null;
+    return { ...f, convRate };
+  });
+  const funnelTotal = funnelData.reduce((s, f) => s + f.count, 0);
+
   return (
     <div>
-      {/* ROW 1: KPIs */}
-      <div className="grid r-grid-kpi" style={{ gap: 12, marginBottom: 12 }}>
-        {[
-          { l: "Total Indicações", v: total, co: T.ac, ic: "📋" },
-          { l: "Em Andamento", v: pipeline, co: T.inf, ic: "🔄" },
-          { l: "Aprovadas/Ativas", v: `${aprovadas}/${ativas}`, co: T.ok, ic: "✅" },
-          { l: "Parceiros", v: parcCount, co: T.wn, ic: "👥" },
-        ].map((s, i) => (
-          <div key={i} style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 16, borderLeft: `3px solid ${s.co}` }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>{s.l}</div>
-                <div style={{ fontSize: 24, fontWeight: 700, fontFamily: "'Space Mono',monospace" }}>{s.v}</div>
-              </div>
-              <div style={{ fontSize: 24 }}>{s.ic}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="grid r-grid-kpi" style={{ gap: 12, marginBottom: 20 }}>
-        {[
-          { l: "Recusadas", v: recusadas, co: T.er, ic: "❌" },
-          { l: "Total Funcionários", v: totalFuncionarios.toLocaleString('pt-BR'), co: T.inf, ic: "👥" },
-          { l: "Taxa Conversão", v: txConversao + "%", co: parseFloat(txConversao) >= 20 ? T.ok : T.wn, ic: "📈" },
-          { l: isExec ? "Gerentes" : isDiretor ? "Executivos" : "Liberadas", v: isExec ? myDiretores.length : isDiretor ? myGerentes.length : baseInds.filter(i => i.lib === "liberado").length, co: T.ac, ic: isExec ? "🏛️" : isDiretor ? "👔" : "🔓" },
-        ].map((s, i) => (
-          <div key={i} style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 16, borderLeft: `3px solid ${s.co}` }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>{s.l}</div>
-                <div style={{ fontSize: 24, fontWeight: 700, fontFamily: "'Space Mono',monospace", color: s.co }}>{s.v}</div>
-              </div>
-              <div style={{ fontSize: 24 }}>{s.ic}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* ROW 2: Funil Visual */}
-      <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 18, marginBottom: 16 }}>
-        <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>📊 Funil de Indicações</h3>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {funnelData.map(f => (
-            <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ width: 120, fontSize: 11, fontWeight: 600, color: T.t2, flexShrink: 0, display: "flex", alignItems: "center", gap: 6 }}>
-                <div style={{ width: 8, height: 8, borderRadius: "50%", background: f.co, flexShrink: 0 }} />{f.label}
-              </div>
-              <div style={{ flex: 1, height: 22, background: T.inp, borderRadius: 4, overflow: "hidden", position: "relative" }}>
-                <div style={{ width: `${(f.count / maxFunnel) * 100}%`, height: "100%", background: f.co + "44", borderRadius: 4, transition: "width 0.3s", minWidth: f.count > 0 ? 8 : 0 }} />
-                <span style={{ position: "absolute", right: 8, top: 3, fontSize: 11, fontWeight: 700, fontFamily: "'Space Mono',monospace", color: T.txt }}>{f.count}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ROW 3: Filters */}
-      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, flexWrap: "wrap", padding: "10px 14px", background: T.card, border: `1px solid ${T.bor}`, borderRadius: 8 }}>
-        <span style={{ fontSize: 11, color: T.tm, fontWeight: 600 }}>🔍 Filtros:</span>
+      {/* FILTERS — TOP (ponto 3: filtros no topo) */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 16, flexWrap: "wrap", padding: "10px 14px", background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10 }}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.tm} strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
         {isExec && <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
           <span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", fontWeight: 600 }}>Gerente:</span>
           <select value={fDir} onChange={e => setFDir(e.target.value)} style={selS}><option value="todos">Todos</option>{myDiretores.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select>
@@ -897,7 +876,7 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
           <span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", fontWeight: 600 }}>Liberação:</span>
-          <select value={fLib} onChange={e => setFLib(e.target.value)} style={selS}><option value="todos">Todos</option><option value="liberado">🔓 Liberado</option><option value="bloqueado">🔒 Bloqueado</option><option value="pendente">⏳ Pendente</option><option value="vencido">⚠️ Vencido</option></select>
+          <select value={fLib} onChange={e => setFLib(e.target.value)} style={selS}><option value="todos">Todos</option><option value="liberado">Liberado</option><option value="bloqueado">Bloqueado</option><option value="pendente">Pendente</option><option value="vencido">Vencido</option></select>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
           <span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", fontWeight: 600 }}>De:</span>
@@ -908,62 +887,183 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
           <input type="date" value={fDtAte} onChange={e => setFDtAte(e.target.value)} style={selS} />
         </div>
         {hasFilters && <>
-          <button onClick={clearFilters} style={{ padding: "5px 10px", borderRadius: 6, border: `1px solid ${T.er}44`, background: T.er + "11", color: T.er, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>✕ Limpar</button>
+          <button onClick={clearFilters} style={{ padding: "5px 10px", borderRadius: 6, border: `1px solid ${T.er}44`, background: T.er + "11", color: T.er, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>Limpar</button>
           <span style={{ fontSize: 11, color: T.t2 }}>{filtered.length} de {baseInds.length}</span>
         </>}
       </div>
 
-      {/* ROW 4: Travas Vencidas Alert + Recent Activity */}
+      {/* KPIs — Hero row (ponto 1: destaque nos KPIs de sucesso) */}
+      <div className="grid r-grid" style={{ gap: 12, marginBottom: 12 }}>
+        {/* Hero KPI: Conversão */}
+        <div onClick={() => setPg("kanban")} style={{ background: `linear-gradient(135deg, ${T.ok}18 0%, ${T.ok}06 100%)`, border: `1px solid ${T.ok}40`, borderRadius: 12, padding: 20, cursor: "pointer", transition: "transform 0.15s" }}
+          onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = `0 6px 20px ${T.ok}20`; }}
+          onMouseLeave={e => { e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = ""; }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div>
+              <div style={{ fontSize: 10, color: T.ok, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, marginBottom: 6 }}>Taxa de Conversao</div>
+              <div style={{ fontSize: 36, fontWeight: 800, fontFamily: "'Space Mono',monospace", color: T.ok, lineHeight: 1 }}>{txConversao}%</div>
+              <div style={{ fontSize: 11, color: T.t2, marginTop: 6 }}>{aprovadas} aprovadas · {ativas} ativas</div>
+            </div>
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={T.ok} strokeWidth="2" strokeLinecap="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          </div>
+        </div>
+        {/* Hero KPI: Total Indicações */}
+        <div onClick={() => setPg("kanban")} style={{ background: `linear-gradient(135deg, ${T.ac}18 0%, ${T.ac}06 100%)`, border: `1px solid ${T.ac}40`, borderRadius: 12, padding: 20, cursor: "pointer", transition: "transform 0.15s" }}
+          onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = `0 6px 20px ${T.ac}20`; }}
+          onMouseLeave={e => { e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = ""; }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div>
+              <div style={{ fontSize: 10, color: T.ac, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700, marginBottom: 6 }}>Total Indicacoes</div>
+              <div style={{ fontSize: 36, fontWeight: 800, fontFamily: "'Space Mono',monospace", color: T.txt, lineHeight: 1 }}>{total}</div>
+              <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "center" }}>
+                {totalVar !== 0 && <span style={{ fontSize: 11, fontWeight: 700, color: totalVar > 0 ? T.ok : T.er, background: (totalVar > 0 ? T.ok : T.er) + "15", padding: "2px 6px", borderRadius: 4 }}>{totalVar > 0 ? "+" : ""}{totalVar}%</span>}
+                <span style={{ fontSize: 10, color: T.tm }}>vs. mes anterior</span>
+              </div>
+            </div>
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={T.ac} strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
+          </div>
+        </div>
+      </div>
+
+      {/* Secondary KPIs */}
+      <div className="grid r-dash-secondary" style={{ gap: 10, marginBottom: 16 }}>
+        {[
+          { l: "Em Andamento", v: pipeline, co: T.inf, pg: "kanban", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.inf} strokeWidth="2" strokeLinecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg> },
+          { l: "Parceiros", v: parcCount, co: T.wn, pg: "parcs", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.wn} strokeWidth="2" strokeLinecap="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
+          { l: "Recusadas", v: recusadas, co: T.er, pg: "kanban", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.er} strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg> },
+          { l: "Funcionarios", v: totalFuncionarios.toLocaleString('pt-BR'), co: T.inf, pg: "kanban", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.inf} strokeWidth="2" strokeLinecap="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></svg> },
+          { l: isExec ? "Gerentes" : isDiretor ? "Executivos" : "Liberadas", v: isExec ? myDiretores.length : isDiretor ? myGerentes.length : baseInds.filter(i => i.lib === "liberado").length, co: T.ac, pg: isExec || isDiretor ? "cfg" : "kanban", icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.ac} strokeWidth="2" strokeLinecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
+        ].map((s, i) => (
+          <div key={i} onClick={() => setPg(s.pg)} style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: "14px 16px", cursor: "pointer", transition: "transform 0.15s" }}
+            onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.borderColor = s.co + "60"; }}
+            onMouseLeave={e => { e.currentTarget.style.transform = ""; e.currentTarget.style.borderColor = T.bor; }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <div style={{ width: 32, height: 32, borderRadius: 8, background: s.co + "12", display: "flex", alignItems: "center", justifyContent: "center" }}>{s.icon}</div>
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "'Space Mono',monospace", color: T.txt }}>{s.v}</div>
+            <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", letterSpacing: 0.3, marginTop: 2 }}>{s.l}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* ROW 2: Funil Real + Tendência Temporal (pontos 2 e 4) */}
+      <div className="grid r-grid" style={{ gap: 16, marginBottom: 16 }}>
+        {/* Funil com formato real e conversão entre etapas */}
+        <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 12, padding: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>Funil de Indicacoes</div>
+            <span style={{ fontSize: 10, color: T.tm, fontFamily: "'Space Mono',monospace" }}>{funnelTotal} total</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2, alignItems: "center" }}>
+            {funnelWithConv.map((f, idx) => {
+              const widthPct = funnelTotal > 0 ? Math.max(20, (f.count / funnelTotal) * 100) : 20;
+              const nextWidthPct = idx < funnelWithConv.length - 1 && funnelTotal > 0 ? Math.max(20, (funnelWithConv[idx + 1].count / funnelTotal) * 100) : null;
+              return (
+                <div key={f.id} style={{ width: "100%" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <div style={{ width: `${widthPct}%`, minWidth: 100, background: f.co + "30", border: `1px solid ${f.co}50`, borderRadius: 6, padding: "8px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", transition: "all 0.3s" }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: T.txt }}>{f.label}</span>
+                      <span style={{ fontSize: 13, fontWeight: 800, fontFamily: "'Space Mono',monospace", color: f.co }}>{f.count}</span>
+                    </div>
+                  </div>
+                  {f.convRate !== null && idx < funnelWithConv.length - 1 && (
+                    <div style={{ textAlign: "center", margin: "2px 0" }}>
+                      <span style={{ fontSize: 9, color: f.convRate >= 50 ? T.ok : f.convRate >= 25 ? T.wn : T.er, fontWeight: 700, fontFamily: "'Space Mono',monospace" }}>
+                        {f.convRate}%
+                      </span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Gráfico de Tendência Temporal (ponto 4) */}
+        <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 12, padding: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>Tendencia (6 meses)</div>
+            <div style={{ display: "flex", gap: 12 }}>
+              <span style={{ fontSize: 10, color: T.ac, display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 8, height: 3, background: T.ac, borderRadius: 2, display: "inline-block" }} />Total</span>
+              <span style={{ fontSize: 10, color: T.ok, display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 8, height: 3, background: T.ok, borderRadius: 2, display: "inline-block" }} />Ativas</span>
+            </div>
+          </div>
+          {/* Bar chart */}
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 8, height: 160 }}>
+            {monthlyTrend.map((m, i) => (
+              <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, fontFamily: "'Space Mono',monospace", color: T.txt }}>{m.total}</span>
+                <div style={{ width: "100%", display: "flex", gap: 2, alignItems: "flex-end", height: 120 }}>
+                  <div style={{ flex: 1, height: `${(m.total / trendMax) * 100}%`, background: T.ac + "40", borderRadius: "4px 4px 0 0", minHeight: m.total > 0 ? 4 : 0, transition: "height 0.3s" }} />
+                  <div style={{ flex: 1, height: `${(m.ativas / trendMax) * 100}%`, background: T.ok + "60", borderRadius: "4px 4px 0 0", minHeight: m.ativas > 0 ? 4 : 0, transition: "height 0.3s" }} />
+                </div>
+                <span style={{ fontSize: 10, color: T.tm, textTransform: "capitalize" }}>{m.label}</span>
+              </div>
+            ))}
+          </div>
+          {/* Month variation */}
+          <div style={{ display: "flex", justifyContent: "center", gap: 16, marginTop: 12, padding: "8px 0", borderTop: `1px solid ${T.bor}` }}>
+            <div style={{ textAlign: "center" }}>
+              <span style={{ fontSize: 10, color: T.tm }}>Indicacoes </span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: totalVar > 0 ? T.ok : totalVar < 0 ? T.er : T.tm }}>{totalVar > 0 ? "+" : ""}{totalVar}%</span>
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <span style={{ fontSize: 10, color: T.tm }}>Ativas </span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: ativasVar > 0 ? T.ok : ativasVar < 0 ? T.er : T.tm }}>{ativasVar > 0 ? "+" : ""}{ativasVar}%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Travas Vencidas Alert */}
       {travasVencidas > 0 && (
-        <div style={{ background: T.er + "0A", border: `1px solid ${T.er}30`, borderRadius: 10, padding: 16, marginBottom: 16 }}>
+        <div style={{ background: T.er + "08", border: `1px solid ${T.er}25`, borderRadius: 12, padding: 16, marginBottom: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-            <span style={{ fontSize: 16 }}>⚠️</span>
-            <h3 style={{ fontSize: 14, fontWeight: 700, color: T.er }}>Travas Vencidas — Ação Necessária</h3>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={T.er} strokeWidth="2" strokeLinecap="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+            <span style={{ fontSize: 13, fontWeight: 700, color: T.er }}>Travas Vencidas</span>
             <Badge type="danger">{travasVencidas}</Badge>
           </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 8 }}>
             {travasVencidasList.slice(0, 6).map(ind => (
-              <div key={ind.id} style={{ background: T.card, border: `1px solid ${T.er}33`, borderRadius: 8, padding: "10px 14px", minWidth: 200, flex: "1 1 200px" }}>
+              <div key={ind.id} style={{ background: T.card, border: `1px solid ${T.er}20`, borderRadius: 8, padding: "10px 14px" }}>
                 <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 2 }}>{ind.emp}</div>
                 <div style={{ fontSize: 10, color: T.tm }}>{users.find(u => u.id === ind.pId)?.name} · {KCOLS.find(k => k.id === ind.st)?.label}</div>
-                <div style={{ fontSize: 10, color: T.er, fontWeight: 600, marginTop: 4 }}>Vencida em {ind.libExp}</div>
+                <div style={{ fontSize: 10, color: T.er, fontWeight: 600, marginTop: 4 }}>Vencida {ind.libExp}</div>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {/* ROW 5: 3-column layout */}
+      {/* ROW: Indicações + Atividade */}
       <div className="grid r-grid-main" style={{ gap: 16, marginBottom: 16 }}>
-        {/* Indicações filtradas */}
         <div>
-          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>📋 Indicações {hasFilters ? "(Filtradas)" : "Recentes"}</h3>
-          <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Indicacoes {hasFilters ? "(Filtradas)" : "Recentes"}</div>
+          <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 12, overflow: "hidden" }}>
             <div className="table-responsive"><table className="data-table">
-              <thead><tr>{["Empresa", "Parceiro", "Status", "Liberação", "Limite", "Data"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
+              <thead><tr>{["Empresa", "Parceiro", "Status", "Liberacao", "Limite", "Data"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>{sorted.slice(0, 10).map(ind => (
                 <tr key={ind.id}>
                   <td style={{ ...tdS, fontSize: 13, fontWeight: 600 }}>{ind.emp}</td>
                   <td style={{ ...tdS, fontSize: 11 }}>{users.find(u => u.id === ind.pId)?.name || "—"}</td>
                   <td style={tdS}><Badge type={ind.st === "ativo" ? "success" : ind.st === "recusado" ? "danger" : "info"}>{KCOLS.find(k => k.id === ind.st)?.label}</Badge></td>
                   <td style={tdS}><LibBadge lib={ind.lib} /></td>
-                  <td style={tdS}>{ind.lib === "liberado" && ind.libExp ? <span style={{ fontSize: 10, fontWeight: 600, color: ind.libExp < today ? T.er : T.ok }}>{ind.libExp < today ? "⚠ " : ""}{ind.libExp}</span> : <span style={{ color: T.tm, fontSize: 10 }}>—</span>}</td>
+                  <td style={tdS}>{ind.lib === "liberado" && ind.libExp ? <span style={{ fontSize: 10, fontWeight: 600, color: ind.libExp < today ? T.er : T.ok }}>{ind.libExp < today ? "! " : ""}{ind.libExp}</span> : <span style={{ color: T.tm, fontSize: 10 }}>—</span>}</td>
                   <td style={{ ...tdS, fontSize: 11, color: T.tm }}>{ind.dt}</td>
                 </tr>
               ))}</tbody>
-              {sorted.length === 0 && <tbody><tr><td colSpan={6} style={{ padding: 30, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhuma indicação{hasFilters ? " com esses filtros" : ""}.</td></tr></tbody>}
+              {sorted.length === 0 && <tbody><tr><td colSpan={6} style={{ padding: 30, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhuma indicacao{hasFilters ? " com esses filtros" : ""}.</td></tr></tbody>}
             </table></div>
-            {sorted.length > 10 && <div style={{ padding: "8px 14px", textAlign: "center", fontSize: 11, color: T.tm, borderTop: `1px solid ${T.bor}` }}>Mostrando 10 de {sorted.length} — veja todas no Funil/Pipeline</div>}
+            {sorted.length > 10 && <div style={{ padding: "8px 14px", textAlign: "center", fontSize: 11, color: T.tm, borderTop: `1px solid ${T.bor}`, cursor: "pointer" }} onClick={() => setPg("kanban")}>Mostrando 10 de {sorted.length} — ver todas</div>}
           </div>
         </div>
 
-        {/* Feed de Atividade */}
         <div>
-          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>🕐 Atividade Recente</h3>
-          <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 4, maxHeight: 440, overflowY: "auto" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Atividade Recente</div>
+          <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 12, padding: 4, maxHeight: 440, overflowY: "auto" }}>
             {allHist.length === 0 && <div style={{ padding: 30, textAlign: "center", fontSize: 12, color: T.tm }}>Sem atividades.</div>}
             {allHist.map((h, i) => (
-              <div key={i} style={{ padding: "10px 14px", borderBottom: `1px solid ${T.bor}22` }}>
+              <div key={i} style={{ padding: "10px 14px", borderBottom: i < allHist.length - 1 ? `1px solid ${T.bor}22` : "none" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
                   <span style={{ fontSize: 11, fontWeight: 700, color: T.ac }}>{h.emp}</span>
                   <span style={{ fontSize: 9, color: T.tm, fontFamily: "'Space Mono',monospace" }}>{h.dt}</span>
@@ -976,18 +1076,18 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
         </div>
       </div>
 
-      {/* ROW 6: Director Ranking (Exec only) */}
+      {/* Director Ranking (Exec only) */}
       {isExec && dirRanking.length > 0 && (
         <div style={{ marginBottom: 16 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>🏛️ Performance dos Gerentes</h3>
-          <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Performance dos Gerentes</div>
+          <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 12, overflow: "hidden" }}>
             <div className="table-responsive"><table className="data-table">
-              <thead><tr>{["Gerente", "Executivos", "Parceiros", "Indicações", "Ativas", "Conversão"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
+              <thead><tr>{["Gerente", "Executivos", "Parceiros", "Indicacoes", "Ativas", "Conversao"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>{dirRanking.map(d => (
                 <tr key={d.id}>
                   <td style={tdS}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <div style={{ width: 30, height: 30, borderRadius: "50%", background: T.wn + "22", color: T.wn, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700 }}>{d.av || d.name[0]}</div>
+                      <div style={{ width: 30, height: 30, borderRadius: "50%", background: T.wn + "18", color: T.wn, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700 }}>{d.av || d.name[0]}</div>
                       <span style={{ fontSize: 13, fontWeight: 600 }}>{d.name}</span>
                     </div>
                   </td>
@@ -1010,20 +1110,19 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
         </div>
       )}
 
-      {/* ROW 7: Ranking + Gerentes/Deals */}
+      {/* Ranking + Performance */}
       <div className="grid r-grid" style={{ gap: 16 }}>
-        {/* Ranking Parceiros */}
         <div>
-          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>🏆 Ranking de Parceiros</h3>
-          <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Ranking de Parceiros</div>
+          <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 12, overflow: "hidden" }}>
             <div className="table-responsive"><table className="data-table">
-              <thead><tr>{["#", "Parceiro", "Total", "Ativas", "Em Andamento", "Funcionários", "Conversão"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
+              <thead><tr>{["#", "Parceiro", "Total", "Ativas", "Pipeline", "Func.", "Conversao"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
               <tbody>{parcRanking.map((p, i) => (
                 <tr key={p.id}>
-                  <td style={{ ...tdS, fontWeight: 700, color: i === 0 ? "#f59e0b" : i === 1 ? "#94a3b8" : i === 2 ? "#cd7f32" : T.tm, fontSize: 14 }}>{i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}º`}</td>
+                  <td style={{ ...tdS, fontWeight: 700, color: i === 0 ? "#f59e0b" : i === 1 ? "#94a3b8" : i === 2 ? "#cd7f32" : T.tm, fontSize: 14 }}>{i < 3 ? ["1", "2", "3"][i] + "o" : `${i + 1}o`}</td>
                   <td style={tdS}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <div style={{ width: 26, height: 26, borderRadius: "50%", background: T.ac + "22", color: T.ac, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700 }}>{p.av || p.name[0]}</div>
+                      <div style={{ width: 26, height: 26, borderRadius: "50%", background: T.ac + "18", color: T.ac, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700 }}>{p.av || p.name[0]}</div>
                       <div><div style={{ fontSize: 12, fontWeight: 600 }}>{p.name}</div><div style={{ fontSize: 9, color: T.tm }}>{p.empresa || ""}</div></div>
                     </div>
                   </td>
@@ -1046,18 +1145,17 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
           </div>
         </div>
 
-        {/* Gerentes Performance (Diretor) or HubSpot Deals (Gerente) */}
         {isDiretor ? (
           <div>
-            <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>👔 Performance dos Executivos</h3>
-            <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>Performance dos Executivos</div>
+            <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 12, overflow: "hidden" }}>
               <div className="table-responsive"><table className="data-table">
-                <thead><tr>{["Executivo", "Parceiros", "Indicações", "Ativas", "Conversão"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
+                <thead><tr>{["Executivo", "Parceiros", "Indicacoes", "Ativas", "Conversao"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
                 <tbody>{gerRanking.map(g => (
                   <tr key={g.id}>
                     <td style={tdS}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <div style={{ width: 26, height: 26, borderRadius: "50%", background: T.wn + "22", color: T.wn, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700 }}>{g.av || g.name[0]}</div>
+                        <div style={{ width: 26, height: 26, borderRadius: "50%", background: T.wn + "18", color: T.wn, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700 }}>{g.av || g.name[0]}</div>
                         <span style={{ fontSize: 12, fontWeight: 600 }}>{g.name}</span>
                       </div>
                     </td>
@@ -1079,8 +1177,8 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
           </div>
         ) : (
           <div>
-            <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>🔗 HubSpot Deals</h3>
-            <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>HubSpot Deals</div>
+            <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 12, overflow: "hidden" }}>
               <div className="table-responsive"><table className="data-table">
                 <thead><tr>{["Empresa", "Deal", "Parceiro", "Status"].map(h => <th key={h} style={thS}>{h}</th>)}</tr></thead>
                 <tbody>{baseInds.filter(i => i.hsId).slice(0, 8).map(ind => (
@@ -1101,11 +1199,11 @@ function Dash({ inds, users, comms, nfes, activity = [] }) {
 }
 
 // ===== KANBAN =====
-function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenceRules }) {
+function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenceRules, hasPerm = () => true }) {
   const { user } = useAuth();
   const [sel, setSel] = useState(null);
   const [view, setView] = useState("kanban");
-  const canMove = user.role !== "parceiro";
+  const canMove = user.role !== "parceiro" && hasPerm("mover_indicacao");
   const canEdit = ["gerente", "diretor", "executivo", "super_admin"].includes(user.role);
   const isDiretor = user.role === "diretor" || user.role === "super_admin" || user.role === "executivo";
   const isGerente = user.role === "gerente";
@@ -1236,9 +1334,57 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenc
     setNewNote("");
   };
 
+  // Proposal state for indications
+  const [indProposals, setIndProposals] = useState([]);
+  const [indPropTemplates, setIndPropTemplates] = useState([]);
+  const [indPropGenModal, setIndPropGenModal] = useState(false);
+  const [indPropSelTemplate, setIndPropSelTemplate] = useState(null);
+  const [indPropFieldValues, setIndPropFieldValues] = useState({});
+  const [indPropGenerating, setIndPropGenerating] = useState(false);
+  const [indPropSending, setIndPropSending] = useState(null);
+  const [indGoogleConn, setIndGoogleConn] = useState({ connected: false });
+
+  useEffect(() => {
+    if (canEdit) {
+      proposalsApi.getTemplates().then(r => setIndPropTemplates(r.data.templates || [])).catch(() => {});
+      googleApi.getStatus().then(r => setIndGoogleConn(r.data)).catch(() => {});
+    }
+  }, [canEdit]);
+
+  const loadIndProposals = async (indId) => {
+    if (!canEdit) return;
+    try { const r = await proposalsApi.getByEntity("indication", indId); setIndProposals(r.data.proposals || []); } catch { setIndProposals([]); }
+  };
+
+  // Contract state for indications
+  const [indContracts, setIndContracts] = useState([]);
+  const [indCtTemplates, setIndCtTemplates] = useState([]);
+  const [indCtGenModal, setIndCtGenModal] = useState(false);
+  const [indCtSelTemplate, setIndCtSelTemplate] = useState(null);
+  const [indCtFieldValues, setIndCtFieldValues] = useState({});
+  const [indCtGenerating, setIndCtGenerating] = useState(false);
+  const [indCsSignModal, setIndCsSignModal] = useState(null);
+  const [indCsSigners, setIndCsSigners] = useState([{ name: "", email: "", role: "sign" }]);
+  const [indCsSending, setIndCsSending] = useState(false);
+  const [indCsConfigured, setIndCsConfigured] = useState(false);
+
+  useEffect(() => {
+    if (canEdit) {
+      contractsApi.getTemplates().then(r => setIndCtTemplates(r.data.templates || [])).catch(() => {});
+      contractsApi.getClickSignConfig().then(r => setIndCsConfigured(r.data.configured)).catch(() => {});
+    }
+  }, [canEdit]);
+
+  const loadIndContracts = async (indId) => {
+    if (!canEdit) return;
+    try { const r = await contractsApi.getByEntity("indication", indId); setIndContracts(r.data.contracts || []); } catch { setIndContracts([]); }
+  };
+
   // Load history when selecting an indication
   const selectInd = async (ind) => {
     setSel(ind);
+    loadIndProposals(ind.id);
+    loadIndContracts(ind.id);
     try {
       const res = await indicationsApi.getById(ind.id);
       if (res.data?.hist) {
@@ -1521,6 +1667,335 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenc
               ))}
             </div>
           </div>
+
+          {/* Propostas */}
+          {canEdit && hasPerm("criar_proposta") && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: T.t2, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>📄 Propostas</div>
+              {indPropTemplates.length === 0 ? (
+                <div style={{ padding: 16, textAlign: "center", color: T.tm, fontSize: 11, background: T.bg2, borderRadius: 8 }}>Nenhum modelo configurado. Va em Configuracoes &gt; Pipeline &gt; Propostas.</div>
+              ) : (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <span style={{ fontSize: 12, color: T.t2 }}>{indProposals.length} proposta(s)</span>
+                    <Btn sm onClick={() => { setIndPropSelTemplate(null); setIndPropFieldValues({}); setIndPropGenModal(true); }}>+ Nova Proposta</Btn>
+                  </div>
+                  {indProposals.map(p => (
+                    <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: T.bg2, borderRadius: 8, marginBottom: 6, border: `1px solid ${T.bor}` }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={p.status === "enviada" ? T.inf : p.status === "aceita" ? T.ok : p.status === "recusada" ? T.er : T.tm} strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/></svg>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600 }}>{p.title}</div>
+                        <div style={{ fontSize: 10, color: T.tm }}>{p.template_name} · {new Date(p.created_at).toLocaleDateString("pt-BR")} · {p.created_by_name}</div>
+                      </div>
+                      <Badge type={p.status === "enviada" ? "info" : p.status === "aceita" ? "success" : p.status === "recusada" ? "danger" : "muted"}>{p.status}</Badge>
+                      <div style={{ display: "flex", gap: 4 }}>
+                        {p.status === "rascunho" && (
+                          <Btn sm onClick={async () => {
+                            try { await proposalsApi.updateStatus(p.id, "enviada"); loadIndProposals(sel.id); } catch { alert("Erro"); }
+                          }}>Marcar Enviada</Btn>
+                        )}
+                        {indGoogleConn.connected && sel.em && p.status === "rascunho" && (
+                          <Btn sm onClick={async () => {
+                            setIndPropSending(p.id);
+                            try {
+                              const fieldVals = JSON.parse(p.field_values || '{}');
+                              const bodyHtml = `<p>Prezado(a),</p><p>Segue em anexo a proposta comercial: <strong>${p.title}</strong></p>` +
+                                Object.entries(fieldVals).map(([k, v]) => v ? `<p><strong>${k}:</strong> ${v}</p>` : '').join('') +
+                                `<p>Atenciosamente,<br/>${user.name}</p>`;
+                              await googleApi.sendEmail({ to: sel.em, subject: `Proposta: ${p.title} - ${sel.emp}`, body: bodyHtml });
+                              await proposalsApi.updateStatus(p.id, "enviada");
+                              loadIndProposals(sel.id);
+                              alert("Proposta enviada por email!");
+                            } catch (e) { alert(e.response?.data?.error || "Erro ao enviar"); }
+                            setIndPropSending(null);
+                          }} disabled={indPropSending === p.id}>{indPropSending === p.id ? "Enviando..." : "Enviar Email"}</Btn>
+                        )}
+                        {p.file_original_name && (
+                          <Btn sm v="secondary" onClick={async () => {
+                            try {
+                              const r = await proposalsApi.downloadTemplate(p.template_id);
+                              const url = URL.createObjectURL(r.data);
+                              const a = document.createElement("a"); a.href = url; a.download = p.file_original_name; a.click(); URL.revokeObjectURL(url);
+                            } catch { alert("Erro ao baixar"); }
+                          }}>Baixar</Btn>
+                        )}
+                        <button onClick={async () => {
+                          if (!confirm("Remover proposta?")) return;
+                          try { await proposalsApi.delete(p.id); loadIndProposals(sel.id); } catch { alert("Erro"); }
+                        }} style={{ background: "none", border: "none", color: T.er, cursor: "pointer", fontSize: 14 }}>x</button>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+
+              {/* Generate Proposal Modal for Indication */}
+              <Modal open={indPropGenModal} onClose={() => setIndPropGenModal(false)} title="Gerar Proposta" footer={
+                <><Btn v="secondary" onClick={() => setIndPropGenModal(false)}>Cancelar</Btn>
+                <Btn onClick={async () => {
+                  if (!indPropSelTemplate) return;
+                  setIndPropGenerating(true);
+                  try {
+                    await proposalsApi.generate({
+                      template_id: indPropSelTemplate.id,
+                      entity_type: "indication",
+                      entity_id: sel.id,
+                      title: `${indPropSelTemplate.name} - ${sel.emp || sel.razao || ""}`,
+                      field_values: indPropFieldValues,
+                    });
+                    loadIndProposals(sel.id);
+                    setIndPropGenModal(false);
+                  } catch (e) { alert(e.response?.data?.error || "Erro"); }
+                  setIndPropGenerating(false);
+                }} disabled={!indPropSelTemplate || indPropGenerating}>{indPropGenerating ? "Gerando..." : "Gerar Proposta"}</Btn></>
+              }>
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                  <div>
+                    <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Modelo de Proposta</label>
+                    <select value={indPropSelTemplate?.id || ""} onChange={e => {
+                      const tpl = indPropTemplates.find(t => t.id === e.target.value);
+                      setIndPropSelTemplate(tpl || null);
+                      if (tpl) {
+                        const fields = JSON.parse(tpl.editable_fields || '[]');
+                        const vals = {};
+                        fields.forEach(f => {
+                          if (f.type === "auto_razao_social") vals[f.key] = sel.razao || sel.emp || "";
+                          else if (f.type === "auto_cnpj") vals[f.key] = sel.cnpj || "";
+                          else if (f.type === "auto_empresa") vals[f.key] = sel.emp || "";
+                          else if (f.type === "auto_contato") vals[f.key] = sel.cont || "";
+                          else if (f.type === "auto_telefone") vals[f.key] = sel.tel || "";
+                          else if (f.type === "auto_email") vals[f.key] = sel.em || "";
+                          else if (f.type === "auto_valor") vals[f.key] = "";
+                          else if (f.type === "auto_funcionarios") vals[f.key] = sel.nf ? String(sel.nf) : "";
+                          else if (f.type === "auto_data_hoje") vals[f.key] = new Date().toLocaleDateString("pt-BR");
+                          else if (f.type === "auto_responsavel") vals[f.key] = users.find(u => u.id === sel.gId)?.name || user.name;
+                          else vals[f.key] = f.default_value || "";
+                        });
+                        setIndPropFieldValues(vals);
+                      } else { setIndPropFieldValues({}); }
+                    }} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+                      <option value="">Selecione um modelo...</option>
+                      {indPropTemplates.map(t => <option key={t.id} value={t.id}>{t.name} ({t.file_type})</option>)}
+                    </select>
+                  </div>
+                  {indPropSelTemplate && (() => {
+                    let fields = [];
+                    try { fields = JSON.parse(indPropSelTemplate.editable_fields || '[]'); } catch {}
+                    if (fields.length === 0) return <div style={{ fontSize: 12, color: T.tm, padding: 10 }}>Este modelo nao possui campos editaveis.</div>;
+                    return (
+                      <div style={{ background: T.bg2, borderRadius: 10, padding: 14, border: `1px solid ${T.bor}` }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10 }}>Preencha os campos da proposta</div>
+                        {fields.map(f => (
+                          <div key={f.key} style={{ marginBottom: 10 }}>
+                            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 4, textTransform: "uppercase" }}>
+                              {f.label}
+                              {f.type.startsWith("auto_") && <span style={{ fontSize: 9, color: T.ok, background: T.ok + "15", padding: "1px 6px", borderRadius: 3 }}>auto</span>}
+                            </label>
+                            <input value={indPropFieldValues[f.key] || ""} onChange={e => setIndPropFieldValues({ ...indPropFieldValues, [f.key]: e.target.value })}
+                              placeholder={f.default_value || ""} style={{ width: "100%", padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12 }} />
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </Modal>
+            </div>
+          )}
+
+          {/* Contratos */}
+          {canEdit && hasPerm("emitir_contrato") && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: T.t2, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>📝 Contratos</div>
+              {indCtTemplates.length === 0 ? (
+                <div style={{ padding: 16, textAlign: "center", color: T.tm, fontSize: 11, background: T.bg2, borderRadius: 8 }}>Nenhum modelo configurado. Va em Configuracoes &gt; Pipeline &gt; Contratos.</div>
+              ) : (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <span style={{ fontSize: 12, color: T.t2 }}>{indContracts.length} contrato(s)</span>
+                    <Btn sm onClick={() => { setIndCtSelTemplate(null); setIndCtFieldValues({}); setIndCtGenModal(true); }}>+ Novo Contrato</Btn>
+                  </div>
+                  {indContracts.map(c => (
+                    <div key={c.id} style={{ padding: "10px 12px", background: T.bg2, borderRadius: 8, marginBottom: 6, border: `1px solid ${T.bor}` }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={c.status === "assinado" ? T.ok : c.status === "enviado" ? T.inf : c.status === "cancelado" ? T.er : T.tm} strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600 }}>{c.title}</div>
+                          <div style={{ fontSize: 10, color: T.tm }}>{c.template_name} · {new Date(c.created_at).toLocaleDateString("pt-BR")}</div>
+                        </div>
+                        <Badge type={c.status === "assinado" ? "success" : c.status === "enviado" ? "info" : c.status === "cancelado" ? "danger" : "muted"}>{c.status}</Badge>
+                      </div>
+                      {c.clicksign_document_key && (
+                        <div style={{ fontSize: 10, color: T.t2, padding: "4px 8px", background: T.card, borderRadius: 4, marginBottom: 4 }}>
+                          ClickSign: <span style={{ fontWeight: 600 }}>{c.clicksign_status || "pending"}</span>
+                          {c.clicksign_url && <> · <a href={c.clicksign_url} target="_blank" rel="noopener noreferrer" style={{ color: T.ac }}>Ver documento</a></>}
+                        </div>
+                      )}
+                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                        {c.status === "rascunho" && indCsConfigured && hasPerm("enviar_clicksign") && (
+                          <Btn sm onClick={() => {
+                            setIndCsSignModal(c);
+                            setIndCsSigners([{ name: sel.cont || "", email: sel.em || "", role: "sign" }]);
+                          }}>Enviar ClickSign</Btn>
+                        )}
+                        {c.clicksign_document_key && c.status === "enviado" && (
+                          <Btn sm v="secondary" onClick={async () => {
+                            try {
+                              const r = await contractsApi.checkClickSignStatus(c.id);
+                              loadIndContracts(sel.id);
+                              alert(`Status: ${r.data.clicksign_status}\n${r.data.signers.map(s => `${s.name}: ${s.signed ? "Assinado" : "Pendente"}`).join("\n")}`);
+                            } catch (e) { alert(e.response?.data?.error || "Erro"); }
+                          }}>Verificar Status</Btn>
+                        )}
+                        {c.file_original_name && (
+                          <Btn sm v="secondary" onClick={async () => {
+                            try {
+                              const r = await contractsApi.downloadTemplate(c.template_id);
+                              const url = URL.createObjectURL(r.data);
+                              const a = document.createElement("a"); a.href = url; a.download = c.file_original_name; a.click(); URL.revokeObjectURL(url);
+                            } catch { alert("Erro ao baixar"); }
+                          }}>Baixar</Btn>
+                        )}
+                        <button onClick={async () => {
+                          if (!confirm("Remover contrato?")) return;
+                          try { await contractsApi.delete(c.id); loadIndContracts(sel.id); } catch { alert("Erro"); }
+                        }} style={{ background: "none", border: "none", color: T.er, cursor: "pointer", fontSize: 14 }}>x</button>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+
+              {/* Generate Contract Modal for Indication */}
+              <Modal open={indCtGenModal} onClose={() => setIndCtGenModal(false)} title="Emitir Contrato" footer={
+                <><Btn v="secondary" onClick={() => setIndCtGenModal(false)}>Cancelar</Btn>
+                <Btn onClick={async () => {
+                  if (!indCtSelTemplate) return;
+                  setIndCtGenerating(true);
+                  try {
+                    await contractsApi.generate({
+                      template_id: indCtSelTemplate.id,
+                      entity_type: "indication",
+                      entity_id: sel.id,
+                      title: `${indCtSelTemplate.name} - ${sel.emp || sel.razao || ""}`,
+                      field_values: indCtFieldValues,
+                    });
+                    loadIndContracts(sel.id);
+                    setIndCtGenModal(false);
+                  } catch (e) { alert(e.response?.data?.error || "Erro"); }
+                  setIndCtGenerating(false);
+                }} disabled={!indCtSelTemplate || indCtGenerating}>{indCtGenerating ? "Gerando..." : "Emitir Contrato"}</Btn></>
+              }>
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                  <div>
+                    <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Modelo de Contrato</label>
+                    <select value={indCtSelTemplate?.id || ""} onChange={e => {
+                      const tpl = indCtTemplates.find(t => t.id === e.target.value);
+                      setIndCtSelTemplate(tpl || null);
+                      if (tpl) {
+                        const fields = JSON.parse(tpl.editable_fields || '[]');
+                        const vals = {};
+                        fields.forEach(f => {
+                          if (f.type === "auto_razao_social") vals[f.key] = sel.razao || sel.emp || "";
+                          else if (f.type === "auto_cnpj") vals[f.key] = sel.cnpj || "";
+                          else if (f.type === "auto_empresa") vals[f.key] = sel.emp || "";
+                          else if (f.type === "auto_contato") vals[f.key] = sel.cont || "";
+                          else if (f.type === "auto_telefone") vals[f.key] = sel.tel || "";
+                          else if (f.type === "auto_email") vals[f.key] = sel.em || "";
+                          else if (f.type === "auto_valor") vals[f.key] = "";
+                          else if (f.type === "auto_funcionarios") vals[f.key] = sel.nf ? String(sel.nf) : "";
+                          else if (f.type === "auto_data_hoje") vals[f.key] = new Date().toLocaleDateString("pt-BR");
+                          else if (f.type === "auto_responsavel") vals[f.key] = users.find(u => u.id === sel.gId)?.name || user.name;
+                          else vals[f.key] = f.default_value || "";
+                        });
+                        setIndCtFieldValues(vals);
+                      } else { setIndCtFieldValues({}); }
+                    }} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+                      <option value="">Selecione um modelo...</option>
+                      {indCtTemplates.map(t => <option key={t.id} value={t.id}>{t.name} ({t.file_type})</option>)}
+                    </select>
+                  </div>
+                  {indCtSelTemplate && (() => {
+                    let fields = [];
+                    try { fields = JSON.parse(indCtSelTemplate.editable_fields || '[]'); } catch {}
+                    if (fields.length === 0) return <div style={{ fontSize: 12, color: T.tm, padding: 10 }}>Este modelo nao possui campos editaveis.</div>;
+                    return (
+                      <div style={{ background: T.bg2, borderRadius: 10, padding: 14, border: `1px solid ${T.bor}` }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10 }}>Preencha os campos do contrato</div>
+                        {fields.map(f => (
+                          <div key={f.key} style={{ marginBottom: 10 }}>
+                            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 4, textTransform: "uppercase" }}>
+                              {f.label}
+                              {f.type.startsWith("auto_") && <span style={{ fontSize: 9, color: T.ok, background: T.ok + "15", padding: "1px 6px", borderRadius: 3 }}>auto</span>}
+                            </label>
+                            <input value={indCtFieldValues[f.key] || ""} onChange={e => setIndCtFieldValues({ ...indCtFieldValues, [f.key]: e.target.value })}
+                              placeholder={f.default_value || ""} style={{ width: "100%", padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12 }} />
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </Modal>
+
+              {/* ClickSign Send Modal for Indication */}
+              <Modal open={!!indCsSignModal} onClose={() => setIndCsSignModal(null)} title="Enviar para ClickSign" footer={
+                <><Btn v="secondary" onClick={() => setIndCsSignModal(null)}>Cancelar</Btn>
+                <Btn onClick={async () => {
+                  const valid = indCsSigners.filter(s => s.name && s.email);
+                  if (valid.length === 0) { alert("Adicione pelo menos um signatario."); return; }
+                  setIndCsSending(true);
+                  try {
+                    await contractsApi.sendToClickSign({
+                      contract_id: indCsSignModal.id,
+                      signers: valid,
+                      message: `Prezado(a),\nSegue o contrato "${indCsSignModal.title}" para assinatura.\n\nAtenciosamente,\n${user.name}`,
+                    });
+                    loadIndContracts(sel.id);
+                    setIndCsSignModal(null);
+                    alert("Contrato enviado para assinatura via ClickSign!");
+                  } catch (e) { alert(e.response?.data?.error || "Erro ao enviar para ClickSign"); }
+                  setIndCsSending(false);
+                }} disabled={indCsSending || !indCsSigners.some(s => s.name && s.email)}>{indCsSending ? "Enviando..." : "Enviar para Assinatura"}</Btn></>
+              }>
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                  <div style={{ fontSize: 12, color: T.t2 }}>Contrato: <strong>{indCsSignModal?.title}</strong></div>
+                  <div style={{ fontSize: 12, fontWeight: 700 }}>Signatarios</div>
+                  {indCsSigners.map((s, i) => (
+                    <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                      <div style={{ flex: 1 }}>
+                        {i === 0 && <label style={{ fontSize: 10, color: T.tm, display: "block", marginBottom: 3 }}>Nome</label>}
+                        <input value={s.name} onChange={e => { const arr = [...indCsSigners]; arr[i].name = e.target.value; setIndCsSigners(arr); }}
+                          placeholder="Nome completo" style={{ width: "100%", padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12 }} />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        {i === 0 && <label style={{ fontSize: 10, color: T.tm, display: "block", marginBottom: 3 }}>Email</label>}
+                        <input value={s.email} onChange={e => { const arr = [...indCsSigners]; arr[i].email = e.target.value; setIndCsSigners(arr); }}
+                          placeholder="email@exemplo.com" style={{ width: "100%", padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12 }} />
+                      </div>
+                      <div style={{ width: 120 }}>
+                        {i === 0 && <label style={{ fontSize: 10, color: T.tm, display: "block", marginBottom: 3 }}>Papel</label>}
+                        <select value={s.role} onChange={e => { const arr = [...indCsSigners]; arr[i].role = e.target.value; setIndCsSigners(arr); }}
+                          style={{ width: "100%", padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12 }}>
+                          <option value="sign">Assinar</option>
+                          <option value="approve">Aprovar</option>
+                          <option value="witness">Testemunha</option>
+                          <option value="party">Parte</option>
+                          <option value="legal_representative">Rep. Legal</option>
+                          <option value="guarantor">Fiador</option>
+                        </select>
+                      </div>
+                      {indCsSigners.length > 1 && (
+                        <button onClick={() => setIndCsSigners(indCsSigners.filter((_, j) => j !== i))}
+                          style={{ background: "none", border: "none", color: T.er, cursor: "pointer", fontSize: 14 }}>x</button>
+                      )}
+                    </div>
+                  ))}
+                  <Btn sm v="secondary" onClick={() => setIndCsSigners([...indCsSigners, { name: "", email: "", role: "sign" }])}>+ Adicionar Signatario</Btn>
+                </div>
+              </Modal>
+            </div>
+          )}
         </div>}
       </Modal>
     </div>
@@ -1547,6 +2022,7 @@ function ParcPage({ users, setUsers, inds }) {
   const [parceiroConvMap, setParceiroConvMap] = useState({}); // parceiro_id -> [convenio names]
   const [pfGer, setPfGer] = useState("todos");
   const [pfConv, setPfConv] = useState("todos");
+  const [pfUf, setPfUf] = useState("todos");
   const [pfConvParMap, setPfConvParMap] = useState({}); // convenio_id -> Set of parceiro ids
 
   useEffect(() => {
@@ -1614,17 +2090,20 @@ function ParcPage({ users, setUsers, inds }) {
 
   const parcGerentes = [...new Map(allParcs.map(p => [p.gId, users.find(u => u.id === p.gId)]).filter(([, g]) => g)).values()];
 
+  const parcUfs = [...new Set(allParcs.map(p => p.uf).filter(Boolean))].sort();
+
   const parcs = allParcs
     .filter(p => !q || p.name.toLowerCase().includes(q.toLowerCase()) || (p.empresa || "").toLowerCase().includes(q.toLowerCase()))
     .filter(p => pfGer === "todos" || p.gId === pfGer)
+    .filter(p => pfUf === "todos" || p.uf === pfUf)
     .filter(p => {
       if (pfConv === "todos") return true;
       const convParceiros = pfConvParMap[pfConv];
       return convParceiros && convParceiros.has(p.id);
     });
 
-  const pfHasFilters = pfGer !== "todos" || pfConv !== "todos" || q;
-  const pfClearFilters = () => { setPfGer("todos"); setPfConv("todos"); setQ(""); };
+  const pfHasFilters = pfGer !== "todos" || pfConv !== "todos" || pfUf !== "todos" || q;
+  const pfClearFilters = () => { setPfGer("todos"); setPfConv("todos"); setPfUf("todos"); setQ(""); };
 
   const [adding, setAdding] = useState(false);
   const add = async () => {
@@ -1708,6 +2187,13 @@ function ParcPage({ users, setUsers, inds }) {
               {allConvenios.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>}
+          {parcUfs.length > 0 && <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", fontWeight: 600 }}>UF:</span>
+            <select value={pfUf} onChange={e => setPfUf(e.target.value)} style={{ padding: "7px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12, outline: "none" }}>
+              <option value="todos">Todos</option>
+              {parcUfs.map(uf => <option key={uf} value={uf}>{uf}</option>)}
+            </select>
+          </div>}
           {pfHasFilters && <>
             <button onClick={pfClearFilters} style={{ padding: "5px 10px", borderRadius: 6, border: `1px solid ${T.er}44`, background: T.er + "11", color: T.er, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans',sans-serif" }}>✕ Limpar</button>
             <span style={{ fontSize: 11, color: T.t2 }}>{parcs.length} de {allParcs.length}</span>
@@ -1744,6 +2230,7 @@ function ParcPage({ users, setUsers, inds }) {
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                   <ComBadge tipo={p.comTipo} val={p.comVal} />
+                  {p.uf && <span style={{ fontSize: 10, color: T.wn, background: T.wn + "15", padding: "3px 8px", borderRadius: 4, fontWeight: 600 }}>📍 {p.uf}</span>}
                   {gerente && <span style={{ fontSize: 10, color: T.t2, background: T.bg2, padding: "3px 8px", borderRadius: 4 }}>👤 {gerente.name}</span>}
                   {parceiroConvMap[p.id]?.length > 0 && parceiroConvMap[p.id].map((cn, ci) => (
                     <span key={ci} style={{ fontSize: 10, color: T.inf, background: T.inf + "15", padding: "3px 8px", borderRadius: 4 }}>🤝 {cn}</span>
@@ -1785,7 +2272,7 @@ function ParcPage({ users, setUsers, inds }) {
               <div style={{ fontSize: 12, color: T.tm }}>{detail.empresa || "Sem empresa"}</div>
             </div>
           </div>
-          {[["CNPJ", detail.cnpj ? detail.cnpj.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5') : null], ["E-mail", detail.email], ["Telefone", detail.tel], ["Executivo", users.find(u => u.id === detail.gId)?.name]].map(([l, v], i) => (
+          {[["CNPJ", detail.cnpj ? detail.cnpj.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5') : null], ["E-mail", detail.email], ["Telefone", detail.tel], ["UF", detail.uf], ["Executivo", users.find(u => u.id === detail.gId)?.name]].map(([l, v], i) => (
             <div key={i} style={{ display: "flex", padding: "8px 0", borderBottom: `1px solid ${T.bor}33` }}>
               <div style={{ width: 130, fontSize: 11, color: T.tm, textTransform: "uppercase", flexShrink: 0 }}>{l}</div>
               <div style={{ fontSize: 13 }}>{v || "—"}</div>
@@ -2661,7 +3148,7 @@ const ACTIVITY_TYPES = [
 const PRIORITY_COLORS = { low: "#10b981", medium: "#f59e0b", high: "#ef4444" };
 const PRIORITY_LABELS = { low: "Baixa", medium: "Média", high: "Alta" };
 
-function NegociosPage({ users, selectedTeam, myTeams }) {
+function NegociosPage({ users, selectedTeam, myTeams, hasPerm = () => true }) {
   const { user } = useAuth();
   const { breakpoint } = useBreakpoint();
   const isMobile = breakpoint === "mobile";
@@ -2693,8 +3180,34 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
   const [emailForm, setEmailForm] = useState({ to: "", subject: "", body: "", cc: "" });
   const [emailSending, setEmailSending] = useState(false);
   const [calEvents, setCalEvents] = useState([]);
+  // Proposal state
+  const [dealProposals, setDealProposals] = useState([]);
+  const [propTemplates, setPropTemplates] = useState([]);
+  const [propGenModal, setPropGenModal] = useState(false);
+  const [propSelTemplate, setPropSelTemplate] = useState(null);
+  const [propFieldValues, setPropFieldValues] = useState({});
+  const [propGenerating, setPropGenerating] = useState(false);
+  const [propSending, setPropSending] = useState(null);
+  // Contract state
+  const [dealContracts, setDealContracts] = useState([]);
+  const [ctTemplates, setCtTemplates] = useState([]);
+  const [ctGenModal, setCtGenModal] = useState(false);
+  const [ctSelTemplate, setCtSelTemplate] = useState(null);
+  const [ctFieldValues, setCtFieldValues] = useState({});
+  const [ctGenerating, setCtGenerating] = useState(false);
+  const [csSignModal, setCsSignModal] = useState(null); // contract being sent to clicksign
+  const [csSigners, setCsSigners] = useState([{ name: "", email: "", role: "sign" }]);
+  const [csSending, setCsSending] = useState(false);
+  const [csConfigured, setCsConfigured] = useState(false);
 
   useEffect(() => { googleApi.getStatus().then(r => setGoogleConn(r.data)).catch(() => {}); }, []);
+  useEffect(() => { if (canEdit) proposalsApi.getTemplates().then(r => setPropTemplates(r.data.templates || [])).catch(() => {}); }, [canEdit]);
+  useEffect(() => {
+    if (canEdit) {
+      contractsApi.getTemplates().then(r => setCtTemplates(r.data.templates || [])).catch(() => {});
+      contractsApi.getClickSignConfig().then(r => setCsConfigured(r.data.configured)).catch(() => {});
+    }
+  }, [canEdit]);
 
   useEffect(() => {
     const params = selectedTeam ? { team_id: selectedTeam } : {};
@@ -2722,14 +3235,18 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
     setDetailTab("detalhes");
     setEditingDeal(false);
     setShowDetailModal(true);
-    const [ar, tr, cr] = await Promise.all([
+    const [ar, tr, cr, pr, ctr] = await Promise.all([
       dealsApi.getActivities(deal.id).catch(() => ({ data: [] })),
       dealsApi.getTasks(deal.id).catch(() => ({ data: [] })),
       dealsApi.getContacts(deal.id).catch(() => ({ data: [] })),
+      canEdit ? proposalsApi.getByEntity("deal", deal.id).catch(() => ({ data: { proposals: [] } })) : Promise.resolve({ data: { proposals: [] } }),
+      canEdit ? contractsApi.getByEntity("deal", deal.id).catch(() => ({ data: { contracts: [] } })) : Promise.resolve({ data: { contracts: [] } }),
     ]);
     setActivities(ar.data);
     setTasks(tr.data);
     setContacts(cr.data);
+    setDealProposals(pr.data.proposals || []);
+    setDealContracts(ctr.data.contracts || []);
   };
 
   const handleCnpjLookup = async () => {
@@ -3036,7 +3553,7 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
           <div>
             {/* Tabs */}
             <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${T.bor}`, marginBottom: 16 }}>
-              {["detalhes", "atividades", "contatos", "tarefas", "email", "agenda"].map(t => (
+              {["detalhes", "atividades", "contatos", "tarefas", ...(canEdit && hasPerm("criar_proposta") ? ["proposta"] : []), ...(canEdit && hasPerm("emitir_contrato") ? ["contrato"] : []), "email", "agenda"].map(t => (
                 <button key={t} onClick={() => setDetailTab(t)}
                   style={{ padding: "8px 16px", fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: "none", color: detailTab === t ? T.ac : T.tm, borderBottom: `2px solid ${detailTab === t ? T.ac : "transparent"}`, marginBottom: -1, textTransform: "capitalize" }}>{t}</button>
               ))}
@@ -3232,6 +3749,377 @@ function NegociosPage({ users, selectedTeam, myTeams }) {
                   ))}
                   {tasks.length === 0 && <div style={{ padding: 20, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhuma tarefa</div>}
                 </div>
+              </div>
+            )}
+
+            {/* PROPOSTA TAB */}
+            {detailTab === "proposta" && canEdit && (
+              <div>
+                {propTemplates.length === 0 ? (
+                  <div style={{ padding: 30, textAlign: "center", color: T.tm }}>
+                    <div style={{ fontSize: 24, marginBottom: 8 }}>📄</div>
+                    <div style={{ fontSize: 13 }}>Nenhum modelo de proposta configurado.</div>
+                    <div style={{ fontSize: 11, marginTop: 4 }}>Va em Configuracoes &gt; Pipeline &gt; Propostas para criar modelos.</div>
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600 }}>Propostas ({dealProposals.length})</span>
+                      <Btn sm onClick={() => { setPropSelTemplate(null); setPropFieldValues({}); setPropGenModal(true); }}>+ Nova Proposta</Btn>
+                    </div>
+
+                    {/* Existing proposals */}
+                    {dealProposals.map(p => (
+                      <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: T.bg2, borderRadius: 8, marginBottom: 6, border: `1px solid ${T.bor}` }}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={p.status === "enviada" ? T.inf : p.status === "aceita" ? T.ok : p.status === "recusada" ? T.er : T.tm} strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/></svg>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600 }}>{p.title}</div>
+                          <div style={{ fontSize: 10, color: T.tm }}>Modelo: {p.template_name} · {new Date(p.created_at).toLocaleDateString("pt-BR")} · {p.created_by_name}</div>
+                        </div>
+                        <Badge type={p.status === "enviada" ? "info" : p.status === "aceita" ? "success" : p.status === "recusada" ? "danger" : "muted"}>{p.status}</Badge>
+                        <div style={{ display: "flex", gap: 4 }}>
+                          {p.status === "rascunho" && (
+                            <Btn sm onClick={async () => {
+                              try {
+                                await proposalsApi.updateStatus(p.id, "enviada");
+                                const r = await proposalsApi.getByEntity("deal", selectedDeal.id);
+                                setDealProposals(r.data.proposals || []);
+                              } catch { alert("Erro"); }
+                            }}>Marcar Enviada</Btn>
+                          )}
+                          {googleConn.connected && selectedDeal.contact_email && p.status === "rascunho" && (
+                            <Btn sm onClick={async () => {
+                              setPropSending(p.id);
+                              try {
+                                const fieldVals = JSON.parse(p.field_values || '{}');
+                                const bodyHtml = `<p>Prezado(a),</p><p>Segue em anexo a proposta comercial: <strong>${p.title}</strong></p>` +
+                                  Object.entries(fieldVals).map(([k, v]) => v ? `<p><strong>${k}:</strong> ${v}</p>` : '').join('') +
+                                  `<p>Atenciosamente,<br/>${user.name}</p>`;
+                                await googleApi.sendEmail({
+                                  to: selectedDeal.contact_email,
+                                  subject: `Proposta: ${p.title} - ${selectedDeal.company || selectedDeal.title}`,
+                                  body: bodyHtml,
+                                });
+                                await proposalsApi.updateStatus(p.id, "enviada");
+                                const r = await proposalsApi.getByEntity("deal", selectedDeal.id);
+                                setDealProposals(r.data.proposals || []);
+                                alert("Proposta enviada por email!");
+                              } catch (e) { alert(e.response?.data?.error || "Erro ao enviar"); }
+                              setPropSending(null);
+                            }} disabled={propSending === p.id}>{propSending === p.id ? "Enviando..." : "Enviar Email"}</Btn>
+                          )}
+                          {p.file_original_name && (
+                            <Btn sm v="secondary" onClick={async () => {
+                              try {
+                                const r = await proposalsApi.downloadTemplate(p.template_id);
+                                const url = URL.createObjectURL(r.data);
+                                const a = document.createElement("a"); a.href = url; a.download = p.file_original_name; a.click(); URL.revokeObjectURL(url);
+                              } catch { alert("Erro ao baixar"); }
+                            }}>Baixar</Btn>
+                          )}
+                          <button onClick={async () => {
+                            if (!confirm("Remover proposta?")) return;
+                            try { await proposalsApi.delete(p.id); const r = await proposalsApi.getByEntity("deal", selectedDeal.id); setDealProposals(r.data.proposals || []); } catch { alert("Erro"); }
+                          }} style={{ background: "none", border: "none", color: T.er, cursor: "pointer", fontSize: 14 }}>x</button>
+                        </div>
+                      </div>
+                    ))}
+                    {dealProposals.length === 0 && (
+                      <div style={{ padding: 20, textAlign: "center", color: T.tm, fontSize: 12 }}>Nenhuma proposta gerada para esta negociacao.</div>
+                    )}
+                  </>
+                )}
+
+                {/* Generate Proposal Modal */}
+                <Modal open={propGenModal} onClose={() => setPropGenModal(false)} title="Gerar Proposta" footer={
+                  <><Btn v="secondary" onClick={() => setPropGenModal(false)}>Cancelar</Btn>
+                  <Btn onClick={async () => {
+                    if (!propSelTemplate) return;
+                    setPropGenerating(true);
+                    try {
+                      await proposalsApi.generate({
+                        template_id: propSelTemplate.id,
+                        entity_type: "deal",
+                        entity_id: selectedDeal.id,
+                        title: `${propSelTemplate.name} - ${selectedDeal.company || selectedDeal.title}`,
+                        field_values: propFieldValues,
+                      });
+                      const r = await proposalsApi.getByEntity("deal", selectedDeal.id);
+                      setDealProposals(r.data.proposals || []);
+                      setPropGenModal(false);
+                    } catch (e) { alert(e.response?.data?.error || "Erro"); }
+                    setPropGenerating(false);
+                  }} disabled={!propSelTemplate || propGenerating}>{propGenerating ? "Gerando..." : "Gerar Proposta"}</Btn></>
+                }>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                    {/* Template selector */}
+                    <div>
+                      <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Modelo de Proposta</label>
+                      <select value={propSelTemplate?.id || ""} onChange={e => {
+                        const tpl = propTemplates.find(t => t.id === e.target.value);
+                        setPropSelTemplate(tpl || null);
+                        if (tpl) {
+                          const fields = JSON.parse(tpl.editable_fields || '[]');
+                          const vals = {};
+                          fields.forEach(f => {
+                            if (f.type === "auto_razao_social") vals[f.key] = selectedDeal.company || "";
+                            else if (f.type === "auto_cnpj") vals[f.key] = selectedDeal.cnpj || "";
+                            else if (f.type === "auto_empresa") vals[f.key] = selectedDeal.company || "";
+                            else if (f.type === "auto_contato") vals[f.key] = selectedDeal.contact_name || "";
+                            else if (f.type === "auto_telefone") vals[f.key] = selectedDeal.contact_phone || "";
+                            else if (f.type === "auto_email") vals[f.key] = selectedDeal.contact_email || "";
+                            else if (f.type === "auto_valor") vals[f.key] = selectedDeal.value ? `R$ ${Number(selectedDeal.value).toLocaleString("pt-BR")}` : "";
+                            else if (f.type === "auto_funcionarios") vals[f.key] = selectedDeal.num_employees ? String(selectedDeal.num_employees) : "";
+                            else if (f.type === "auto_data_hoje") vals[f.key] = new Date().toLocaleDateString("pt-BR");
+                            else if (f.type === "auto_responsavel") vals[f.key] = selectedDeal.owner_name || user.name;
+                            else vals[f.key] = f.default_value || "";
+                          });
+                          setPropFieldValues(vals);
+                        } else { setPropFieldValues({}); }
+                      }} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+                        <option value="">Selecione um modelo...</option>
+                        {propTemplates.map(t => <option key={t.id} value={t.id}>{t.name} ({t.file_type})</option>)}
+                      </select>
+                    </div>
+
+                    {/* Editable fields */}
+                    {propSelTemplate && (() => {
+                      let fields = [];
+                      try { fields = JSON.parse(propSelTemplate.editable_fields || '[]'); } catch {}
+                      if (fields.length === 0) return <div style={{ fontSize: 12, color: T.tm, padding: 10 }}>Este modelo nao possui campos editaveis.</div>;
+                      return (
+                        <div style={{ background: T.bg2, borderRadius: 10, padding: 14, border: `1px solid ${T.bor}` }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10 }}>Preencha os campos da proposta</div>
+                          {fields.map(f => (
+                            <div key={f.key} style={{ marginBottom: 10 }}>
+                              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 4, textTransform: "uppercase" }}>
+                                {f.label}
+                                {f.type.startsWith("auto_") && <span style={{ fontSize: 9, color: T.ok, background: T.ok + "15", padding: "1px 6px", borderRadius: 3 }}>auto</span>}
+                              </label>
+                              {f.type === "date" || f.type === "auto_data_hoje" ? (
+                                <input type={f.type.startsWith("auto_") ? "text" : "date"} value={propFieldValues[f.key] || ""} onChange={e => setPropFieldValues({ ...propFieldValues, [f.key]: e.target.value })}
+                                  style={{ width: "100%", padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12 }} />
+                              ) : (
+                                <input value={propFieldValues[f.key] || ""} onChange={e => setPropFieldValues({ ...propFieldValues, [f.key]: e.target.value })}
+                                  placeholder={f.default_value || ""} style={{ width: "100%", padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12 }} />
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </Modal>
+              </div>
+            )}
+
+            {/* CONTRATO TAB */}
+            {detailTab === "contrato" && canEdit && (
+              <div>
+                {ctTemplates.length === 0 ? (
+                  <div style={{ padding: 30, textAlign: "center", color: T.tm }}>
+                    <div style={{ fontSize: 24, marginBottom: 8 }}>📝</div>
+                    <div style={{ fontSize: 13 }}>Nenhum modelo de contrato configurado.</div>
+                    <div style={{ fontSize: 11, marginTop: 4 }}>Va em Configuracoes &gt; Pipeline &gt; Contratos para criar modelos.</div>
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600 }}>Contratos ({dealContracts.length})</span>
+                      <Btn sm onClick={() => { setCtSelTemplate(null); setCtFieldValues({}); setCtGenModal(true); }}>+ Novo Contrato</Btn>
+                    </div>
+
+                    {dealContracts.map(c => (
+                      <div key={c.id} style={{ padding: "12px 14px", background: T.bg2, borderRadius: 8, marginBottom: 8, border: `1px solid ${T.bor}` }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={c.status === "assinado" ? T.ok : c.status === "enviado" ? T.inf : c.status === "cancelado" ? T.er : T.tm} strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600 }}>{c.title}</div>
+                            <div style={{ fontSize: 10, color: T.tm }}>Modelo: {c.template_name} · {new Date(c.created_at).toLocaleDateString("pt-BR")} · {c.created_by_name}</div>
+                          </div>
+                          <Badge type={c.status === "assinado" ? "success" : c.status === "enviado" ? "info" : c.status === "cancelado" ? "danger" : "muted"}>{c.status}</Badge>
+                        </div>
+
+                        {/* ClickSign info */}
+                        {c.clicksign_document_key && (
+                          <div style={{ fontSize: 10, color: T.t2, padding: "6px 8px", background: T.card, borderRadius: 4, marginBottom: 6 }}>
+                            ClickSign: <span style={{ fontWeight: 600 }}>{c.clicksign_status || "pending"}</span>
+                            {c.clicksign_url && <> · <a href={c.clicksign_url} target="_blank" rel="noopener noreferrer" style={{ color: T.ac }}>Ver documento</a></>}
+                            {(() => { try { return JSON.parse(c.signers || '[]'); } catch { return []; } })().map((s, i) => (
+                              <span key={i} style={{ marginLeft: 8 }}>{s.name} ({s.email})</span>
+                            ))}
+                          </div>
+                        )}
+
+                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                          {c.status === "rascunho" && csConfigured && hasPerm("enviar_clicksign") && (
+                            <Btn sm onClick={() => {
+                              setCsSignModal(c);
+                              setCsSigners([{ name: selectedDeal.contact_name || "", email: selectedDeal.contact_email || "", role: "sign" }]);
+                            }}>Enviar ClickSign</Btn>
+                          )}
+                          {c.clicksign_document_key && c.status === "enviado" && (
+                            <Btn sm v="secondary" onClick={async () => {
+                              try {
+                                const r = await contractsApi.checkClickSignStatus(c.id);
+                                const ctr = await contractsApi.getByEntity("deal", selectedDeal.id);
+                                setDealContracts(ctr.data.contracts || []);
+                                alert(`Status: ${r.data.clicksign_status}\n${r.data.signers.map(s => `${s.name}: ${s.signed ? "Assinado" : "Pendente"}`).join("\n")}`);
+                              } catch (e) { alert(e.response?.data?.error || "Erro"); }
+                            }}>Verificar Status</Btn>
+                          )}
+                          {c.file_original_name && (
+                            <Btn sm v="secondary" onClick={async () => {
+                              try {
+                                const r = await contractsApi.downloadTemplate(c.template_id);
+                                const url = URL.createObjectURL(r.data);
+                                const a = document.createElement("a"); a.href = url; a.download = c.file_original_name; a.click(); URL.revokeObjectURL(url);
+                              } catch { alert("Erro ao baixar"); }
+                            }}>Baixar</Btn>
+                          )}
+                          <button onClick={async () => {
+                            if (!confirm("Remover contrato?")) return;
+                            try { await contractsApi.delete(c.id); const r = await contractsApi.getByEntity("deal", selectedDeal.id); setDealContracts(r.data.contracts || []); } catch { alert("Erro"); }
+                          }} style={{ background: "none", border: "none", color: T.er, cursor: "pointer", fontSize: 14 }}>x</button>
+                        </div>
+                      </div>
+                    ))}
+                    {dealContracts.length === 0 && (
+                      <div style={{ padding: 20, textAlign: "center", color: T.tm, fontSize: 12 }}>Nenhum contrato emitido para esta negociacao.</div>
+                    )}
+                  </>
+                )}
+
+                {/* Generate Contract Modal */}
+                <Modal open={ctGenModal} onClose={() => setCtGenModal(false)} title="Emitir Contrato" footer={
+                  <><Btn v="secondary" onClick={() => setCtGenModal(false)}>Cancelar</Btn>
+                  <Btn onClick={async () => {
+                    if (!ctSelTemplate) return;
+                    setCtGenerating(true);
+                    try {
+                      await contractsApi.generate({
+                        template_id: ctSelTemplate.id,
+                        entity_type: "deal",
+                        entity_id: selectedDeal.id,
+                        title: `${ctSelTemplate.name} - ${selectedDeal.company || selectedDeal.title}`,
+                        field_values: ctFieldValues,
+                      });
+                      const r = await contractsApi.getByEntity("deal", selectedDeal.id);
+                      setDealContracts(r.data.contracts || []);
+                      setCtGenModal(false);
+                    } catch (e) { alert(e.response?.data?.error || "Erro"); }
+                    setCtGenerating(false);
+                  }} disabled={!ctSelTemplate || ctGenerating}>{ctGenerating ? "Gerando..." : "Emitir Contrato"}</Btn></>
+                }>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                    <div>
+                      <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Modelo de Contrato</label>
+                      <select value={ctSelTemplate?.id || ""} onChange={e => {
+                        const tpl = ctTemplates.find(t => t.id === e.target.value);
+                        setCtSelTemplate(tpl || null);
+                        if (tpl) {
+                          const fields = JSON.parse(tpl.editable_fields || '[]');
+                          const vals = {};
+                          fields.forEach(f => {
+                            if (f.type === "auto_razao_social") vals[f.key] = selectedDeal.company || "";
+                            else if (f.type === "auto_cnpj") vals[f.key] = selectedDeal.cnpj || "";
+                            else if (f.type === "auto_empresa") vals[f.key] = selectedDeal.company || "";
+                            else if (f.type === "auto_contato") vals[f.key] = selectedDeal.contact_name || "";
+                            else if (f.type === "auto_telefone") vals[f.key] = selectedDeal.contact_phone || "";
+                            else if (f.type === "auto_email") vals[f.key] = selectedDeal.contact_email || "";
+                            else if (f.type === "auto_valor") vals[f.key] = selectedDeal.value ? `R$ ${Number(selectedDeal.value).toLocaleString("pt-BR")}` : "";
+                            else if (f.type === "auto_funcionarios") vals[f.key] = selectedDeal.num_employees ? String(selectedDeal.num_employees) : "";
+                            else if (f.type === "auto_data_hoje") vals[f.key] = new Date().toLocaleDateString("pt-BR");
+                            else if (f.type === "auto_responsavel") vals[f.key] = selectedDeal.owner_name || user.name;
+                            else vals[f.key] = f.default_value || "";
+                          });
+                          setCtFieldValues(vals);
+                        } else { setCtFieldValues({}); }
+                      }} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+                        <option value="">Selecione um modelo...</option>
+                        {ctTemplates.map(t => <option key={t.id} value={t.id}>{t.name} ({t.file_type})</option>)}
+                      </select>
+                    </div>
+                    {ctSelTemplate && (() => {
+                      let fields = [];
+                      try { fields = JSON.parse(ctSelTemplate.editable_fields || '[]'); } catch {}
+                      if (fields.length === 0) return <div style={{ fontSize: 12, color: T.tm, padding: 10 }}>Este modelo nao possui campos editaveis.</div>;
+                      return (
+                        <div style={{ background: T.bg2, borderRadius: 10, padding: 14, border: `1px solid ${T.bor}` }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10 }}>Preencha os campos do contrato</div>
+                          {fields.map(f => (
+                            <div key={f.key} style={{ marginBottom: 10 }}>
+                              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 4, textTransform: "uppercase" }}>
+                                {f.label}
+                                {f.type.startsWith("auto_") && <span style={{ fontSize: 9, color: T.ok, background: T.ok + "15", padding: "1px 6px", borderRadius: 3 }}>auto</span>}
+                              </label>
+                              <input value={ctFieldValues[f.key] || ""} onChange={e => setCtFieldValues({ ...ctFieldValues, [f.key]: e.target.value })}
+                                placeholder={f.default_value || ""} style={{ width: "100%", padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12 }} />
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </Modal>
+
+                {/* ClickSign Send Modal */}
+                <Modal open={!!csSignModal} onClose={() => setCsSignModal(null)} title="Enviar para ClickSign" footer={
+                  <><Btn v="secondary" onClick={() => setCsSignModal(null)}>Cancelar</Btn>
+                  <Btn onClick={async () => {
+                    const valid = csSigners.filter(s => s.name && s.email);
+                    if (valid.length === 0) { alert("Adicione pelo menos um signatario."); return; }
+                    setCsSending(true);
+                    try {
+                      await contractsApi.sendToClickSign({
+                        contract_id: csSignModal.id,
+                        signers: valid,
+                        message: `Prezado(a),\nSegue o contrato "${csSignModal.title}" para assinatura.\n\nAtenciosamente,\n${user.name}`,
+                      });
+                      const r = await contractsApi.getByEntity("deal", selectedDeal.id);
+                      setDealContracts(r.data.contracts || []);
+                      setCsSignModal(null);
+                      alert("Contrato enviado para assinatura via ClickSign!");
+                    } catch (e) { alert(e.response?.data?.error || "Erro ao enviar para ClickSign"); }
+                    setCsSending(false);
+                  }} disabled={csSending || !csSigners.some(s => s.name && s.email)}>{csSending ? "Enviando..." : "Enviar para Assinatura"}</Btn></>
+                }>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                    <div style={{ fontSize: 12, color: T.t2 }}>Contrato: <strong>{csSignModal?.title}</strong></div>
+                    <div style={{ fontSize: 12, fontWeight: 700 }}>Signatarios</div>
+                    {csSigners.map((s, i) => (
+                      <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                        <div style={{ flex: 1 }}>
+                          {i === 0 && <label style={{ fontSize: 10, color: T.tm, display: "block", marginBottom: 3 }}>Nome</label>}
+                          <input value={s.name} onChange={e => { const arr = [...csSigners]; arr[i].name = e.target.value; setCsSigners(arr); }}
+                            placeholder="Nome completo" style={{ width: "100%", padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12 }} />
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          {i === 0 && <label style={{ fontSize: 10, color: T.tm, display: "block", marginBottom: 3 }}>Email</label>}
+                          <input value={s.email} onChange={e => { const arr = [...csSigners]; arr[i].email = e.target.value; setCsSigners(arr); }}
+                            placeholder="email@exemplo.com" style={{ width: "100%", padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12 }} />
+                        </div>
+                        <div style={{ width: 120 }}>
+                          {i === 0 && <label style={{ fontSize: 10, color: T.tm, display: "block", marginBottom: 3 }}>Papel</label>}
+                          <select value={s.role} onChange={e => { const arr = [...csSigners]; arr[i].role = e.target.value; setCsSigners(arr); }}
+                            style={{ width: "100%", padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12 }}>
+                            <option value="sign">Assinar</option>
+                            <option value="approve">Aprovar</option>
+                            <option value="witness">Testemunha</option>
+                            <option value="party">Parte</option>
+                            <option value="legal_representative">Rep. Legal</option>
+                            <option value="guarantor">Fiador</option>
+                          </select>
+                        </div>
+                        {csSigners.length > 1 && (
+                          <button onClick={() => setCsSigners(csSigners.filter((_, j) => j !== i))}
+                            style={{ background: "none", border: "none", color: T.er, cursor: "pointer", fontSize: 14 }}>x</button>
+                        )}
+                      </div>
+                    ))}
+                    <Btn sm v="secondary" onClick={() => setCsSigners([...csSigners, { name: "", email: "", role: "sign" }])}>+ Adicionar Signatario</Btn>
+                  </div>
+                </Modal>
               </div>
             )}
 
@@ -3862,6 +4750,66 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
   const [productModal, setProductModal] = useState(false);
   const [editProduct, setEditProduct] = useState(null);
   const [productForm, setProductForm] = useState({ name: "", description: "" });
+  // Proposal templates state
+  const [cfgTemplates, setCfgTemplates] = useState([]);
+  const [tplModal, setTplModal] = useState(false);
+  const [editTpl, setEditTpl] = useState(null);
+  const [tplForm, setTplForm] = useState({ name: "", description: "", editable_fields: [] });
+  const [tplFile, setTplFile] = useState(null);
+  const [tplSaving, setTplSaving] = useState(false);
+  const [tplFieldForm, setTplFieldForm] = useState({ key: "", label: "", type: "text", default_value: "" });
+  const FIELD_TYPES = [
+    { id: "text", l: "Texto" }, { id: "number", l: "Numero" }, { id: "date", l: "Data" }, { id: "currency", l: "Valor (R$)" },
+    { id: "auto_razao_social", l: "Razao Social (auto)" }, { id: "auto_cnpj", l: "CNPJ (auto)" }, { id: "auto_empresa", l: "Empresa (auto)" },
+    { id: "auto_contato", l: "Nome Contato (auto)" }, { id: "auto_telefone", l: "Telefone (auto)" }, { id: "auto_email", l: "Email (auto)" },
+    { id: "auto_valor", l: "Valor Deal (auto)" }, { id: "auto_funcionarios", l: "Funcionarios (auto)" }, { id: "auto_data_hoje", l: "Data Hoje (auto)" },
+    { id: "auto_responsavel", l: "Responsavel (auto)" },
+  ];
+
+  const loadTemplates = useCallback(() => {
+    if (isSA || ALLOWED_ROLES_PROPOSALS.includes(user.role)) {
+      proposalsApi.getTemplates().then(r => setCfgTemplates(r.data.templates || [])).catch(() => {});
+    }
+  }, [isSA, user.role]);
+  const ALLOWED_ROLES_PROPOSALS = ['super_admin', 'executivo', 'diretor', 'gerente'];
+  useEffect(() => { loadTemplates(); }, [loadTemplates]);
+
+  // Contract templates state
+  const [cfgContractTemplates, setCfgContractTemplates] = useState([]);
+  const [ctModal, setCtModal] = useState(false);
+  const [editCt, setEditCt] = useState(null);
+  const [ctForm, setCtForm] = useState({ name: "", description: "", editable_fields: [] });
+  const [ctFile, setCtFile] = useState(null);
+  const [ctSaving, setCtSaving] = useState(false);
+  const [ctFieldForm, setCtFieldForm] = useState({ key: "", label: "", type: "text", default_value: "" });
+  // Permissions state
+  const [permData, setPermData] = useState(null); // { permissions, allPages, allFeatures, roles }
+  const [permLoaded, setPermLoaded] = useState(false);
+  const [permSaving, setPermSaving] = useState(null);
+  const [permSelRole, setPermSelRole] = useState("gerente");
+
+  const loadPermissions = useCallback(() => {
+    if (isSA && !permLoaded) {
+      permissionsApi.getAll().then(r => { setPermData(r.data); setPermLoaded(true); }).catch(() => {});
+    }
+  }, [isSA, permLoaded]);
+  useEffect(() => { loadPermissions(); }, [loadPermissions]);
+
+  // ClickSign config state
+  const [csCfg, setCsCfg] = useState({ apiKey: "", environment: "sandbox" });
+  const [csCfgLoaded, setCsCfgLoaded] = useState(false);
+  const [csStatus, setCsStatus] = useState({ configured: false, environment: "sandbox", apiKeyPreview: null });
+  const [csSaving, setCsSaving] = useState(false);
+  const [csTesting, setCsTesting] = useState(false);
+  const [csTestResult, setCsTestResult] = useState(null);
+
+  const loadContractTemplates = useCallback(() => {
+    if (isSA || ALLOWED_ROLES_PROPOSALS.includes(user.role)) {
+      contractsApi.getTemplates().then(r => setCfgContractTemplates(r.data.templates || [])).catch(() => {});
+    }
+  }, [isSA, user.role]);
+  useEffect(() => { loadContractTemplates(); }, [loadContractTemplates]);
+
   // Google config state
   const [googleCfg, setGoogleCfg] = useState({ clientId: "", clientSecret: "", redirectUri: "" });
   const [googleCfgLoaded, setGoogleCfgLoaded] = useState(false);
@@ -4010,6 +4958,14 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
     googleApi.getStatus().then(r => setGoogleStatus(r.data)).catch(() => {});
   }, [isSA, googleCfgLoaded]);
   useEffect(() => { loadGoogleConfig(); }, [loadGoogleConfig]);
+
+  // ClickSign config
+  const loadClickSignConfig = useCallback(() => {
+    if (isSA && !csCfgLoaded) {
+      contractsApi.getClickSignConfig().then(r => { setCsStatus(r.data); setCsCfgLoaded(true); }).catch(() => {});
+    }
+  }, [isSA, csCfgLoaded]);
+  useEffect(() => { loadClickSignConfig(); }, [loadClickSignConfig]);
 
   const handleSaveGoogleConfig = async () => {
     setGoogleSaving(true);
@@ -4272,10 +5228,10 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
   const tdS = { padding: "12px 14px", fontSize: 13, borderBottom: `1px solid ${T.bor}` };
 
   const cfgGroups = isSA ? [
-    { label: "Sistema", items: ["geral", "notificações", "auditoria"] },
-    { label: "Integrações", items: ["google", "hubspot"] },
+    { label: "Sistema", items: ["geral", "permissões", "notificações", "auditoria"] },
+    { label: "Integrações", items: ["google", "hubspot", "clicksign"] },
     { label: "Cadastros", items: ["usuários", "parceiros", "convênios", "equipes", "produtos"] },
-    { label: "Pipeline", items: ["funis", "materiais"] },
+    { label: "Pipeline", items: ["funis", "propostas", "contratos", "materiais"] },
   ] : [{ label: "Pipeline", items: ["funis"] }];
   const [openGroup, setOpenGroup] = useState(null);
 
@@ -4508,6 +5464,156 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
           {saved && <span style={{ marginLeft: 10, fontSize: 13, color: T.ok, fontWeight: 600 }}>Salvo!</span>}
         </>}
       </div>}
+      {/* PERMISSÕES TAB */}
+      {tab === "permissões" && permData && (
+        <div>
+          <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 24 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 10, background: T.ac + "15", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={T.ac} strokeWidth="2" strokeLinecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              </div>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 700 }}>Gerenciamento de Permissões</div>
+                <div style={{ fontSize: 12, color: T.tm }}>Configure o que cada perfil pode acessar no sistema</div>
+              </div>
+            </div>
+
+            {/* Role Selector */}
+            <div style={{ display: "flex", gap: 6, marginBottom: 20, flexWrap: "wrap" }}>
+              {permData.roles.filter(r => r !== "super_admin").map(role => {
+                const rl = { executivo: "Executivo (Diretor)", diretor: "Gerente (Diretor)", gerente: "Executivo (Gerente)", parceiro: "Parceiro", convenio: "Convênio" };
+                return (
+                  <button key={role} onClick={() => setPermSelRole(role)}
+                    style={{ padding: "8px 16px", fontSize: 12, fontWeight: permSelRole === role ? 700 : 500, cursor: "pointer",
+                      border: `1px solid ${permSelRole === role ? T.ac : T.bor}`,
+                      background: permSelRole === role ? T.ac + "15" : T.bg2,
+                      color: permSelRole === role ? T.ac : T.t2,
+                      borderRadius: 8, fontFamily: "'DM Sans',sans-serif" }}>
+                    {rl[role] || role}
+                  </button>
+                );
+              })}
+            </div>
+
+            {permData.permissions[permSelRole] && (() => {
+              const perm = permData.permissions[permSelRole];
+              const togglePage = (pageId) => {
+                const newPages = perm.pages.includes(pageId)
+                  ? perm.pages.filter(p => p !== pageId)
+                  : [...perm.pages, pageId];
+                setPermData({ ...permData, permissions: { ...permData.permissions, [permSelRole]: { ...perm, pages: newPages } } });
+              };
+              const toggleFeature = (featId) => {
+                const newFeats = perm.features.includes(featId)
+                  ? perm.features.filter(f => f !== featId)
+                  : [...perm.features, featId];
+                setPermData({ ...permData, permissions: { ...permData.permissions, [permSelRole]: { ...perm, features: newFeats } } });
+              };
+              const toggleAllFeatures = (groupItems, checked) => {
+                let newFeats = [...perm.features];
+                groupItems.forEach(item => {
+                  if (checked) { if (!newFeats.includes(item.id)) newFeats.push(item.id); }
+                  else { newFeats = newFeats.filter(f => f !== item.id); }
+                });
+                setPermData({ ...permData, permissions: { ...permData.permissions, [permSelRole]: { ...perm, features: newFeats } } });
+              };
+
+              return (
+                <div>
+                  {perm.custom && (
+                    <div style={{ padding: "8px 14px", background: T.inf + "0A", border: `1px solid ${T.inf}25`, borderRadius: 8, marginBottom: 16, fontSize: 11, color: T.inf }}>
+                      Permissões customizadas ativas para este perfil.
+                    </div>
+                  )}
+
+                  {/* PAGES */}
+                  <div style={{ marginBottom: 20 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.ac} strokeWidth="2" strokeLinecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/></svg>
+                      Páginas / Menus
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8 }}>
+                      {permData.allPages.map(page => (
+                        <label key={page.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: T.bg2, borderRadius: 6, cursor: "pointer", border: `1px solid ${perm.pages.includes(page.id) ? T.ac + "40" : T.bor}` }}>
+                          <input type="checkbox" checked={perm.pages.includes(page.id)} onChange={() => togglePage(page.id)}
+                            style={{ accentColor: T.ac, width: 16, height: 16 }} />
+                          <span style={{ fontSize: 12, fontWeight: perm.pages.includes(page.id) ? 600 : 400 }}>{page.l}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* FEATURES */}
+                  <div style={{ marginBottom: 20 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.ac} strokeWidth="2" strokeLinecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                      Funcionalidades
+                    </div>
+                    {permData.allFeatures.map(group => {
+                      const allChecked = group.items.every(item => perm.features.includes(item.id));
+                      const someChecked = group.items.some(item => perm.features.includes(item.id));
+                      return (
+                        <div key={group.group} style={{ marginBottom: 12, background: T.bg2, borderRadius: 8, border: `1px solid ${T.bor}`, overflow: "hidden" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", background: T.card, borderBottom: `1px solid ${T.bor}` }}>
+                            <input type="checkbox" checked={allChecked} ref={el => { if (el) el.indeterminate = someChecked && !allChecked; }}
+                              onChange={e => toggleAllFeatures(group.items, e.target.checked)}
+                              style={{ accentColor: T.ac, width: 15, height: 15 }} />
+                            <span style={{ fontSize: 12, fontWeight: 700 }}>{group.group}</span>
+                            <span style={{ fontSize: 10, color: T.tm, marginLeft: "auto" }}>{group.items.filter(i => perm.features.includes(i.id)).length}/{group.items.length}</span>
+                          </div>
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 4, padding: 8 }}>
+                            {group.items.map(item => (
+                              <label key={item.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", cursor: "pointer", borderRadius: 4 }}>
+                                <input type="checkbox" checked={perm.features.includes(item.id)} onChange={() => toggleFeature(item.id)}
+                                  style={{ accentColor: T.ac, width: 14, height: 14 }} />
+                                <span style={{ fontSize: 11, color: perm.features.includes(item.id) ? T.txt : T.tm }}>{item.l}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Actions */}
+                  <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                    <Btn onClick={async () => {
+                      setPermSaving(permSelRole);
+                      try {
+                        await permissionsApi.update(permSelRole, { pages: perm.pages, features: perm.features });
+                        setPermLoaded(false);
+                        alert("Permissões salvas!");
+                      } catch (e) { alert(e.response?.data?.error || "Erro ao salvar"); }
+                      setPermSaving(null);
+                    }} disabled={permSaving === permSelRole}>{permSaving === permSelRole ? "Salvando..." : "Salvar Permissões"}</Btn>
+                    <Btn v="secondary" onClick={async () => {
+                      if (!confirm("Resetar permissões deste perfil para o padrão?")) return;
+                      try {
+                        await permissionsApi.reset(permSelRole);
+                        setPermLoaded(false);
+                        alert("Permissões resetadas!");
+                      } catch (e) { alert(e.response?.data?.error || "Erro"); }
+                    }}>Resetar para Padrão</Btn>
+                    {perm.custom && <span style={{ fontSize: 11, color: T.wn }}>Customizado</span>}
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div style={{ marginTop: 20, padding: 14, background: T.bg2, borderRadius: 8, border: `1px solid ${T.bor}` }}>
+              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Informações</div>
+              <div style={{ fontSize: 11, color: T.t2, lineHeight: 1.6 }}>
+                • <strong>Super Admin</strong> sempre tem acesso total e não pode ser alterado<br/>
+                • As permissões se aplicam imediatamente ao próximo login do usuário<br/>
+                • "Resetar para Padrão" restaura as permissões originais do perfil<br/>
+                • Páginas controlam a visibilidade no menu lateral<br/>
+                • Funcionalidades controlam ações específicas dentro das páginas
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {tab === "notificações" && <div>
         {/* Canal Preferences */}
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20, marginBottom: 16 }}>
@@ -5382,6 +6488,387 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
               )}
             </div>
           </Modal>
+        </div>
+      )}
+
+      {/* PROPOSTAS TAB */}
+      {tab === "propostas" && (
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <div style={{ fontSize: 13, color: T.t2 }}>{cfgTemplates.length} modelo(s) de proposta</div>
+            <Btn onClick={() => { setEditTpl(null); setTplForm({ name: "", description: "", editable_fields: [] }); setTplFile(null); setTplModal(true); }}>+ Novo Modelo</Btn>
+          </div>
+
+          {cfgTemplates.length === 0 && (
+            <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 40, textAlign: "center" }}>
+              <div style={{ fontSize: 32, marginBottom: 12 }}>📄</div>
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>Nenhum modelo de proposta</div>
+              <div style={{ fontSize: 12, color: T.tm, marginBottom: 16 }}>Suba um arquivo (.docx, .pdf, .pptx) e configure campos editaveis que serao preenchidos automaticamente.</div>
+              <Btn onClick={() => { setEditTpl(null); setTplForm({ name: "", description: "", editable_fields: [] }); setTplFile(null); setTplModal(true); }}>Criar Primeiro Modelo</Btn>
+            </div>
+          )}
+
+          {cfgTemplates.map(tpl => (
+            <div key={tpl.id} style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 16, marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={T.ac} strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/></svg>
+                  <span style={{ fontSize: 14, fontWeight: 700 }}>{tpl.name}</span>
+                  <span style={{ fontSize: 10, color: T.tm, background: T.bg2, padding: "2px 8px", borderRadius: 4, textTransform: "uppercase" }}>{tpl.file_type}</span>
+                </div>
+                {tpl.description && <div style={{ fontSize: 12, color: T.t2, marginBottom: 4 }}>{tpl.description}</div>}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {(() => { try { return JSON.parse(tpl.editable_fields || '[]'); } catch { return []; } })().map((f, i) => (
+                    <span key={i} style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4, background: f.type.startsWith("auto_") ? T.ok + "15" : T.inf + "15", color: f.type.startsWith("auto_") ? T.ok : T.inf }}>
+                      {f.label} {f.type.startsWith("auto_") && "(auto)"}
+                    </span>
+                  ))}
+                </div>
+                <div style={{ fontSize: 10, color: T.tm, marginTop: 4 }}>Arquivo: {tpl.file_original_name} · Criado por {tpl.created_by_name}</div>
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <Btn sm onClick={async () => {
+                  try {
+                    const r = await proposalsApi.downloadTemplate(tpl.id);
+                    const url = URL.createObjectURL(r.data);
+                    const a = document.createElement("a"); a.href = url; a.download = tpl.file_original_name; a.click(); URL.revokeObjectURL(url);
+                  } catch (e) { alert("Erro ao baixar"); }
+                }}>Baixar</Btn>
+                <Btn sm onClick={() => {
+                  let fields = [];
+                  try { fields = JSON.parse(tpl.editable_fields || '[]'); } catch {}
+                  setEditTpl(tpl);
+                  setTplForm({ name: tpl.name, description: tpl.description || "", editable_fields: fields });
+                  setTplFile(null);
+                  setTplModal(true);
+                }}>Editar</Btn>
+                <Btn sm v="danger" onClick={async () => {
+                  if (!confirm("Remover este modelo?")) return;
+                  try { await proposalsApi.deleteTemplate(tpl.id); loadTemplates(); } catch { alert("Erro"); }
+                }}>Remover</Btn>
+              </div>
+            </div>
+          ))}
+
+          {/* Template Create/Edit Modal */}
+          <Modal open={tplModal} onClose={() => setTplModal(false)} title={editTpl ? "Editar Modelo" : "Novo Modelo de Proposta"} wide footer={
+            <><Btn v="secondary" onClick={() => setTplModal(false)}>Cancelar</Btn>
+            <Btn onClick={async () => {
+              if (!tplForm.name || (!editTpl && !tplFile)) return;
+              setTplSaving(true);
+              try {
+                if (editTpl) {
+                  await proposalsApi.updateTemplate(editTpl.id, { name: tplForm.name, description: tplForm.description, editable_fields: JSON.stringify(tplForm.editable_fields) });
+                } else {
+                  const fd = new FormData();
+                  fd.append("file", tplFile);
+                  fd.append("name", tplForm.name);
+                  fd.append("description", tplForm.description);
+                  fd.append("editable_fields", JSON.stringify(tplForm.editable_fields));
+                  await proposalsApi.createTemplate(fd);
+                }
+                loadTemplates(); setTplModal(false);
+              } catch (e) { alert(e.response?.data?.error || "Erro ao salvar"); }
+              setTplSaving(false);
+            }} disabled={!tplForm.name || (!editTpl && !tplFile) || tplSaving}>{tplSaving ? "Salvando..." : editTpl ? "Salvar" : "Criar Modelo"}</Btn></>
+          }>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <Inp label="Nome do Modelo *" value={tplForm.name} onChange={v => setTplForm({ ...tplForm, name: v })} placeholder="Ex: Proposta Comercial Padrao" />
+              <Inp label="Descricao" value={tplForm.description} onChange={v => setTplForm({ ...tplForm, description: v })} placeholder="Breve descricao do modelo" />
+
+              {!editTpl && (
+                <div>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Arquivo do Modelo *</label>
+                  <input type="file" accept=".docx,.doc,.pdf,.pptx,.ppt,.xlsx,.xls" onChange={e => setTplFile(e.target.files[0])}
+                    style={{ padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13, width: "100%" }} />
+                  <div style={{ fontSize: 10, color: T.tm, marginTop: 4 }}>Formatos aceitos: .docx, .pdf, .pptx, .xlsx</div>
+                </div>
+              )}
+
+              {editTpl && (
+                <div style={{ padding: 10, background: T.bg2, borderRadius: 6, fontSize: 12, color: T.t2 }}>
+                  Arquivo atual: <strong>{editTpl.file_original_name}</strong>
+                </div>
+              )}
+
+              {/* Editable Fields Configuration */}
+              <div style={{ background: T.bg2, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Campos Editaveis da Proposta</div>
+                <div style={{ fontSize: 11, color: T.tm, marginBottom: 12 }}>Configure os campos que serao preenchidos ao gerar uma proposta. Campos "auto" sao preenchidos automaticamente com dados da negociacao/indicacao.</div>
+
+                {/* Existing fields */}
+                {tplForm.editable_fields.map((f, idx) => (
+                  <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, padding: "8px 10px", background: T.card, borderRadius: 6, border: `1px solid ${T.bor}` }}>
+                    <span style={{ flex: 1, fontSize: 12, fontWeight: 600 }}>{f.label}</span>
+                    <span style={{ fontSize: 10, color: f.type.startsWith("auto_") ? T.ok : T.inf, background: (f.type.startsWith("auto_") ? T.ok : T.inf) + "15", padding: "2px 8px", borderRadius: 4 }}>
+                      {FIELD_TYPES.find(ft => ft.id === f.type)?.l || f.type}
+                    </span>
+                    {f.default_value && <span style={{ fontSize: 10, color: T.tm }}>Padrao: {f.default_value}</span>}
+                    <button onClick={() => setTplForm({ ...tplForm, editable_fields: tplForm.editable_fields.filter((_, i) => i !== idx) })}
+                      style={{ background: "none", border: "none", color: T.er, cursor: "pointer", fontSize: 14, padding: "0 4px" }}>x</button>
+                  </div>
+                ))}
+
+                {/* Add field form */}
+                <div style={{ display: "flex", gap: 6, alignItems: "flex-end", marginTop: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ fontSize: 10, color: T.tm, display: "block", marginBottom: 3 }}>Label</label>
+                    <input value={tplFieldForm.label} onChange={e => setTplFieldForm({ ...tplFieldForm, label: e.target.value, key: e.target.value.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "") })}
+                      placeholder="Ex: Valor Mensal" style={{ width: "100%", padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12 }} />
+                  </div>
+                  <div style={{ width: 180 }}>
+                    <label style={{ fontSize: 10, color: T.tm, display: "block", marginBottom: 3 }}>Tipo</label>
+                    <select value={tplFieldForm.type} onChange={e => setTplFieldForm({ ...tplFieldForm, type: e.target.value })}
+                      style={{ width: "100%", padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12 }}>
+                      {FIELD_TYPES.map(ft => <option key={ft.id} value={ft.id}>{ft.l}</option>)}
+                    </select>
+                  </div>
+                  {!tplFieldForm.type.startsWith("auto_") && (
+                    <div style={{ width: 120 }}>
+                      <label style={{ fontSize: 10, color: T.tm, display: "block", marginBottom: 3 }}>Padrao</label>
+                      <input value={tplFieldForm.default_value} onChange={e => setTplFieldForm({ ...tplFieldForm, default_value: e.target.value })}
+                        placeholder="Opcional" style={{ width: "100%", padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12 }} />
+                    </div>
+                  )}
+                  <Btn sm onClick={() => {
+                    if (!tplFieldForm.label) return;
+                    setTplForm({ ...tplForm, editable_fields: [...tplForm.editable_fields, { ...tplFieldForm }] });
+                    setTplFieldForm({ key: "", label: "", type: "text", default_value: "" });
+                  }}>+</Btn>
+                </div>
+              </div>
+            </div>
+          </Modal>
+        </div>
+      )}
+
+      {/* CONTRATOS TAB */}
+      {tab === "contratos" && (
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <div style={{ fontSize: 13, color: T.t2 }}>{cfgContractTemplates.length} modelo(s) de contrato</div>
+            <Btn onClick={() => { setEditCt(null); setCtForm({ name: "", description: "", editable_fields: [] }); setCtFile(null); setCtModal(true); }}>+ Novo Modelo</Btn>
+          </div>
+
+          {cfgContractTemplates.length === 0 && (
+            <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 40, textAlign: "center" }}>
+              <div style={{ fontSize: 32, marginBottom: 12 }}>📝</div>
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>Nenhum modelo de contrato</div>
+              <div style={{ fontSize: 12, color: T.tm, marginBottom: 16 }}>Suba um arquivo (.docx, .pdf) e configure campos editaveis. Os contratos podem ser enviados para assinatura via ClickSign.</div>
+              <Btn onClick={() => { setEditCt(null); setCtForm({ name: "", description: "", editable_fields: [] }); setCtFile(null); setCtModal(true); }}>Criar Primeiro Modelo</Btn>
+            </div>
+          )}
+
+          {cfgContractTemplates.map(tpl => (
+            <div key={tpl.id} style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 16, marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={T.ac} strokeWidth="2" strokeLinecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
+                  <span style={{ fontSize: 14, fontWeight: 700 }}>{tpl.name}</span>
+                  <span style={{ fontSize: 10, color: T.tm, background: T.bg2, padding: "2px 8px", borderRadius: 4, textTransform: "uppercase" }}>{tpl.file_type}</span>
+                </div>
+                {tpl.description && <div style={{ fontSize: 12, color: T.t2, marginBottom: 4 }}>{tpl.description}</div>}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {(() => { try { return JSON.parse(tpl.editable_fields || '[]'); } catch { return []; } })().map((f, i) => (
+                    <span key={i} style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4, background: f.type.startsWith("auto_") ? T.ok + "15" : T.inf + "15", color: f.type.startsWith("auto_") ? T.ok : T.inf }}>
+                      {f.label} {f.type.startsWith("auto_") && "(auto)"}
+                    </span>
+                  ))}
+                </div>
+                <div style={{ fontSize: 10, color: T.tm, marginTop: 4 }}>Arquivo: {tpl.file_original_name} · Criado por {tpl.created_by_name}</div>
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <Btn sm onClick={async () => {
+                  try {
+                    const r = await contractsApi.downloadTemplate(tpl.id);
+                    const url = URL.createObjectURL(r.data);
+                    const a = document.createElement("a"); a.href = url; a.download = tpl.file_original_name; a.click(); URL.revokeObjectURL(url);
+                  } catch { alert("Erro ao baixar"); }
+                }}>Baixar</Btn>
+                <Btn sm onClick={() => {
+                  let fields = [];
+                  try { fields = JSON.parse(tpl.editable_fields || '[]'); } catch {}
+                  setEditCt(tpl);
+                  setCtForm({ name: tpl.name, description: tpl.description || "", editable_fields: fields });
+                  setCtFile(null);
+                  setCtModal(true);
+                }}>Editar</Btn>
+                <Btn sm v="danger" onClick={async () => {
+                  if (!confirm("Remover este modelo?")) return;
+                  try { await contractsApi.deleteTemplate(tpl.id); loadContractTemplates(); } catch { alert("Erro"); }
+                }}>Remover</Btn>
+              </div>
+            </div>
+          ))}
+
+          {/* Contract Template Create/Edit Modal */}
+          <Modal open={ctModal} onClose={() => setCtModal(false)} title={editCt ? "Editar Modelo" : "Novo Modelo de Contrato"} wide footer={
+            <><Btn v="secondary" onClick={() => setCtModal(false)}>Cancelar</Btn>
+            <Btn onClick={async () => {
+              if (!ctForm.name || (!editCt && !ctFile)) return;
+              setCtSaving(true);
+              try {
+                if (editCt) {
+                  await contractsApi.updateTemplate(editCt.id, { name: ctForm.name, description: ctForm.description, editable_fields: JSON.stringify(ctForm.editable_fields) });
+                } else {
+                  const fd = new FormData();
+                  fd.append("file", ctFile);
+                  fd.append("name", ctForm.name);
+                  fd.append("description", ctForm.description);
+                  fd.append("editable_fields", JSON.stringify(ctForm.editable_fields));
+                  await contractsApi.createTemplate(fd);
+                }
+                loadContractTemplates(); setCtModal(false);
+              } catch (e) { alert(e.response?.data?.error || "Erro ao salvar"); }
+              setCtSaving(false);
+            }} disabled={!ctForm.name || (!editCt && !ctFile) || ctSaving}>{ctSaving ? "Salvando..." : editCt ? "Salvar" : "Criar Modelo"}</Btn></>
+          }>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <Inp label="Nome do Modelo *" value={ctForm.name} onChange={v => setCtForm({ ...ctForm, name: v })} placeholder="Ex: Contrato de Prestacao de Servicos" />
+              <Inp label="Descricao" value={ctForm.description} onChange={v => setCtForm({ ...ctForm, description: v })} placeholder="Breve descricao do modelo" />
+
+              {!editCt && (
+                <div>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Arquivo do Modelo *</label>
+                  <input type="file" accept=".docx,.doc,.pdf,.pptx,.ppt,.xlsx,.xls" onChange={e => setCtFile(e.target.files[0])}
+                    style={{ padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13, width: "100%" }} />
+                  <div style={{ fontSize: 10, color: T.tm, marginTop: 4 }}>Formatos aceitos: .docx, .pdf, .pptx, .xlsx</div>
+                </div>
+              )}
+
+              {editCt && (
+                <div style={{ padding: 10, background: T.bg2, borderRadius: 6, fontSize: 12, color: T.t2 }}>
+                  Arquivo atual: <strong>{editCt.file_original_name}</strong>
+                </div>
+              )}
+
+              {/* Editable Fields Configuration */}
+              <div style={{ background: T.bg2, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Campos Editaveis do Contrato</div>
+                <div style={{ fontSize: 11, color: T.tm, marginBottom: 12 }}>Configure os campos que serao preenchidos ao emitir um contrato. Campos "auto" sao preenchidos automaticamente.</div>
+
+                {ctForm.editable_fields.map((f, idx) => (
+                  <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, padding: "8px 10px", background: T.card, borderRadius: 6, border: `1px solid ${T.bor}` }}>
+                    <span style={{ flex: 1, fontSize: 12, fontWeight: 600 }}>{f.label}</span>
+                    <span style={{ fontSize: 10, color: f.type.startsWith("auto_") ? T.ok : T.inf, background: (f.type.startsWith("auto_") ? T.ok : T.inf) + "15", padding: "2px 8px", borderRadius: 4 }}>
+                      {FIELD_TYPES.find(ft => ft.id === f.type)?.l || f.type}
+                    </span>
+                    {f.default_value && <span style={{ fontSize: 10, color: T.tm }}>Padrao: {f.default_value}</span>}
+                    <button onClick={() => setCtForm({ ...ctForm, editable_fields: ctForm.editable_fields.filter((_, i) => i !== idx) })}
+                      style={{ background: "none", border: "none", color: T.er, cursor: "pointer", fontSize: 14, padding: "0 4px" }}>x</button>
+                  </div>
+                ))}
+
+                <div style={{ display: "flex", gap: 6, alignItems: "flex-end", marginTop: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ fontSize: 10, color: T.tm, display: "block", marginBottom: 3 }}>Label</label>
+                    <input value={ctFieldForm.label} onChange={e => setCtFieldForm({ ...ctFieldForm, label: e.target.value, key: e.target.value.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "") })}
+                      placeholder="Ex: Valor Mensal" style={{ width: "100%", padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12 }} />
+                  </div>
+                  <div style={{ width: 180 }}>
+                    <label style={{ fontSize: 10, color: T.tm, display: "block", marginBottom: 3 }}>Tipo</label>
+                    <select value={ctFieldForm.type} onChange={e => setCtFieldForm({ ...ctFieldForm, type: e.target.value })}
+                      style={{ width: "100%", padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12 }}>
+                      {FIELD_TYPES.map(ft => <option key={ft.id} value={ft.id}>{ft.l}</option>)}
+                    </select>
+                  </div>
+                  {!ctFieldForm.type.startsWith("auto_") && (
+                    <div style={{ width: 120 }}>
+                      <label style={{ fontSize: 10, color: T.tm, display: "block", marginBottom: 3 }}>Padrao</label>
+                      <input value={ctFieldForm.default_value} onChange={e => setCtFieldForm({ ...ctFieldForm, default_value: e.target.value })}
+                        placeholder="Opcional" style={{ width: "100%", padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12 }} />
+                    </div>
+                  )}
+                  <Btn sm onClick={() => {
+                    if (!ctFieldForm.label) return;
+                    setCtForm({ ...ctForm, editable_fields: [...ctForm.editable_fields, { ...ctFieldForm }] });
+                    setCtFieldForm({ key: "", label: "", type: "text", default_value: "" });
+                  }}>+</Btn>
+                </div>
+              </div>
+            </div>
+          </Modal>
+        </div>
+      )}
+
+      {/* CLICKSIGN TAB */}
+      {tab === "clicksign" && (
+        <div>
+          <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 24 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 10, background: "#1a56db15", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1a56db" strokeWidth="2" strokeLinecap="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+              </div>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 700 }}>ClickSign</div>
+                <div style={{ fontSize: 12, color: T.tm }}>Plataforma de assinatura eletronica de documentos</div>
+              </div>
+              {csStatus.configured && (
+                <Badge type="success" style={{ marginLeft: "auto" }}>{csStatus.environment === "production" ? "Producao" : "Sandbox"}</Badge>
+              )}
+            </div>
+
+            {csStatus.configured && csStatus.apiKeyPreview && (
+              <div style={{ padding: 12, background: T.ok + "0A", border: `1px solid ${T.ok}25`, borderRadius: 8, marginBottom: 16, fontSize: 12 }}>
+                <span style={{ color: T.ok, fontWeight: 600 }}>Conectado</span> · API Key: <code style={{ fontSize: 11 }}>{csStatus.apiKeyPreview}</code>
+                {csStatus.updatedAt && <span style={{ color: T.tm }}> · Atualizado em {new Date(csStatus.updatedAt).toLocaleDateString("pt-BR")}</span>}
+              </div>
+            )}
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <Inp label="API Key (Access Token) *" value={csCfg.apiKey} onChange={v => setCsCfg({ ...csCfg, apiKey: v })} placeholder="Cole aqui o token de acesso do ClickSign" />
+              <div>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Ambiente</label>
+                <select value={csCfg.environment} onChange={e => setCsCfg({ ...csCfg, environment: e.target.value })}
+                  style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+                  <option value="sandbox">Sandbox (teste)</option>
+                  <option value="production">Producao</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+              <Btn onClick={async () => {
+                if (!csCfg.apiKey) return;
+                setCsSaving(true);
+                try {
+                  await contractsApi.saveClickSignConfig({ apiKey: csCfg.apiKey, environment: csCfg.environment });
+                  const r = await contractsApi.getClickSignConfig();
+                  setCsStatus(r.data);
+                  alert("Configuracao salva!");
+                } catch (e) { alert(e.response?.data?.error || "Erro ao salvar"); }
+                setCsSaving(false);
+              }} disabled={!csCfg.apiKey || csSaving}>{csSaving ? "Salvando..." : "Salvar Configuracao"}</Btn>
+              <Btn v="secondary" onClick={async () => {
+                setCsTesting(true); setCsTestResult(null);
+                try {
+                  const r = await contractsApi.testClickSign();
+                  setCsTestResult(r.data);
+                } catch (e) { setCsTestResult({ connected: false, error: e.response?.data?.error || e.message }); }
+                setCsTesting(false);
+              }} disabled={!csStatus.configured || csTesting}>{csTesting ? "Testando..." : "Testar Conexao"}</Btn>
+            </div>
+
+            {csTestResult && (
+              <div style={{ marginTop: 12, padding: 12, borderRadius: 8, background: csTestResult.connected ? T.ok + "0A" : T.er + "0A", border: `1px solid ${(csTestResult.connected ? T.ok : T.er) + "25"}`, fontSize: 12 }}>
+                {csTestResult.connected
+                  ? <span style={{ color: T.ok, fontWeight: 600 }}>Conexao OK — Ambiente: {csTestResult.environment}</span>
+                  : <span style={{ color: T.er, fontWeight: 600 }}>Falha: {csTestResult.error}</span>
+                }
+              </div>
+            )}
+
+            <div style={{ marginTop: 20, padding: 14, background: T.bg2, borderRadius: 8, border: `1px solid ${T.bor}` }}>
+              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>Como funciona</div>
+              <div style={{ fontSize: 11, color: T.t2, lineHeight: 1.6 }}>
+                1. Crie modelos de contrato em <strong>Pipeline &gt; Contratos</strong><br/>
+                2. Nos detalhes de uma negociacao ou indicacao, gere o contrato preenchendo os campos<br/>
+                3. Clique em <strong>"Enviar ClickSign"</strong> para enviar o documento para assinatura<br/>
+                4. Adicione os signatarios (nome, email) e o contrato sera enviado automaticamente<br/>
+                5. Acompanhe o status da assinatura em tempo real
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -6603,7 +8090,10 @@ export default function App() {
   const [, forceUpdate] = useState(0);
   const [myTeams, setMyTeams] = useState([]);
   const [selectedTeam, setSelectedTeam] = useState(null);
+  const [myPerms, setMyPerms] = useState(null); // { pages: [], features: [] }
   const { isMobile, isTablet, isDesktop, breakpoint } = useBreakpoint();
+  const hasPerm = (feat) => !myPerms || myPerms.features.includes(feat);
+  const hasPage = (pageId) => !myPerms || myPerms.pages.includes(pageId);
 
   // Check for existing session on mount
   useEffect(() => {
@@ -6628,14 +8118,17 @@ export default function App() {
 
     try {
       // Fetch all data in parallel
-      const [usersRes, indsRes, matsRes, notifsRes, activityRes, teamsRes] = await Promise.all([
+      const [usersRes, indsRes, matsRes, notifsRes, activityRes, teamsRes, permsRes] = await Promise.all([
         usersApi.getAll(),
         indicationsApi.getAll(),
         materialsApi.getAll(),
         notificationsApi.getAll(),
         indicationsApi.getActivity(20).catch(() => ({ data: { activity: [] } })),
         teamsApi.getMyTeams().catch(() => ({ data: [] })),
+        permissionsApi.getMy().catch(() => ({ data: null })),
       ]);
+
+      if (permsRes.data) setMyPerms(permsRes.data);
 
       // Transform and set users
       const transformedUsers = (usersRes.data.users || usersRes.data || []).map(transformUser);
@@ -6832,9 +8325,15 @@ export default function App() {
     return allMods.size > 0 ? allMods : null;
   })();
   const nav = NAV.filter(n => {
-    if (!n.r.includes(user.role)) return false;
-    // Always show: dash, notifs, cfg
-    if (["dash", "notifs", "cfg"].includes(n.id)) return true;
+    // Permission-based filtering (if loaded)
+    if (myPerms) {
+      if (!myPerms.pages.includes(n.id)) return false;
+    } else {
+      // Fallback to hardcoded role check
+      if (!n.r.includes(user.role)) return false;
+    }
+    // Always show: dash, notifs
+    if (["dash", "notifs"].includes(n.id)) return true;
     // If user has teams, filter by team modules
     if (teamModules) return teamModules.has(n.id);
     return true;
@@ -6933,9 +8432,9 @@ export default function App() {
             </div>
           </div>
           <div className={`${useDrawer ? "main-padding--mobile" : "main-padding"}`}>
-            {pg === "dash" && <Dash inds={inds} users={users} comms={comms} nfes={nfes} activity={activity} />}
-            {pg === "kanban" && <KanbanPage inds={inds} setInds={setInds} users={users} travaDias={travaDias} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} />}
-            {pg === "negocios" && <NegociosPage users={users} selectedTeam={selectedTeam} myTeams={myTeams} />}
+            {pg === "dash" && <Dash inds={inds} users={users} comms={comms} nfes={nfes} activity={activity} setPg={setPg} />}
+            {pg === "kanban" && <KanbanPage inds={inds} setInds={setInds} users={users} travaDias={travaDias} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} hasPerm={hasPerm} />}
+            {pg === "negocios" && <NegociosPage users={users} selectedTeam={selectedTeam} myTeams={myTeams} hasPerm={hasPerm} />}
             {pg === "bi" && <BIPage users={users} selectedTeam={selectedTeam} myTeams={myTeams} />}
             {pg === "inds" && <MinhasInd inds={inds} setInds={setInds} notifs={notifs} setNotifs={setNotifs} users={users} cadenceRules={cadenceRules} />}
             {pg === "convenio" && <ConvenioPage />}

@@ -960,6 +960,7 @@ tr:hover {
   .r-grid-main { grid-template-columns: 1fr !important; }
   .r-grid-3 { grid-template-columns: 1fr !important; }
   .r-grid-2x2-mobile { grid-template-columns: 1fr 1fr !important; }
+  .r-dash-secondary { grid-template-columns: repeat(2, 1fr) !important; }
 
   /* Mobile welcome card */
   .welcome-card__meta { flex-direction: column; }
@@ -1051,6 +1052,7 @@ tr:hover {
   .r-grid-main { grid-template-columns: 1fr !important; }
   .r-grid-3 { grid-template-columns: repeat(2, 1fr) !important; }
   .r-grid-2x2-mobile { grid-template-columns: repeat(4, 1fr) !important; }
+  .r-dash-secondary { grid-template-columns: repeat(3, 1fr) !important; }
 
   .app-header { padding: 14px var(--sp-4) 14px 60px; }
   .main-padding { padding: var(--sp-4) var(--sp-4); }
@@ -1063,6 +1065,7 @@ tr:hover {
   .r-grid-main { grid-template-columns: 2fr 1fr; }
   .r-grid-3 { grid-template-columns: repeat(3, 1fr); }
   .r-grid-2x2-mobile { grid-template-columns: repeat(4, 1fr); }
+  .r-dash-secondary { grid-template-columns: repeat(5, 1fr); }
 
   .app-header { padding: 14px 28px; }
   .main-padding { padding: var(--sp-6) 28px; }

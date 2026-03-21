@@ -7,18 +7,18 @@ const router = Router();
 // Helper: get app setting
 async function getSetting(key) {
   const db = getDatabase();
-  const row = await db.get('SELECT value FROM app_settings WHERE key = ?', [key]);
+  const row = await db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key);
   return row?.value || null;
 }
 
 // Helper: set app setting
 async function setSetting(key, value) {
   const db = getDatabase();
-  const existing = await db.get('SELECT key FROM app_settings WHERE key = ?', [key]);
+  const existing = await db.prepare('SELECT key FROM app_settings WHERE key = ?').get(key);
   if (existing) {
-    await db.run('UPDATE app_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?', [value, key]);
+    await db.prepare('UPDATE app_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?').run(value, key);
   } else {
-    await db.run('INSERT INTO app_settings (key, value) VALUES (?, ?)', [key, value]);
+    await db.prepare('INSERT INTO app_settings (key, value) VALUES (?, ?)').run(key, value);
   }
 }
 
@@ -69,7 +69,7 @@ async function refreshAccessToken(refreshToken, config) {
 // Helper: get valid access token for user
 async function getValidToken(userId) {
   const db = getDatabase();
-  const tokens = await db.get('SELECT * FROM google_tokens WHERE user_id = ?', [userId]);
+  const tokens = await db.prepare('SELECT * FROM google_tokens WHERE user_id = ?').get(userId);
   if (!tokens) return null;
 
   // Check if token expired
@@ -79,10 +79,9 @@ async function getValidToken(userId) {
     try {
       const newTokens = await refreshAccessToken(tokens.refresh_token, config);
       const expiry = new Date(Date.now() + (newTokens.expires_in || 3600) * 1000).toISOString();
-      await db.run(
-        'UPDATE google_tokens SET access_token = ?, token_expiry = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?',
-        [newTokens.access_token, expiry, userId]
-      );
+      await db.prepare(
+        'UPDATE google_tokens SET access_token = ?, token_expiry = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?'
+      ).run(newTokens.access_token, expiry, userId);
       return newTokens.access_token;
     } catch {
       return null;
@@ -160,6 +159,11 @@ router.get('/callback', async (req, res) => {
     const { code, state: userId } = req.query;
     if (!code || !userId) return res.status(400).send('Missing code or state');
 
+    // Validate that the userId in state corresponds to an actual active user
+    const db = getDatabase();
+    const validUser = await db.prepare('SELECT id FROM users WHERE id = ? AND is_active = 1').get(userId);
+    if (!validUser) return res.status(400).send('Invalid state parameter');
+
     const config = await getGoogleConfig();
     const tokens = await exchangeCode(code, config);
 
@@ -174,26 +178,25 @@ router.get('/callback', async (req, res) => {
     } catch {}
 
     const expiry = new Date(Date.now() + (tokens.expires_in || 3600) * 1000).toISOString();
-    const db = getDatabase();
 
     // Upsert tokens
-    const existing = await db.get('SELECT user_id FROM google_tokens WHERE user_id = ?', [userId]);
+    const existing = await db.prepare('SELECT user_id FROM google_tokens WHERE user_id = ?').get(userId);
     if (existing) {
-      await db.run(
-        'UPDATE google_tokens SET access_token = ?, refresh_token = ?, token_expiry = ?, email = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?',
-        [tokens.access_token, tokens.refresh_token, expiry, email, userId]
-      );
+      await db.prepare(
+        'UPDATE google_tokens SET access_token = ?, refresh_token = ?, token_expiry = ?, email = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?'
+      ).run(tokens.access_token, tokens.refresh_token, expiry, email, userId);
     } else {
-      await db.run(
-        'INSERT INTO google_tokens (user_id, access_token, refresh_token, token_expiry, email) VALUES (?, ?, ?, ?, ?)',
-        [userId, tokens.access_token, tokens.refresh_token, expiry, email]
-      );
+      await db.prepare(
+        'INSERT INTO google_tokens (user_id, access_token, refresh_token, token_expiry, email) VALUES (?, ?, ?, ?, ?)'
+      ).run(userId, tokens.access_token, tokens.refresh_token, expiry, email);
     }
 
-    // Redirect back to app
-    res.send(`<html><body><script>window.close();window.opener&&window.opener.postMessage('google-connected','*');</script><p>Conectado! Pode fechar esta janela.</p></body></html>`);
+    // Redirect back to app (use specific origin instead of wildcard)
+    const origin = process.env.CORS_ORIGIN || 'http://localhost:5173';
+    res.send(`<html><body><script>window.close();window.opener&&window.opener.postMessage('google-connected','${origin}');</script><p>Conectado! Pode fechar esta janela.</p></body></html>`);
   } catch (e) {
-    res.status(500).send(`Erro: ${e.message}`);
+    console.error('Google OAuth callback error:', e.message);
+    res.status(500).send('Erro ao conectar com Google. Tente novamente.');
   }
 });
 
@@ -202,7 +205,7 @@ router.get('/callback', async (req, res) => {
 router.get('/status', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
-    const tokens = await db.get('SELECT email, created_at FROM google_tokens WHERE user_id = ?', [req.user.id]);
+    const tokens = await db.prepare('SELECT email, created_at FROM google_tokens WHERE user_id = ?').get(req.user.id);
     res.json({ connected: !!tokens, email: tokens?.email || null, since: tokens?.created_at || null });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -214,7 +217,7 @@ router.get('/status', authenticate, async (req, res) => {
 router.post('/disconnect', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
-    await db.run('DELETE FROM google_tokens WHERE user_id = ?', [req.user.id]);
+    await db.prepare('DELETE FROM google_tokens WHERE user_id = ?').run(req.user.id);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -290,7 +293,7 @@ router.post('/gmail/send', authenticate, async (req, res) => {
 
     // Build RFC 2822 message
     const db = getDatabase();
-    const tokens = await db.get('SELECT email FROM google_tokens WHERE user_id = ?', [req.user.id]);
+    const tokens = await db.prepare('SELECT email FROM google_tokens WHERE user_id = ?').get(req.user.id);
     const from = tokens?.email || '';
 
     let message = `From: ${from}\r\nTo: ${to}\r\nSubject: ${subject}\r\n`;

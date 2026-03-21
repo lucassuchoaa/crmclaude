@@ -4,6 +4,8 @@ import { getDatabase } from '../config/database.js';
 import { hasPermission } from '../config/auth.js';
 import { authenticate } from '../middleware/auth.js';
 
+const isPg = !!process.env.DATABASE_URL;
+
 const router = express.Router();
 
 // ── Helper: filter by role (same pattern as indications.js) ──
@@ -54,7 +56,7 @@ router.get('/', authenticate, async (req, res) => {
     res.json(rows);
   } catch (err) {
     console.error('GET /pipelines error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
@@ -82,7 +84,7 @@ router.post('/', authenticate, async (req, res) => {
     res.status(201).json({ id, name });
   } catch (err) {
     console.error('POST /pipelines error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
@@ -107,7 +109,7 @@ router.put('/:id', authenticate, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('PUT /pipelines error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
@@ -120,7 +122,7 @@ router.delete('/:id', authenticate, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('DELETE /pipelines error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
@@ -132,7 +134,7 @@ router.get('/:id/stages', authenticate, async (req, res) => {
     res.json(rows);
   } catch (err) {
     console.error('GET stages error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
@@ -152,7 +154,7 @@ router.get('/:id/deals', authenticate, async (req, res) => {
     res.json(rows);
   } catch (err) {
     console.error('GET deals error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
@@ -182,13 +184,14 @@ router.post('/:pipelineId/deals', authenticate, async (req, res) => {
     res.status(201).json({ id, title, stage_id: stageId });
   } catch (err) {
     console.error('POST deal error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
 // PUT /deals/:id
 router.put('/deals/:id', authenticate, async (req, res) => {
   try {
+    if (!hasPermission(req.user.role, 'gerente')) return res.status(403).json({ error: 'Sem permissão' });
     const db = getDatabase();
     const { title, company, value, priority, stage_id, contact_name, contact_phone, contact_email, notes, num_employees, product_id } = req.body;
     await db.prepare(`UPDATE deals SET title = ?, company = ?, value = ?, priority = ?, stage_id = ?, contact_name = ?, contact_phone = ?, contact_email = ?, notes = ?, num_employees = ?, product_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
@@ -196,13 +199,14 @@ router.put('/deals/:id', authenticate, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('PUT deal error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
 // PATCH /deals/:id/stage - move deal to a different stage (with automation)
 router.patch('/deals/:id/stage', authenticate, async (req, res) => {
   try {
+    if (!hasPermission(req.user.role, 'gerente')) return res.status(403).json({ error: 'Sem permissão' });
     const db = getDatabase();
     const { stage_id, loss_reason } = req.body;
     if (!stage_id) return res.status(400).json({ error: 'stage_id obrigatório' });
@@ -289,19 +293,20 @@ router.patch('/deals/:id/stage', authenticate, async (req, res) => {
     res.json({ ok: true, automations_triggered: automations.length, created_deals });
   } catch (err) {
     console.error('PATCH deal stage error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
 // DELETE /deals/:id
 router.delete('/deals/:id', authenticate, async (req, res) => {
   try {
+    if (!hasPermission(req.user.role, 'gerente')) return res.status(403).json({ error: 'Sem permissão' });
     const db = getDatabase();
     await db.prepare(`DELETE FROM deals WHERE id = ?`).run(req.params.id);
     res.json({ ok: true });
   } catch (err) {
     console.error('DELETE deal error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
@@ -317,13 +322,14 @@ router.get('/deals/:dealId/contacts', authenticate, async (req, res) => {
     res.json(rows);
   } catch (err) {
     console.error('GET contacts error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
 // POST /deals/:dealId/contacts
 router.post('/deals/:dealId/contacts', authenticate, async (req, res) => {
   try {
+    if (!hasPermission(req.user.role, 'gerente')) return res.status(403).json({ error: 'Sem permissão' });
     const db = getDatabase();
     const { name, phone, email, role, is_primary } = req.body;
     if (!name) return res.status(400).json({ error: 'Nome obrigatório' });
@@ -337,19 +343,20 @@ router.post('/deals/:dealId/contacts', authenticate, async (req, res) => {
     res.status(201).json({ id, ok: true });
   } catch (err) {
     console.error('POST contact error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
 // DELETE /deals/contacts/:id
 router.delete('/deals/contacts/:id', authenticate, async (req, res) => {
   try {
+    if (!hasPermission(req.user.role, 'gerente')) return res.status(403).json({ error: 'Sem permissão' });
     const db = getDatabase();
     await db.prepare('DELETE FROM deal_contacts WHERE id = ?').run(req.params.id);
     res.json({ ok: true });
   } catch (err) {
     console.error('DELETE contact error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
@@ -365,7 +372,7 @@ router.get('/deals/:dealId/activities', authenticate, async (req, res) => {
     res.json(rows);
   } catch (err) {
     console.error('GET activities error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
@@ -380,7 +387,7 @@ router.post('/deals/:dealId/activities', authenticate, async (req, res) => {
     res.status(201).json({ id: result.lastInsertRowid || result.changes, ok: true });
   } catch (err) {
     console.error('POST activity error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
@@ -396,7 +403,7 @@ router.get('/deals/:dealId/tasks', authenticate, async (req, res) => {
     res.json(rows);
   } catch (err) {
     console.error('GET tasks error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
@@ -411,7 +418,7 @@ router.post('/deals/:dealId/tasks', authenticate, async (req, res) => {
     res.status(201).json({ id: result.lastInsertRowid || result.changes, ok: true });
   } catch (err) {
     console.error('POST task error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
@@ -424,7 +431,7 @@ router.patch('/tasks/:id/complete', authenticate, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('PATCH task error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
@@ -436,7 +443,7 @@ router.delete('/tasks/:id', authenticate, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('DELETE task error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
@@ -464,7 +471,7 @@ router.get('/stats/summary', authenticate, async (req, res) => {
     });
   } catch (err) {
     console.error('GET stats error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
@@ -484,7 +491,7 @@ router.get('/:id/automations', authenticate, async (req, res) => {
     res.json(rows);
   } catch (err) {
     console.error('GET automations error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
@@ -501,19 +508,20 @@ router.post('/:id/automations', authenticate, async (req, res) => {
     res.status(201).json({ id, ok: true });
   } catch (err) {
     console.error('POST automation error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
 // DELETE /automations/:id
 router.delete('/automations/:id', authenticate, async (req, res) => {
   try {
+    if (!hasPermission(req.user.role, 'gerente')) return res.status(403).json({ error: 'Sem permissão' });
     const db = getDatabase();
     await db.prepare('DELETE FROM pipeline_automations WHERE id = ?').run(req.params.id);
     res.json({ ok: true });
   } catch (err) {
     console.error('DELETE automation error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
@@ -524,6 +532,7 @@ router.delete('/automations/:id', authenticate, async (req, res) => {
 // GET /pipelines/bi/overview - General metrics
 router.get('/bi/overview', authenticate, async (req, res) => {
   try {
+    if (!hasPermission(req.user.role, 'diretor')) return res.status(403).json({ error: 'Sem permissão' });
     const db = getDatabase();
     const { pipeline_id, date_from, date_to, owner_id } = req.query;
     let dateFilter = '';
@@ -570,13 +579,14 @@ router.get('/bi/overview', authenticate, async (req, res) => {
     });
   } catch (err) {
     console.error('BI overview error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
 // GET /pipelines/bi/by-owner - Deals grouped by owner
 router.get('/bi/by-owner', authenticate, async (req, res) => {
   try {
+    if (!hasPermission(req.user.role, 'diretor')) return res.status(403).json({ error: 'Sem permissão' });
     const db = getDatabase();
     const { pipeline_id, date_from, date_to, owner_id } = req.query;
     let filters = '';
@@ -605,13 +615,14 @@ router.get('/bi/by-owner', authenticate, async (req, res) => {
     res.json(rows.map(r => ({ ...r, total: Number(r.total), won: Number(r.won), lost: Number(r.lost), open: Number(r.open), total_value: Number(r.total_value), won_value: Number(r.won_value) })));
   } catch (err) {
     console.error('BI by-owner error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
 // GET /pipelines/bi/by-stage - Deals grouped by stage (funnel view)
 router.get('/bi/by-stage', authenticate, async (req, res) => {
   try {
+    if (!hasPermission(req.user.role, 'diretor')) return res.status(403).json({ error: 'Sem permissão' });
     const db = getDatabase();
     const { pipeline_id, date_from, date_to, owner_id } = req.query;
     let filters = '';
@@ -625,7 +636,7 @@ router.get('/bi/by-stage', authenticate, async (req, res) => {
       SELECT s.id as stage_id, s.name as stage_name, s.color, s.display_order, s.is_win, s.is_lost,
         COUNT(d.id) as count,
         COALESCE(SUM(d.value),0) as total_value,
-        AVG(JULIANDAY(d.updated_at) - JULIANDAY(d.created_at)) as avg_days
+        ${isPg ? "AVG(EXTRACT(EPOCH FROM (d.updated_at::timestamp - d.created_at::timestamp)) / 86400)" : "AVG(JULIANDAY(d.updated_at) - JULIANDAY(d.created_at))"} as avg_days
       FROM pipeline_stages s
       LEFT JOIN deals d ON d.stage_id = s.id ${filters ? 'AND 1=1 ' + filters : ''}
       WHERE s.pipeline_id = ?
@@ -636,13 +647,14 @@ router.get('/bi/by-stage', authenticate, async (req, res) => {
     res.json(rows.map(r => ({ ...r, count: Number(r.count), total_value: Number(r.total_value), avg_days: r.avg_days ? Number(Number(r.avg_days).toFixed(1)) : 0, is_win: Number(r.is_win), is_lost: Number(r.is_lost) })));
   } catch (err) {
     console.error('BI by-stage error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
 // GET /pipelines/bi/loss-reasons - Loss reasons breakdown
 router.get('/bi/loss-reasons', authenticate, async (req, res) => {
   try {
+    if (!hasPermission(req.user.role, 'diretor')) return res.status(403).json({ error: 'Sem permissão' });
     const db = getDatabase();
     const { pipeline_id, date_from, date_to, owner_id } = req.query;
     let filters = '';
@@ -664,13 +676,14 @@ router.get('/bi/loss-reasons', authenticate, async (req, res) => {
     res.json(rows.map(r => ({ ...r, count: Number(r.count), lost_value: Number(r.lost_value) })));
   } catch (err) {
     console.error('BI loss-reasons error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
 // GET /pipelines/bi/timeline - Deals created/won/lost over time
 router.get('/bi/timeline', authenticate, async (req, res) => {
   try {
+    if (!hasPermission(req.user.role, 'diretor')) return res.status(403).json({ error: 'Sem permissão' });
     const db = getDatabase();
     const { pipeline_id, period, date_from, date_to, owner_id } = req.query;
     let filters = '';
@@ -680,7 +693,12 @@ router.get('/bi/timeline', authenticate, async (req, res) => {
     if (date_to) { filters += ' AND d.created_at <= ?'; params.push(date_to + 'T23:59:59'); }
     if (owner_id) { filters += ' AND d.owner_id = ?'; params.push(owner_id); }
 
-    const groupBy = period === 'weekly' ? "STRFTIME('%Y-W%W', d.created_at)" : period === 'daily' ? "DATE(d.created_at)" : "STRFTIME('%Y-%m', d.created_at)";
+    let groupBy;
+    if (isPg) {
+      groupBy = period === 'weekly' ? "TO_CHAR(d.created_at::date, 'IYYY-\"W\"IW')" : period === 'daily' ? "d.created_at::date" : "TO_CHAR(d.created_at::date, 'YYYY-MM')";
+    } else {
+      groupBy = period === 'weekly' ? "STRFTIME('%Y-W%W', d.created_at)" : period === 'daily' ? "DATE(d.created_at)" : "STRFTIME('%Y-%m', d.created_at)";
+    }
 
     const rows = await db.prepare(`
       SELECT ${groupBy} as period,
@@ -699,13 +717,14 @@ router.get('/bi/timeline', authenticate, async (req, res) => {
     res.json(rows.map(r => ({ ...r, created: Number(r.created), won: Number(r.won), lost: Number(r.lost), total_value: Number(r.total_value), won_value: Number(r.won_value) })));
   } catch (err) {
     console.error('BI timeline error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 
 // GET /pipelines/bi/activity-ranking - Most active users
 router.get('/bi/activity-ranking', authenticate, async (req, res) => {
   try {
+    if (!hasPermission(req.user.role, 'diretor')) return res.status(403).json({ error: 'Sem permissão' });
     const db = getDatabase();
     const { pipeline_id, date_from, date_to, owner_id } = req.query;
     let filters = '';
@@ -739,7 +758,7 @@ router.get('/bi/activity-ranking', authenticate, async (req, res) => {
     res.json(Object.values(userMap).sort((a, b) => b.total - a.total));
   } catch (err) {
     console.error('BI activity-ranking error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Erro interno' });
   }
 });
 

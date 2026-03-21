@@ -616,6 +616,105 @@ async function createTables(db) {
       )
     `);
 
+  // Proposal templates table
+  await ddl(`
+    CREATE TABLE IF NOT EXISTS proposal_templates (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      file_path TEXT,
+      file_data ${isPg ? 'BYTEA' : 'BLOB'},
+      file_original_name TEXT,
+      file_type TEXT,
+      editable_fields TEXT DEFAULT '[]',
+      is_active INTEGER DEFAULT 1,
+      created_by TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Generated proposals table
+  await ddl(`
+    CREATE TABLE IF NOT EXISTS proposals (
+      id TEXT PRIMARY KEY,
+      template_id TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      field_values TEXT DEFAULT '{}',
+      status TEXT DEFAULT 'rascunho',
+      sent_at TEXT,
+      created_by TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Contract templates table
+  await ddl(`
+    CREATE TABLE IF NOT EXISTS contract_templates (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      file_path TEXT,
+      file_data ${isPg ? 'BYTEA' : 'BLOB'},
+      file_original_name TEXT,
+      file_type TEXT,
+      editable_fields TEXT DEFAULT '[]',
+      is_active INTEGER DEFAULT 1,
+      created_by TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Generated contracts table
+  await ddl(`
+    CREATE TABLE IF NOT EXISTS contracts (
+      id TEXT PRIMARY KEY,
+      template_id TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      field_values TEXT DEFAULT '{}',
+      status TEXT DEFAULT 'rascunho',
+      clicksign_document_key TEXT,
+      clicksign_request_signature_key TEXT,
+      clicksign_status TEXT,
+      clicksign_url TEXT,
+      signers TEXT DEFAULT '[]',
+      sent_at TEXT,
+      signed_at TEXT,
+      created_by TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // ClickSign config table
+  await ddl(`
+    CREATE TABLE IF NOT EXISTS clicksign_config (
+      id INTEGER PRIMARY KEY ${isPg ? '' : 'AUTOINCREMENT'},
+      api_key TEXT NOT NULL,
+      environment TEXT DEFAULT 'sandbox',
+      updated_by TEXT,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Role permissions table (custom access control)
+  await ddl(`
+    CREATE TABLE IF NOT EXISTS role_permissions (
+      id INTEGER PRIMARY KEY ${isPg ? '' : 'AUTOINCREMENT'},
+      role TEXT NOT NULL UNIQUE,
+      pages TEXT DEFAULT '[]',
+      features TEXT DEFAULT '[]',
+      updated_by TEXT,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   // ── Indexes ──
   // PG and SQLite both support CREATE INDEX IF NOT EXISTS
   const indexes = `
@@ -654,8 +753,15 @@ async function createTables(db) {
     CREATE INDEX IF NOT EXISTS idx_deals_owner ON deals(owner_id);
     CREATE INDEX IF NOT EXISTS idx_deal_activities_deal ON deal_activities(deal_id);
     CREATE INDEX IF NOT EXISTS idx_deal_tasks_deal ON deal_tasks(deal_id);
+    CREATE INDEX IF NOT EXISTS idx_proposals_entity ON proposals(entity_type, entity_id);
+    CREATE INDEX IF NOT EXISTS idx_proposals_template ON proposals(template_id);
+    CREATE INDEX IF NOT EXISTS idx_proposal_templates_active ON proposal_templates(is_active);
     CREATE INDEX IF NOT EXISTS idx_deal_tasks_assigned ON deal_tasks(assigned_to);
     CREATE INDEX IF NOT EXISTS idx_deal_contacts_deal ON deal_contacts(deal_id);
+    CREATE INDEX IF NOT EXISTS idx_contracts_entity ON contracts(entity_type, entity_id);
+    CREATE INDEX IF NOT EXISTS idx_contracts_template ON contracts(template_id);
+    CREATE INDEX IF NOT EXISTS idx_contract_templates_active ON contract_templates(is_active);
+    CREATE INDEX IF NOT EXISTS idx_contracts_clicksign ON contracts(clicksign_document_key);
     CREATE INDEX IF NOT EXISTS idx_pipeline_automations_pipeline ON pipeline_automations(pipeline_id);
     CREATE INDEX IF NOT EXISTS idx_pipeline_automations_trigger ON pipeline_automations(trigger_stage_id);
   `;
@@ -686,6 +792,7 @@ async function createTables(db) {
     await pgSafeAddColumn('deals', 'loss_reason', 'TEXT');
     await pgSafeAddColumn('deals', 'num_employees', 'INTEGER');
     await pgSafeAddColumn('deals', 'product_id', 'TEXT');
+    await pgSafeAddColumn('users', 'uf', 'TEXT');
   }
 
   // ── SQLite-only migrations ──
