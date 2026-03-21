@@ -8047,7 +8047,6 @@ function DiretoriaPage() {
 // ===== PROSPECTING PAGE =====
 function ProspectingPage({ users, hasPerm }) {
   const { user } = useAuth();
-  const T = useTheme();
   const [tab, setTab] = useState("leads");
   const [leads, setLeads] = useState([]);
   const [totalLeads, setTotalLeads] = useState(0);
@@ -8740,7 +8739,6 @@ function ProspectingPage({ users, hasPerm }) {
 // ===== LANDING PAGES PAGE =====
 function LandingPagesPage() {
   const { user } = useAuth();
-  const T = useTheme();
   const [pages, setPages] = useState([]);
   const [selected, setSelected] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -8871,7 +8869,6 @@ function LandingPagesPage() {
 // ===== INBOX PAGE =====
 function InboxPage({ users }) {
   const { user } = useAuth();
-  const T = useTheme();
   const [threads, setThreads] = useState([]);
   const [messages, setMessages] = useState([]);
   const [unread, setUnread] = useState(0);
