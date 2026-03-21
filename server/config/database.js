@@ -715,6 +715,275 @@ async function createTables(db) {
     )
   `);
 
+  // ══════════════════════════════════════════════
+  // PROSPECTING MODULE TABLES
+  // ══════════════════════════════════════════════
+
+  // Leads (central prospecting entity)
+  await ddl(`
+    CREATE TABLE IF NOT EXISTS leads (
+      id TEXT PRIMARY KEY,
+      email TEXT, phone TEXT, name TEXT, company TEXT, cnpj TEXT,
+      job_title TEXT, linkedin_url TEXT, website TEXT,
+      source TEXT DEFAULT 'manual',
+      source_id TEXT,
+      owner_id TEXT,
+      status TEXT DEFAULT 'new',
+      profile_score INTEGER DEFAULT 0,
+      behavior_score INTEGER DEFAULT 0,
+      total_score INTEGER DEFAULT 0,
+      temperature TEXT DEFAULT 'cold',
+      tags TEXT DEFAULT '[]',
+      custom_fields TEXT DEFAULT '{}',
+      razao_social TEXT, nome_fantasia TEXT, capital REAL,
+      abertura TEXT, cnae TEXT, endereco TEXT, num_funcionarios INTEGER,
+      converted_deal_id TEXT, converted_at TEXT, lost_reason TEXT,
+      last_activity_at TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Lead activities
+  const leadActivitiesDDL = isPg
+    ? `CREATE TABLE IF NOT EXISTS lead_activities (
+        id SERIAL PRIMARY KEY,
+        lead_id TEXT NOT NULL,
+        user_id TEXT,
+        type TEXT NOT NULL,
+        channel TEXT, subject TEXT, description TEXT,
+        metadata TEXT DEFAULT '{}',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )`
+    : `CREATE TABLE IF NOT EXISTS lead_activities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        lead_id TEXT NOT NULL,
+        user_id TEXT,
+        type TEXT NOT NULL,
+        channel TEXT, subject TEXT, description TEXT,
+        metadata TEXT DEFAULT '{}',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE CASCADE
+      )`;
+  await db.exec(leadActivitiesDDL);
+
+  // Lead scoring rules
+  await ddl(`
+    CREATE TABLE IF NOT EXISTS lead_scoring_rules (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      field TEXT NOT NULL,
+      operator TEXT NOT NULL,
+      value TEXT,
+      score INTEGER NOT NULL DEFAULT 0,
+      is_active INTEGER DEFAULT 1,
+      created_by TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Lead segments
+  await ddl(`
+    CREATE TABLE IF NOT EXISTS lead_segments (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL, description TEXT,
+      filters TEXT NOT NULL DEFAULT '[]',
+      match_type TEXT DEFAULT 'all',
+      is_dynamic INTEGER DEFAULT 1,
+      lead_count INTEGER DEFAULT 0,
+      owner_id TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Cadences
+  await ddl(`
+    CREATE TABLE IF NOT EXISTS cadences (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL, description TEXT,
+      status TEXT DEFAULT 'draft',
+      type TEXT DEFAULT 'outbound',
+      total_steps INTEGER DEFAULT 0,
+      owner_id TEXT NOT NULL, team_id TEXT,
+      enrolled_count INTEGER DEFAULT 0,
+      completed_count INTEGER DEFAULT 0,
+      replied_count INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Cadence steps
+  const cadenceStepsDDL = isPg
+    ? `CREATE TABLE IF NOT EXISTS cadence_steps (
+        id SERIAL PRIMARY KEY,
+        cadence_id TEXT NOT NULL,
+        step_order INTEGER NOT NULL,
+        channel TEXT NOT NULL,
+        delay_days INTEGER DEFAULT 0,
+        delay_hours INTEGER DEFAULT 0,
+        email_subject TEXT, email_body TEXT,
+        whatsapp_message TEXT,
+        call_script TEXT,
+        linkedin_action TEXT, linkedin_message TEXT,
+        is_active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )`
+    : `CREATE TABLE IF NOT EXISTS cadence_steps (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cadence_id TEXT NOT NULL,
+        step_order INTEGER NOT NULL,
+        channel TEXT NOT NULL,
+        delay_days INTEGER DEFAULT 0,
+        delay_hours INTEGER DEFAULT 0,
+        email_subject TEXT, email_body TEXT,
+        whatsapp_message TEXT,
+        call_script TEXT,
+        linkedin_action TEXT, linkedin_message TEXT,
+        is_active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (cadence_id) REFERENCES cadences(id) ON DELETE CASCADE
+      )`;
+  await db.exec(cadenceStepsDDL);
+
+  // Cadence enrollments
+  await ddl(`
+    CREATE TABLE IF NOT EXISTS cadence_enrollments (
+      id TEXT PRIMARY KEY,
+      cadence_id TEXT NOT NULL, lead_id TEXT NOT NULL,
+      status TEXT DEFAULT 'active',
+      current_step INTEGER DEFAULT 0,
+      next_step_at TEXT,
+      enrolled_by TEXT NOT NULL,
+      completed_at TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Cadence executions
+  const cadenceExecDDL = isPg
+    ? `CREATE TABLE IF NOT EXISTS cadence_executions (
+        id SERIAL PRIMARY KEY,
+        enrollment_id TEXT NOT NULL, cadence_id TEXT NOT NULL,
+        step_id INTEGER NOT NULL, lead_id TEXT NOT NULL,
+        channel TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        sent_at TEXT, opened_at TEXT, clicked_at TEXT, replied_at TEXT,
+        error_message TEXT,
+        metadata TEXT DEFAULT '{}',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )`
+    : `CREATE TABLE IF NOT EXISTS cadence_executions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        enrollment_id TEXT NOT NULL, cadence_id TEXT NOT NULL,
+        step_id INTEGER NOT NULL, lead_id TEXT NOT NULL,
+        channel TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        sent_at TEXT, opened_at TEXT, clicked_at TEXT, replied_at TEXT,
+        error_message TEXT,
+        metadata TEXT DEFAULT '{}',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (enrollment_id) REFERENCES cadence_enrollments(id) ON DELETE CASCADE
+      )`;
+  await db.exec(cadenceExecDDL);
+
+  // Landing pages
+  await ddl(`
+    CREATE TABLE IF NOT EXISTS landing_pages (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL, slug TEXT UNIQUE NOT NULL,
+      status TEXT DEFAULT 'draft',
+      template_type TEXT DEFAULT 'blank',
+      html_content TEXT, css_content TEXT,
+      form_fields TEXT DEFAULT '[]',
+      thank_you_message TEXT, redirect_url TEXT,
+      custom_domain TEXT,
+      meta_title TEXT, meta_description TEXT, og_image TEXT,
+      variant TEXT DEFAULT 'A', parent_id TEXT,
+      views INTEGER DEFAULT 0, submissions INTEGER DEFAULT 0,
+      conversion_rate REAL DEFAULT 0,
+      owner_id TEXT NOT NULL, team_id TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Landing page submissions
+  const lpSubmissionsDDL = isPg
+    ? `CREATE TABLE IF NOT EXISTS landing_page_submissions (
+        id SERIAL PRIMARY KEY,
+        landing_page_id TEXT NOT NULL,
+        lead_id TEXT,
+        form_data TEXT NOT NULL DEFAULT '{}',
+        ip_address TEXT, user_agent TEXT, referrer TEXT,
+        utm_source TEXT, utm_medium TEXT, utm_campaign TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )`
+    : `CREATE TABLE IF NOT EXISTS landing_page_submissions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        landing_page_id TEXT NOT NULL,
+        lead_id TEXT,
+        form_data TEXT NOT NULL DEFAULT '{}',
+        ip_address TEXT, user_agent TEXT, referrer TEXT,
+        utm_source TEXT, utm_medium TEXT, utm_campaign TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (landing_page_id) REFERENCES landing_pages(id) ON DELETE CASCADE
+      )`;
+  await db.exec(lpSubmissionsDDL);
+
+  // Workflow automations
+  await ddl(`
+    CREATE TABLE IF NOT EXISTS workflow_automations (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL, description TEXT,
+      trigger_type TEXT NOT NULL,
+      trigger_config TEXT DEFAULT '{}',
+      actions TEXT NOT NULL DEFAULT '[]',
+      is_active INTEGER DEFAULT 1,
+      execution_count INTEGER DEFAULT 0,
+      last_executed_at TEXT,
+      owner_id TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Inbox messages
+  await ddl(`
+    CREATE TABLE IF NOT EXISTS inbox_messages (
+      id TEXT PRIMARY KEY,
+      lead_id TEXT, deal_id TEXT, user_id TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      from_address TEXT, to_address TEXT, subject TEXT,
+      body TEXT NOT NULL, body_html TEXT,
+      is_read INTEGER DEFAULT 0,
+      thread_id TEXT, external_id TEXT,
+      cadence_execution_id INTEGER,
+      attachments TEXT DEFAULT '[]',
+      metadata TEXT DEFAULT '{}',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // AI conversations
+  await ddl(`
+    CREATE TABLE IF NOT EXISTS ai_conversations (
+      id TEXT PRIMARY KEY,
+      lead_id TEXT, user_id TEXT NOT NULL,
+      context_type TEXT NOT NULL,
+      messages TEXT NOT NULL DEFAULT '[]',
+      model TEXT DEFAULT 'claude-sonnet-4-5-20250514',
+      tokens_used INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   // ── Migrations (must run BEFORE indexes) ──
   if (isPg) {
     const pgSafeAddColumn = async (table, column, definition) => {
@@ -812,6 +1081,36 @@ async function createTables(db) {
     CREATE INDEX IF NOT EXISTS idx_contracts_clicksign ON contracts(clicksign_document_key);
     CREATE INDEX IF NOT EXISTS idx_pipeline_automations_pipeline ON pipeline_automations(pipeline_id);
     CREATE INDEX IF NOT EXISTS idx_pipeline_automations_trigger ON pipeline_automations(trigger_stage_id);
+    CREATE INDEX IF NOT EXISTS idx_leads_email ON leads(email);
+    CREATE INDEX IF NOT EXISTS idx_leads_cnpj ON leads(cnpj);
+    CREATE INDEX IF NOT EXISTS idx_leads_owner ON leads(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
+    CREATE INDEX IF NOT EXISTS idx_leads_score ON leads(total_score);
+    CREATE INDEX IF NOT EXISTS idx_leads_temperature ON leads(temperature);
+    CREATE INDEX IF NOT EXISTS idx_leads_source ON leads(source);
+    CREATE INDEX IF NOT EXISTS idx_leads_created ON leads(created_at);
+    CREATE INDEX IF NOT EXISTS idx_lead_activities_lead ON lead_activities(lead_id);
+    CREATE INDEX IF NOT EXISTS idx_lead_activities_type ON lead_activities(type);
+    CREATE INDEX IF NOT EXISTS idx_cadences_owner ON cadences(owner_id);
+    CREATE INDEX IF NOT EXISTS idx_cadences_status ON cadences(status);
+    CREATE INDEX IF NOT EXISTS idx_cadence_steps_cadence ON cadence_steps(cadence_id);
+    CREATE INDEX IF NOT EXISTS idx_cadence_enrollments_cadence ON cadence_enrollments(cadence_id);
+    CREATE INDEX IF NOT EXISTS idx_cadence_enrollments_lead ON cadence_enrollments(lead_id);
+    CREATE INDEX IF NOT EXISTS idx_cadence_enrollments_status ON cadence_enrollments(status);
+    CREATE INDEX IF NOT EXISTS idx_cadence_enrollments_next ON cadence_enrollments(next_step_at);
+    CREATE INDEX IF NOT EXISTS idx_cadence_executions_enrollment ON cadence_executions(enrollment_id);
+    CREATE INDEX IF NOT EXISTS idx_cadence_executions_cadence ON cadence_executions(cadence_id);
+    CREATE INDEX IF NOT EXISTS idx_landing_pages_slug ON landing_pages(slug);
+    CREATE INDEX IF NOT EXISTS idx_landing_pages_status ON landing_pages(status);
+    CREATE INDEX IF NOT EXISTS idx_lp_submissions_page ON landing_page_submissions(landing_page_id);
+    CREATE INDEX IF NOT EXISTS idx_workflow_trigger ON workflow_automations(trigger_type);
+    CREATE INDEX IF NOT EXISTS idx_workflow_active ON workflow_automations(is_active);
+    CREATE INDEX IF NOT EXISTS idx_inbox_user ON inbox_messages(user_id);
+    CREATE INDEX IF NOT EXISTS idx_inbox_lead ON inbox_messages(lead_id);
+    CREATE INDEX IF NOT EXISTS idx_inbox_channel ON inbox_messages(channel);
+    CREATE INDEX IF NOT EXISTS idx_inbox_read ON inbox_messages(is_read);
+    CREATE INDEX IF NOT EXISTS idx_ai_conv_user ON ai_conversations(user_id);
+    CREATE INDEX IF NOT EXISTS idx_ai_conv_lead ON ai_conversations(lead_id);
   `;
 
   if (isPg) {

@@ -30,7 +30,14 @@ import googleRoutes from './routes/google.js';
 import proposalsRoutes from './routes/proposals.js';
 import contractsRoutes from './routes/contracts.js';
 import permissionsRoutes from './routes/permissions.js';
+import leadsRoutes from './routes/leads.js';
+import cadencesRoutes from './routes/cadences.js';
+import landingPagesRoutes from './routes/landingPages.js';
+import workflowsRoutes from './routes/workflows.js';
+import inboxRoutes from './routes/inbox.js';
+import aiAgentRoutes from './routes/aiAgent.js';
 import { startHubSpotScheduler } from './services/hubspotSync.js';
+import { startCadenceRunner } from './services/cadenceRunner.js';
 
 dotenv.config();
 
@@ -61,7 +68,8 @@ const limiter = rateLimit({
     req.path.startsWith('/whatsapp/webhook') ||
     req.path.startsWith('/whatsapp/instance/qr') ||
     req.path.startsWith('/whatsapp/instance/status') ||
-    req.path.startsWith('/notifications'),
+    req.path.startsWith('/notifications') ||
+    req.path.startsWith('/landing-pages/public'),
 });
 app.use('/api/', limiter);
 
@@ -103,6 +111,12 @@ app.use('/api/google', googleRoutes);
 app.use('/api/proposals', proposalsRoutes);
 app.use('/api/contracts', contractsRoutes);
 app.use('/api/permissions', permissionsRoutes);
+app.use('/api/leads', leadsRoutes);
+app.use('/api/cadences', cadencesRoutes);
+app.use('/api/landing-pages', landingPagesRoutes);
+app.use('/api/workflows', workflowsRoutes);
+app.use('/api/inbox', inboxRoutes);
+app.use('/api/ai', aiAgentRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -140,6 +154,7 @@ app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   seedIfEmpty(getDatabase()).catch(e => console.error('Seed error:', e.message));
   startHubSpotScheduler(getDatabase());
+  startCadenceRunner(getDatabase());
 });
 
 export default app;

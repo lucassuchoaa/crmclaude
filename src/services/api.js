@@ -430,4 +430,92 @@ export const dealsApi = {
   deleteContact: (id) => api.delete(`/pipelines/deals/contacts/${id}`),
 };
 
+// Leads API
+export const leadsApi = {
+  getAll: (params) => api.get('/leads', { params }),
+  getById: (id) => api.get(`/leads/${id}`),
+  create: (data) => api.post('/leads', data),
+  update: (id, data) => api.put(`/leads/${id}`, data),
+  delete: (id) => api.delete(`/leads/${id}`),
+  enrich: (id) => api.post(`/leads/${id}/enrich`),
+  importCsv: (data) => api.post('/leads/import', data),
+  convert: (id, data) => api.post(`/leads/${id}/convert`, data),
+  getActivities: (id, params) => api.get(`/leads/${id}/activities`, { params }),
+  addActivity: (id, data) => api.post(`/leads/${id}/activities`, data),
+  assign: (id, owner_id) => api.patch(`/leads/${id}/assign`, { owner_id }),
+  // Scoring
+  getScoringRules: () => api.get('/leads/scoring/rules'),
+  createScoringRule: (data) => api.post('/leads/scoring/rules', data),
+  updateScoringRule: (id, data) => api.put(`/leads/scoring/rules/${id}`, data),
+  deleteScoringRule: (id) => api.delete(`/leads/scoring/rules/${id}`),
+  recalculateScores: () => api.post('/leads/scoring/recalculate'),
+  // Segments
+  getSegments: () => api.get('/leads/segments'),
+  createSegment: (data) => api.post('/leads/segments', data),
+  updateSegment: (id, data) => api.put(`/leads/segments/${id}`, data),
+  deleteSegment: (id) => api.delete(`/leads/segments/${id}`),
+  getSegmentLeads: (id) => api.get(`/leads/segments/${id}/leads`),
+  // Dashboard
+  dashboardOverview: () => api.get('/leads/dashboard/overview'),
+  dashboardFunnel: () => api.get('/leads/dashboard/funnel'),
+  dashboardSources: () => api.get('/leads/dashboard/sources'),
+  dashboardTeam: () => api.get('/leads/dashboard/team-performance'),
+};
+
+// Cadences API
+export const cadencesApi = {
+  getAll: (params) => api.get('/cadences', { params }),
+  getById: (id) => api.get(`/cadences/${id}`),
+  create: (data) => api.post('/cadences', data),
+  update: (id, data) => api.put(`/cadences/${id}`, data),
+  delete: (id) => api.delete(`/cadences/${id}`),
+  updateStatus: (id, status) => api.patch(`/cadences/${id}/status`, { status }),
+  duplicate: (id) => api.post(`/cadences/${id}/duplicate`),
+  getSteps: (id) => api.get(`/cadences/${id}/steps`),
+  addStep: (id, data) => api.post(`/cadences/${id}/steps`, data),
+  enroll: (id, lead_ids) => api.post(`/cadences/${id}/enroll`, { lead_ids }),
+  unenroll: (id, lead_ids) => api.post(`/cadences/${id}/unenroll`, { lead_ids }),
+  getEnrollments: (id) => api.get(`/cadences/${id}/enrollments`),
+  getStats: (id) => api.get(`/cadences/${id}/stats`),
+};
+
+// Landing Pages API
+export const landingPagesApi = {
+  getAll: () => api.get('/landing-pages'),
+  getById: (id) => api.get(`/landing-pages/${id}`),
+  create: (data) => api.post('/landing-pages', data),
+  update: (id, data) => api.put(`/landing-pages/${id}`, data),
+  delete: (id) => api.delete(`/landing-pages/${id}`),
+  duplicate: (id) => api.post(`/landing-pages/${id}/duplicate`),
+  getSubmissions: (id) => api.get(`/landing-pages/${id}/submissions`),
+  getStats: (id) => api.get(`/landing-pages/${id}/stats`),
+};
+
+// Workflows API
+export const workflowsApi = {
+  getAll: () => api.get('/workflows'),
+  getById: (id) => api.get(`/workflows/${id}`),
+  create: (data) => api.post('/workflows', data),
+  update: (id, data) => api.put(`/workflows/${id}`, data),
+  delete: (id) => api.delete(`/workflows/${id}`),
+  toggle: (id) => api.patch(`/workflows/${id}/toggle`),
+};
+
+// Inbox API
+export const inboxApi = {
+  getAll: (params) => api.get('/inbox', { params }),
+  getThreads: () => api.get('/inbox/threads'),
+  send: (data) => api.post('/inbox', data),
+  markRead: (id) => api.patch(`/inbox/${id}/read`),
+  markAllRead: () => api.post('/inbox/mark-all-read'),
+};
+
+// AI Agent API
+export const aiApi = {
+  chat: (data) => api.post('/ai/chat', data),
+  getConversations: () => api.get('/ai/conversations'),
+  getConversation: (id) => api.get(`/ai/conversations/${id}`),
+  deleteConversation: (id) => api.delete(`/ai/conversations/${id}`),
+};
+
 export default api;

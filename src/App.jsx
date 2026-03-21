@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback } from "react";
-import { authApi, usersApi, indicationsApi, commissionsApi, nfesApi, materialsApi, notificationsApi, hubspotApi, groupsApi, cnpjAgentApi, diretoriaApi, whatsappApi, conveniosApi, pipelinesApi, dealsApi, teamsApi, productsApi, googleApi, proposalsApi, contractsApi, permissionsApi, setTokens, clearTokens } from "./services/api";
+import { authApi, usersApi, indicationsApi, commissionsApi, nfesApi, materialsApi, notificationsApi, hubspotApi, groupsApi, cnpjAgentApi, diretoriaApi, whatsappApi, conveniosApi, pipelinesApi, dealsApi, teamsApi, productsApi, googleApi, proposalsApi, contractsApi, permissionsApi, leadsApi, cadencesApi, landingPagesApi, workflowsApi, inboxApi, aiApi, setTokens, clearTokens } from "./services/api";
 import { useBreakpoint } from "./hooks/useBreakpoint";
 
 const AuthCtx = createContext(null);
@@ -8044,6 +8044,960 @@ function DiretoriaPage() {
   );
 }
 
+// ===== PROSPECTING PAGE =====
+function ProspectingPage({ users, hasPerm }) {
+  const { user } = useAuth();
+  const T = useTheme();
+  const [tab, setTab] = useState("leads");
+  const [leads, setLeads] = useState([]);
+  const [totalLeads, setTotalLeads] = useState(0);
+  const [leadPage, setLeadPage] = useState(1);
+  const [leadSearch, setLeadSearch] = useState("");
+  const [leadFilter, setLeadFilter] = useState({});
+  const [selectedLead, setSelectedLead] = useState(null);
+  const [leadActivities, setLeadActivities] = useState([]);
+  const [showCreateLead, setShowCreateLead] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [showConvert, setShowConvert] = useState(false);
+  const [cadences, setCadences] = useState([]);
+  const [selectedCadence, setSelectedCadence] = useState(null);
+  const [showCreateCadence, setShowCreateCadence] = useState(false);
+  const [scoringRules, setScoringRules] = useState([]);
+  const [segments, setSegments] = useState([]);
+  const [dashData, setDashData] = useState(null);
+  const [funnelData, setFunnelData] = useState([]);
+  const [workflows, setWorkflows] = useState([]);
+  const [showCreateWorkflow, setShowCreateWorkflow] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [editLead, setEditLead] = useState({});
+  const [editCadence, setEditCadence] = useState({ name: "", description: "", type: "outbound", steps: [] });
+  const [editWorkflow, setEditWorkflow] = useState({ name: "", trigger_type: "lead_created", trigger_config: {}, actions: [] });
+  const [enrollCadenceId, setEnrollCadenceId] = useState(null);
+  const [selectedLeadIds, setSelectedLeadIds] = useState([]);
+  const [pipelines, setPipelines] = useState([]);
+  const [pipelineStages, setPipelineStages] = useState([]);
+  const [convertData, setConvertData] = useState({ pipeline_id: "", stage_id: "", value: 0, title: "" });
+  // AI chat
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiMessages, setAiMessages] = useState([]);
+  const [aiInput, setAiInput] = useState("");
+  const [aiConvId, setAiConvId] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
+
+  const fetchLeads = useCallback(async () => {
+    try {
+      setLoading(true);
+      const params = { page: leadPage, limit: 50, search: leadSearch || undefined, ...leadFilter };
+      const { data } = await leadsApi.getAll(params);
+      setLeads(data.leads || []);
+      setTotalLeads(data.total || 0);
+    } catch { } finally { setLoading(false); }
+  }, [leadPage, leadSearch, leadFilter]);
+
+  useEffect(() => { fetchLeads(); }, [fetchLeads]);
+
+  useEffect(() => {
+    if (tab === "cadences") cadencesApi.getAll().then(r => setCadences(r.data)).catch(() => {});
+    if (tab === "scoring") leadsApi.getScoringRules().then(r => setScoringRules(r.data)).catch(() => {});
+    if (tab === "segments") leadsApi.getSegments().then(r => setSegments(r.data)).catch(() => {});
+    if (tab === "dashboard") {
+      leadsApi.dashboardOverview().then(r => setDashData(r.data)).catch(() => {});
+      leadsApi.dashboardFunnel().then(r => setFunnelData(r.data)).catch(() => {});
+    }
+    if (tab === "workflows") workflowsApi.getAll().then(r => setWorkflows(r.data)).catch(() => {});
+  }, [tab]);
+
+  const selectLead = async (lead) => {
+    try {
+      const { data } = await leadsApi.getById(lead.id);
+      setSelectedLead(data);
+      const acts = await leadsApi.getActivities(lead.id);
+      setLeadActivities(acts.data || []);
+    } catch { setSelectedLead(lead); }
+  };
+
+  const createLead = async () => {
+    try {
+      await leadsApi.create(editLead);
+      setShowCreateLead(false);
+      setEditLead({});
+      fetchLeads();
+    } catch (e) { alert(e.response?.data?.error || "Erro"); }
+  };
+
+  const updateLead = async () => {
+    if (!selectedLead) return;
+    try {
+      const { data } = await leadsApi.update(selectedLead.id, editLead);
+      setSelectedLead(data);
+      fetchLeads();
+      setEditLead({});
+    } catch (e) { alert(e.response?.data?.error || "Erro"); }
+  };
+
+  const deleteLead = async (id) => {
+    if (!confirm("Excluir este lead?")) return;
+    try { await leadsApi.delete(id); setSelectedLead(null); fetchLeads(); } catch { }
+  };
+
+  const enrichLead = async (id) => {
+    try {
+      const { data } = await leadsApi.enrich(id);
+      setSelectedLead(data);
+      fetchLeads();
+    } catch (e) { alert(e.response?.data?.error || "Erro ao enriquecer"); }
+  };
+
+  const convertLead = async () => {
+    if (!selectedLead) return;
+    try {
+      await leadsApi.convert(selectedLead.id, convertData);
+      setShowConvert(false);
+      setSelectedLead(null);
+      fetchLeads();
+    } catch (e) { alert(e.response?.data?.error || "Erro"); }
+  };
+
+  const importCsv = async (text) => {
+    const lines = text.trim().split("\n");
+    const headers = lines[0].split(",").map(h => h.trim().toLowerCase());
+    const rows = lines.slice(1).map(line => {
+      const vals = line.split(",");
+      const obj = {};
+      headers.forEach((h, i) => { obj[h] = (vals[i] || "").trim(); });
+      return obj;
+    });
+    try {
+      const { data } = await leadsApi.importCsv({ leads: rows });
+      alert(`Importados: ${data.imported}, Duplicados: ${data.skipped}`);
+      setShowImport(false);
+      fetchLeads();
+    } catch (e) { alert(e.response?.data?.error || "Erro"); }
+  };
+
+  const createCadence = async () => {
+    try {
+      await cadencesApi.create(editCadence);
+      setShowCreateCadence(false);
+      setEditCadence({ name: "", description: "", type: "outbound", steps: [] });
+      cadencesApi.getAll().then(r => setCadences(r.data));
+    } catch (e) { alert(e.response?.data?.error || "Erro"); }
+  };
+
+  const enrollInCadence = async (cadenceId, leadIds) => {
+    try {
+      await cadencesApi.enroll(cadenceId, leadIds);
+      setEnrollCadenceId(null);
+      setSelectedLeadIds([]);
+      fetchLeads();
+    } catch (e) { alert(e.response?.data?.error || "Erro"); }
+  };
+
+  const sendAiMessage = async () => {
+    if (!aiInput.trim()) return;
+    const msg = aiInput;
+    setAiInput("");
+    setAiMessages(prev => [...prev, { role: "user", content: msg }]);
+    setAiLoading(true);
+    try {
+      const { data } = await aiApi.chat({ conversation_id: aiConvId, message: msg, context_type: "lead_analysis", lead_id: selectedLead?.id });
+      setAiConvId(data.conversation_id);
+      setAiMessages(prev => [...prev, { role: "assistant", content: data.response }]);
+    } catch (e) {
+      setAiMessages(prev => [...prev, { role: "assistant", content: "Erro: " + (e.response?.data?.error || e.message) }]);
+    } finally { setAiLoading(false); }
+  };
+
+  const tabStyle = (t) => ({ padding: "8px 16px", fontSize: 12, fontWeight: tab === t ? 700 : 500, color: tab === t ? T.ac : T.t2, background: tab === t ? T.ac + "1A" : "transparent", border: "none", borderBottom: tab === t ? `2px solid ${T.ac}` : "2px solid transparent", cursor: "pointer" });
+  const STATUS_COLORS = { new: T.inf, contacted: T.wn, qualified: T.ok, unqualified: T.tm, converted: "#22c55e", lost: T.er };
+  const TEMP_COLORS = { cold: "#60a5fa", warm: "#f59e0b", hot: "#ef4444" };
+  const STATUS_LABELS = { new: "Novo", contacted: "Contactado", qualified: "Qualificado", unqualified: "Desqualificado", converted: "Convertido", lost: "Perdido" };
+
+  return (
+    <div>
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 0, borderBottom: `1px solid ${T.bor}`, marginBottom: 16, overflowX: "auto" }}>
+        {["leads", "cadences", "scoring", "segments", "workflows", "dashboard"].map(t => (
+          <button key={t} onClick={() => setTab(t)} style={tabStyle(t)}>
+            {t === "leads" ? "Leads" : t === "cadences" ? "Cadências" : t === "scoring" ? "Scoring" : t === "segments" ? "Segmentos" : t === "workflows" ? "Workflows" : "Dashboard"}
+          </button>
+        ))}
+      </div>
+
+      {/* ──── LEADS TAB ──── */}
+      {tab === "leads" && (
+        <div style={{ display: "flex", gap: 16 }}>
+          {/* List */}
+          <div style={{ flex: selectedLead ? 1 : 1 }}>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+              <input placeholder="Buscar leads..." value={leadSearch} onChange={e => { setLeadSearch(e.target.value); setLeadPage(1); }}
+                style={{ flex: 1, minWidth: 200, padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }} />
+              <select value={leadFilter.status || ""} onChange={e => setLeadFilter(f => ({ ...f, status: e.target.value || undefined }))}
+                style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11 }}>
+                <option value="">Todos status</option>
+                {Object.entries(STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+              <select value={leadFilter.temperature || ""} onChange={e => setLeadFilter(f => ({ ...f, temperature: e.target.value || undefined }))}
+                style={{ padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11 }}>
+                <option value="">Todas temp.</option>
+                <option value="cold">Frio</option><option value="warm">Morno</option><option value="hot">Quente</option>
+              </select>
+              <Btn v="primary" sm onClick={() => { setEditLead({}); setShowCreateLead(true); }}>+ Lead</Btn>
+              <Btn v="ghost" sm onClick={() => setShowImport(true)}>Importar CSV</Btn>
+              {selectedLeadIds.length > 0 && cadences.length > 0 && (
+                <Btn v="primary" sm onClick={() => setEnrollCadenceId("pick")}>Inscrever ({selectedLeadIds.length})</Btn>
+              )}
+            </div>
+            <div style={{ background: T.card, borderRadius: 8, border: `1px solid ${T.bor}`, overflow: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr style={{ background: T.bg2, borderBottom: `1px solid ${T.bor}` }}>
+                    <th style={{ padding: "8px", textAlign: "left", width: 30 }}><input type="checkbox" onChange={e => setSelectedLeadIds(e.target.checked ? leads.map(l => l.id) : [])} checked={selectedLeadIds.length === leads.length && leads.length > 0} /></th>
+                    <th style={{ padding: "8px", textAlign: "left" }}>Nome</th>
+                    <th style={{ padding: "8px", textAlign: "left" }}>Empresa</th>
+                    <th style={{ padding: "8px", textAlign: "left" }}>Email</th>
+                    <th style={{ padding: "8px", textAlign: "center" }}>Score</th>
+                    <th style={{ padding: "8px", textAlign: "center" }}>Status</th>
+                    <th style={{ padding: "8px", textAlign: "center" }}>Temp.</th>
+                    <th style={{ padding: "8px", textAlign: "left" }}>Fonte</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {leads.map(l => (
+                    <tr key={l.id} onClick={() => selectLead(l)} style={{ borderBottom: `1px solid ${T.bor}`, cursor: "pointer", background: selectedLead?.id === l.id ? T.ac + "0D" : "transparent" }}>
+                      <td style={{ padding: "8px" }} onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" checked={selectedLeadIds.includes(l.id)} onChange={e => setSelectedLeadIds(prev => e.target.checked ? [...prev, l.id] : prev.filter(x => x !== l.id))} />
+                      </td>
+                      <td style={{ padding: "8px", fontWeight: 600 }}>{l.name || "-"}</td>
+                      <td style={{ padding: "8px" }}>{l.company || l.razao_social || "-"}</td>
+                      <td style={{ padding: "8px", color: T.tm }}>{l.email || "-"}</td>
+                      <td style={{ padding: "8px", textAlign: "center", fontWeight: 700, color: (l.total_score || 0) >= 70 ? "#ef4444" : (l.total_score || 0) >= 30 ? "#f59e0b" : T.tm }}>{l.total_score || 0}</td>
+                      <td style={{ padding: "8px", textAlign: "center" }}><span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 10, background: (STATUS_COLORS[l.status] || T.tm) + "22", color: STATUS_COLORS[l.status] || T.tm }}>{STATUS_LABELS[l.status] || l.status}</span></td>
+                      <td style={{ padding: "8px", textAlign: "center" }}><span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 10, background: (TEMP_COLORS[l.temperature] || T.tm) + "22", color: TEMP_COLORS[l.temperature] || T.tm }}>{l.temperature === "hot" ? "Quente" : l.temperature === "warm" ? "Morno" : "Frio"}</span></td>
+                      <td style={{ padding: "8px", fontSize: 10, color: T.tm }}>{l.source}</td>
+                    </tr>
+                  ))}
+                  {leads.length === 0 && <tr><td colSpan={8} style={{ padding: 40, textAlign: "center", color: T.tm }}>Nenhum lead encontrado</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            {totalLeads > 50 && (
+              <div style={{ display: "flex", gap: 8, marginTop: 8, justifyContent: "center" }}>
+                <Btn sm v="ghost" disabled={leadPage <= 1} onClick={() => setLeadPage(p => p - 1)}>Anterior</Btn>
+                <span style={{ fontSize: 11, color: T.tm, padding: "8px" }}>Pág {leadPage} de {Math.ceil(totalLeads / 50)}</span>
+                <Btn sm v="ghost" disabled={leadPage >= Math.ceil(totalLeads / 50)} onClick={() => setLeadPage(p => p + 1)}>Próxima</Btn>
+              </div>
+            )}
+          </div>
+
+          {/* Lead detail panel */}
+          {selectedLead && (
+            <div style={{ width: 380, background: T.card, borderRadius: 8, border: `1px solid ${T.bor}`, padding: 16, overflow: "auto", maxHeight: "calc(100vh - 200px)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+                <h3 style={{ fontSize: 14, fontWeight: 700 }}>{selectedLead.name || selectedLead.company || "Lead"}</h3>
+                <button onClick={() => setSelectedLead(null)} style={{ background: "none", border: "none", cursor: "pointer", color: T.tm, fontSize: 16 }}>✕</button>
+              </div>
+              <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+                <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 10, background: (STATUS_COLORS[selectedLead.status] || T.tm) + "22", color: STATUS_COLORS[selectedLead.status] }}>{STATUS_LABELS[selectedLead.status]}</span>
+                <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 10, background: (TEMP_COLORS[selectedLead.temperature] || T.tm) + "22", color: TEMP_COLORS[selectedLead.temperature] }}>Score: {selectedLead.total_score || 0}</span>
+              </div>
+              {/* Fields */}
+              {[["Email", selectedLead.email], ["Telefone", selectedLead.phone], ["Empresa", selectedLead.company || selectedLead.razao_social],
+                ["CNPJ", selectedLead.cnpj], ["Cargo", selectedLead.job_title], ["LinkedIn", selectedLead.linkedin_url],
+                ["Fonte", selectedLead.source], ["Dono", selectedLead.owner_name]].map(([label, val]) => val && (
+                <div key={label} style={{ marginBottom: 6 }}>
+                  <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase" }}>{label}</div>
+                  <div style={{ fontSize: 12 }}>{val}</div>
+                </div>
+              ))}
+              {selectedLead.tags?.length > 0 && (
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", marginBottom: 4 }}>Tags</div>
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                    {selectedLead.tags.map(t => <span key={t} style={{ padding: "2px 6px", borderRadius: 8, fontSize: 10, background: T.ac + "22", color: T.ac }}>{t}</span>)}
+                  </div>
+                </div>
+              )}
+              {selectedLead.active_enrollment && (
+                <div style={{ padding: 8, borderRadius: 6, background: T.ac + "0D", marginBottom: 8, fontSize: 11 }}>
+                  Cadência ativa: <b>{selectedLead.active_enrollment.cadence_name}</b> (step {selectedLead.active_enrollment.current_step})
+                </div>
+              )}
+              {/* Actions */}
+              <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+                <Btn sm v="primary" onClick={() => { setEditLead({ status: selectedLead.status }); }}>Editar</Btn>
+                {selectedLead.cnpj && <Btn sm v="ghost" onClick={() => enrichLead(selectedLead.id)}>Enriquecer CNPJ</Btn>}
+                {selectedLead.status !== "converted" && <Btn sm v="ghost" onClick={() => {
+                  pipelinesApi.getAll().then(r => { setPipelines(r.data); if (r.data[0]) { setPipelineStages([]); pipelinesApi.getStages(r.data[0].id).then(s => setPipelineStages(s.data)); setConvertData(d => ({ ...d, pipeline_id: r.data[0].id })); } });
+                  setShowConvert(true);
+                }}>Converter em Deal</Btn>}
+                <Btn sm v="ghost" onClick={() => { setAiOpen(true); setAiMessages([]); setAiConvId(null); }}>IA</Btn>
+                <Btn sm v="danger" onClick={() => deleteLead(selectedLead.id)}>Excluir</Btn>
+              </div>
+              {/* Quick status change */}
+              <div style={{ marginBottom: 12 }}>
+                <select value={selectedLead.status} onChange={async e => {
+                  try { const { data } = await leadsApi.update(selectedLead.id, { status: e.target.value }); setSelectedLead(data); fetchLeads(); } catch {}
+                }} style={{ width: "100%", padding: "6px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11 }}>
+                  {Object.entries(STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
+              </div>
+              {/* Add note */}
+              <div style={{ marginBottom: 12 }}>
+                <textarea placeholder="Adicionar nota..." rows={2}
+                  style={{ width: "100%", padding: 8, background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12, resize: "vertical" }}
+                  onKeyDown={async e => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      if (!e.target.value.trim()) return;
+                      await leadsApi.addActivity(selectedLead.id, { type: "note", description: e.target.value });
+                      e.target.value = "";
+                      const acts = await leadsApi.getActivities(selectedLead.id);
+                      setLeadActivities(acts.data || []);
+                    }
+                  }} />
+              </div>
+              {/* Timeline */}
+              <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", marginBottom: 6 }}>Atividades</div>
+              <div style={{ maxHeight: 300, overflow: "auto" }}>
+                {leadActivities.map((a, i) => (
+                  <div key={i} style={{ padding: "6px 0", borderBottom: `1px solid ${T.bor}`, fontSize: 11 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ fontWeight: 600 }}>{a.type}</span>
+                      <span style={{ color: T.tm, fontSize: 10 }}>{new Date(a.created_at).toLocaleDateString("pt-BR")}</span>
+                    </div>
+                    {a.description && <div style={{ color: T.t2, marginTop: 2 }}>{a.description}</div>}
+                    {a.user_name && <div style={{ color: T.tm, fontSize: 10 }}>por {a.user_name}</div>}
+                  </div>
+                ))}
+                {leadActivities.length === 0 && <div style={{ color: T.tm, padding: 12, textAlign: "center" }}>Sem atividades</div>}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ──── CADENCES TAB ──── */}
+      {tab === "cadences" && (
+        <div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <Btn v="primary" sm onClick={() => { setEditCadence({ name: "", description: "", type: "outbound", steps: [] }); setShowCreateCadence(true); }}>+ Cadência</Btn>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(340px,1fr))", gap: 12 }}>
+            {cadences.map(c => (
+              <div key={c.id} onClick={() => { cadencesApi.getById(c.id).then(r => setSelectedCadence(r.data)); }} style={{ background: T.card, borderRadius: 8, border: `1px solid ${T.bor}`, padding: 16, cursor: "pointer" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                  <h4 style={{ fontSize: 13, fontWeight: 700 }}>{c.name}</h4>
+                  <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 10, background: c.status === "active" ? T.ok + "22" : T.tm + "22", color: c.status === "active" ? T.ok : T.tm }}>{c.status}</span>
+                </div>
+                {c.description && <div style={{ fontSize: 11, color: T.t2, marginBottom: 8 }}>{c.description}</div>}
+                <div style={{ display: "flex", gap: 16, fontSize: 11, color: T.tm }}>
+                  <span>{c.total_steps} steps</span>
+                  <span>{c.enrolled_count} inscritos</span>
+                  <span>{c.completed_count} completos</span>
+                  <span>{c.replied_count} respostas</span>
+                </div>
+                <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                  <Btn sm v={c.status === "active" ? "warning" : "primary"} onClick={async e => {
+                    e.stopPropagation();
+                    await cadencesApi.updateStatus(c.id, c.status === "active" ? "paused" : "active");
+                    cadencesApi.getAll().then(r => setCadences(r.data));
+                  }}>{c.status === "active" ? "Pausar" : "Ativar"}</Btn>
+                  <Btn sm v="ghost" onClick={async e => { e.stopPropagation(); await cadencesApi.duplicate(c.id); cadencesApi.getAll().then(r => setCadences(r.data)); }}>Duplicar</Btn>
+                  <Btn sm v="danger" onClick={async e => { e.stopPropagation(); if (confirm("Excluir?")) { await cadencesApi.delete(c.id); setCadences(cs => cs.filter(x => x.id !== c.id)); } }}>Excluir</Btn>
+                </div>
+              </div>
+            ))}
+          </div>
+          {cadences.length === 0 && <div style={{ padding: 40, textAlign: "center", color: T.tm }}>Nenhuma cadência criada</div>}
+        </div>
+      )}
+
+      {/* ──── SCORING TAB ──── */}
+      {tab === "scoring" && (
+        <div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <Btn v="primary" sm onClick={async () => {
+              const name = prompt("Nome da regra:");
+              if (!name) return;
+              await leadsApi.createScoringRule({ name, type: "profile", field: "company", operator: "exists", score: 10 });
+              leadsApi.getScoringRules().then(r => setScoringRules(r.data));
+            }}>+ Regra</Btn>
+            <Btn v="ghost" sm onClick={async () => { await leadsApi.recalculateScores(); alert("Scores recalculados"); }}>Recalcular Scores</Btn>
+          </div>
+          <div style={{ background: T.card, borderRadius: 8, border: `1px solid ${T.bor}` }}>
+            {scoringRules.map(r => (
+              <div key={r.id} style={{ padding: "10px 16px", borderBottom: `1px solid ${T.bor}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600 }}>{r.name}</div>
+                  <div style={{ fontSize: 11, color: T.tm }}>{r.type} | {r.field} {r.operator} {r.value || ""} = <b>{r.score > 0 ? "+" : ""}{r.score} pts</b></div>
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <Btn sm v={r.is_active ? "primary" : "ghost"} onClick={async () => {
+                    await leadsApi.updateScoringRule(r.id, { ...r, is_active: !r.is_active });
+                    leadsApi.getScoringRules().then(res => setScoringRules(res.data));
+                  }}>{r.is_active ? "Ativo" : "Inativo"}</Btn>
+                  <Btn sm v="danger" onClick={async () => { await leadsApi.deleteScoringRule(r.id); setScoringRules(rs => rs.filter(x => x.id !== r.id)); }}>X</Btn>
+                </div>
+              </div>
+            ))}
+            {scoringRules.length === 0 && <div style={{ padding: 32, textAlign: "center", color: T.tm }}>Nenhuma regra criada</div>}
+          </div>
+        </div>
+      )}
+
+      {/* ──── SEGMENTS TAB ──── */}
+      {tab === "segments" && (
+        <div>
+          <Btn v="primary" sm onClick={async () => {
+            const name = prompt("Nome do segmento:");
+            if (!name) return;
+            await leadsApi.createSegment({ name, filters: [], match_type: "all" });
+            leadsApi.getSegments().then(r => setSegments(r.data));
+          }} style={{ marginBottom: 12 }}>+ Segmento</Btn>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))", gap: 12 }}>
+            {segments.map(s => (
+              <div key={s.id} style={{ background: T.card, borderRadius: 8, border: `1px solid ${T.bor}`, padding: 16 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{s.name}</div>
+                {s.description && <div style={{ fontSize: 11, color: T.t2, marginBottom: 8 }}>{s.description}</div>}
+                <div style={{ fontSize: 11, color: T.tm }}>{s.lead_count} leads | {(s.filters || []).length} filtros | {s.is_dynamic ? "Dinâmico" : "Estático"}</div>
+                <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                  <Btn sm v="ghost" onClick={async () => { setLeadFilter({ segment_id: s.id }); setTab("leads"); }}>Ver Leads</Btn>
+                  <Btn sm v="danger" onClick={async () => { if (confirm("Excluir?")) { await leadsApi.deleteSegment(s.id); setSegments(ss => ss.filter(x => x.id !== s.id)); } }}>X</Btn>
+                </div>
+              </div>
+            ))}
+          </div>
+          {segments.length === 0 && <div style={{ padding: 40, textAlign: "center", color: T.tm }}>Nenhum segmento criado</div>}
+        </div>
+      )}
+
+      {/* ──── WORKFLOWS TAB ──── */}
+      {tab === "workflows" && (
+        <div>
+          <Btn v="primary" sm onClick={() => { setEditWorkflow({ name: "", trigger_type: "lead_created", trigger_config: {}, actions: [] }); setShowCreateWorkflow(true); }} style={{ marginBottom: 12 }}>+ Workflow</Btn>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(340px,1fr))", gap: 12 }}>
+            {workflows.map(w => (
+              <div key={w.id} style={{ background: T.card, borderRadius: 8, border: `1px solid ${T.bor}`, padding: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                  <h4 style={{ fontSize: 13, fontWeight: 700 }}>{w.name}</h4>
+                  <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 10, background: w.is_active ? T.ok + "22" : T.tm + "22", color: w.is_active ? T.ok : T.tm }}>{w.is_active ? "Ativo" : "Inativo"}</span>
+                </div>
+                <div style={{ fontSize: 11, color: T.tm, marginBottom: 6 }}>Trigger: {w.trigger_type} | Execuções: {w.execution_count}</div>
+                <div style={{ fontSize: 11, color: T.t2 }}>Ações: {(w.actions || []).map(a => a.type).join(", ") || "Nenhuma"}</div>
+                <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                  <Btn sm v={w.is_active ? "warning" : "primary"} onClick={async () => { await workflowsApi.toggle(w.id); workflowsApi.getAll().then(r => setWorkflows(r.data)); }}>{w.is_active ? "Desativar" : "Ativar"}</Btn>
+                  <Btn sm v="danger" onClick={async () => { if (confirm("Excluir?")) { await workflowsApi.delete(w.id); setWorkflows(ws => ws.filter(x => x.id !== w.id)); } }}>X</Btn>
+                </div>
+              </div>
+            ))}
+          </div>
+          {workflows.length === 0 && <div style={{ padding: 40, textAlign: "center", color: T.tm }}>Nenhum workflow criado</div>}
+        </div>
+      )}
+
+      {/* ──── DASHBOARD TAB ──── */}
+      {tab === "dashboard" && dashData && (
+        <div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(180px,1fr))", gap: 12, marginBottom: 16 }}>
+            {[["Total de Leads", dashData.total, T.ac], ["Novos (7 dias)", dashData.new_this_week, T.ok],
+              ...(dashData.by_temperature || []).map(t => [t.temperature === "hot" ? "Quentes" : t.temperature === "warm" ? "Mornos" : "Frios", t.c, TEMP_COLORS[t.temperature]])
+            ].map(([label, val, color]) => (
+              <div key={label} style={{ background: T.card, borderRadius: 8, border: `1px solid ${T.bor}`, padding: 16, textAlign: "center" }}>
+                <div style={{ fontSize: 24, fontWeight: 700, color }}>{val}</div>
+                <div style={{ fontSize: 11, color: T.tm }}>{label}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <div style={{ background: T.card, borderRadius: 8, border: `1px solid ${T.bor}`, padding: 16 }}>
+              <h4 style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Funil</h4>
+              {funnelData.map(f => (
+                <div key={f.status} style={{ marginBottom: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 2 }}>
+                    <span>{STATUS_LABELS[f.status] || f.status}</span><span style={{ fontWeight: 700 }}>{f.count}</span>
+                  </div>
+                  <div style={{ height: 6, borderRadius: 3, background: T.bor }}>
+                    <div style={{ height: "100%", borderRadius: 3, background: STATUS_COLORS[f.status] || T.ac, width: `${Math.max(2, (f.count / (dashData.total || 1)) * 100)}%`, transition: "width 0.3s" }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ background: T.card, borderRadius: 8, border: `1px solid ${T.bor}`, padding: 16 }}>
+              <h4 style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Por Fonte</h4>
+              {(dashData.by_source || []).map(s => (
+                <div key={s.source} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 12, borderBottom: `1px solid ${T.bor}` }}>
+                  <span>{s.source}</span><span style={{ fontWeight: 600 }}>{s.c}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──── MODALS ──── */}
+
+      {/* Create Lead Modal */}
+      <Modal open={showCreateLead} onClose={() => setShowCreateLead(false)} title="Novo Lead" footer={<Btn v="primary" onClick={createLead}>Criar</Btn>}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          {[["name", "Nome"], ["email", "Email"], ["phone", "Telefone"], ["company", "Empresa"], ["cnpj", "CNPJ"], ["job_title", "Cargo"], ["linkedin_url", "LinkedIn"], ["website", "Website"]].map(([k, l]) => (
+            <div key={k}><label style={{ fontSize: 10, color: T.tm, display: "block", marginBottom: 2 }}>{l}</label>
+              <input value={editLead[k] || ""} onChange={e => setEditLead(d => ({ ...d, [k]: e.target.value }))}
+                style={{ width: "100%", padding: "6px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }} />
+            </div>
+          ))}
+          <div><label style={{ fontSize: 10, color: T.tm, display: "block", marginBottom: 2 }}>Fonte</label>
+            <select value={editLead.source || "manual"} onChange={e => setEditLead(d => ({ ...d, source: e.target.value }))}
+              style={{ width: "100%", padding: "6px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }}>
+              <option value="manual">Manual</option><option value="import">Importação</option><option value="api">API</option>
+            </select>
+          </div>
+          <div><label style={{ fontSize: 10, color: T.tm, display: "block", marginBottom: 2 }}>Dono</label>
+            <select value={editLead.owner_id || ""} onChange={e => setEditLead(d => ({ ...d, owner_id: e.target.value }))}
+              style={{ width: "100%", padding: "6px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }}>
+              <option value="">Eu</option>
+              {users.filter(u => !["parceiro", "convenio"].includes(u.role)).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Import CSV Modal */}
+      <Modal open={showImport} onClose={() => setShowImport(false)} title="Importar CSV">
+        <p style={{ fontSize: 12, color: T.t2, marginBottom: 8 }}>Cole o CSV com cabeçalhos: name, email, phone, company, cnpj, job_title</p>
+        <textarea id="csv-input" rows={10} style={{ width: "100%", padding: 8, background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11, fontFamily: "monospace" }} placeholder="name,email,phone,company&#10;João,joao@email.com,11999999999,Empresa XYZ" />
+        <Btn v="primary" onClick={() => importCsv(document.getElementById("csv-input").value)} style={{ marginTop: 8 }}>Importar</Btn>
+      </Modal>
+
+      {/* Convert to Deal Modal */}
+      <Modal open={showConvert} onClose={() => setShowConvert(false)} title="Converter em Deal" footer={<Btn v="primary" onClick={convertLead}>Converter</Btn>}>
+        <div style={{ display: "grid", gap: 8 }}>
+          <div><label style={{ fontSize: 10, color: T.tm }}>Pipeline</label>
+            <select value={convertData.pipeline_id} onChange={e => {
+              setConvertData(d => ({ ...d, pipeline_id: e.target.value, stage_id: "" }));
+              pipelinesApi.getStages(e.target.value).then(r => setPipelineStages(r.data));
+            }} style={{ width: "100%", padding: "6px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }}>
+              <option value="">Selecione</option>
+              {pipelines.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+          <div><label style={{ fontSize: 10, color: T.tm }}>Etapa</label>
+            <select value={convertData.stage_id} onChange={e => setConvertData(d => ({ ...d, stage_id: e.target.value }))}
+              style={{ width: "100%", padding: "6px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }}>
+              <option value="">Selecione</option>
+              {pipelineStages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
+          <div><label style={{ fontSize: 10, color: T.tm }}>Título</label>
+            <input value={convertData.title} onChange={e => setConvertData(d => ({ ...d, title: e.target.value }))}
+              style={{ width: "100%", padding: "6px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }} />
+          </div>
+          <div><label style={{ fontSize: 10, color: T.tm }}>Valor (R$)</label>
+            <input type="number" value={convertData.value} onChange={e => setConvertData(d => ({ ...d, value: Number(e.target.value) }))}
+              style={{ width: "100%", padding: "6px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }} />
+          </div>
+        </div>
+      </Modal>
+
+      {/* Create Cadence Modal */}
+      <Modal open={showCreateCadence} onClose={() => setShowCreateCadence(false)} title="Nova Cadência" wide footer={<Btn v="primary" onClick={createCadence}>Criar</Btn>}>
+        <div style={{ display: "grid", gap: 8, marginBottom: 16 }}>
+          <input placeholder="Nome da cadência" value={editCadence.name} onChange={e => setEditCadence(d => ({ ...d, name: e.target.value }))}
+            style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 13 }} />
+          <input placeholder="Descrição (opcional)" value={editCadence.description || ""} onChange={e => setEditCadence(d => ({ ...d, description: e.target.value }))}
+            style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }} />
+        </div>
+        <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>Steps</div>
+        {(editCadence.steps || []).map((step, i) => (
+          <div key={i} style={{ background: T.bg2, borderRadius: 6, padding: 12, marginBottom: 8, border: `1px solid ${T.bor}` }}>
+            <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: T.ac }}>#{i + 1}</span>
+              <select value={step.channel} onChange={e => { const s = [...editCadence.steps]; s[i] = { ...s[i], channel: e.target.value }; setEditCadence(d => ({ ...d, steps: s })); }}
+                style={{ padding: "4px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11 }}>
+                <option value="email">Email</option><option value="whatsapp">WhatsApp</option><option value="call">Ligação</option><option value="linkedin">LinkedIn</option><option value="wait">Esperar</option>
+              </select>
+              <input type="number" min={0} value={step.delay_days || 0} onChange={e => { const s = [...editCadence.steps]; s[i] = { ...s[i], delay_days: Number(e.target.value) }; setEditCadence(d => ({ ...d, steps: s })); }}
+                style={{ width: 60, padding: "4px 6px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11 }} /> <span style={{ fontSize: 10, color: T.tm }}>dias</span>
+              <input type="number" min={0} value={step.delay_hours || 0} onChange={e => { const s = [...editCadence.steps]; s[i] = { ...s[i], delay_hours: Number(e.target.value) }; setEditCadence(d => ({ ...d, steps: s })); }}
+                style={{ width: 60, padding: "4px 6px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11 }} /> <span style={{ fontSize: 10, color: T.tm }}>horas</span>
+              <button onClick={() => { const s = [...editCadence.steps]; s.splice(i, 1); setEditCadence(d => ({ ...d, steps: s })); }}
+                style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", color: T.er, fontSize: 14 }}>✕</button>
+            </div>
+            {step.channel === "email" && <>
+              <input placeholder="Assunto" value={step.email_subject || ""} onChange={e => { const s = [...editCadence.steps]; s[i] = { ...s[i], email_subject: e.target.value }; setEditCadence(d => ({ ...d, steps: s })); }}
+                style={{ width: "100%", marginBottom: 4, padding: "6px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11 }} />
+              <textarea placeholder="Corpo do email (use {{nome}}, {{empresa}})" value={step.email_body || ""} rows={3} onChange={e => { const s = [...editCadence.steps]; s[i] = { ...s[i], email_body: e.target.value }; setEditCadence(d => ({ ...d, steps: s })); }}
+                style={{ width: "100%", padding: "6px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11, resize: "vertical" }} />
+            </>}
+            {step.channel === "whatsapp" && <textarea placeholder="Mensagem WhatsApp (use {{nome}}, {{empresa}})" value={step.whatsapp_message || ""} rows={3} onChange={e => { const s = [...editCadence.steps]; s[i] = { ...s[i], whatsapp_message: e.target.value }; setEditCadence(d => ({ ...d, steps: s })); }}
+              style={{ width: "100%", padding: "6px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11, resize: "vertical" }} />}
+            {step.channel === "call" && <textarea placeholder="Script da ligação" value={step.call_script || ""} rows={2} onChange={e => { const s = [...editCadence.steps]; s[i] = { ...s[i], call_script: e.target.value }; setEditCadence(d => ({ ...d, steps: s })); }}
+              style={{ width: "100%", padding: "6px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11, resize: "vertical" }} />}
+          </div>
+        ))}
+        <Btn v="ghost" sm onClick={() => setEditCadence(d => ({ ...d, steps: [...(d.steps || []), { channel: "email", delay_days: 1, delay_hours: 0 }] }))}>+ Adicionar Step</Btn>
+      </Modal>
+
+      {/* Enroll Cadence Picker */}
+      <Modal open={enrollCadenceId === "pick"} onClose={() => setEnrollCadenceId(null)} title="Escolher Cadência">
+        {cadences.filter(c => c.status === "active" || c.status === "draft").map(c => (
+          <div key={c.id} onClick={() => enrollInCadence(c.id, selectedLeadIds)} style={{ padding: "10px 12px", borderBottom: `1px solid ${T.bor}`, cursor: "pointer", fontSize: 12 }}>
+            <span style={{ fontWeight: 600 }}>{c.name}</span> <span style={{ color: T.tm, fontSize: 10 }}>({c.total_steps} steps)</span>
+          </div>
+        ))}
+      </Modal>
+
+      {/* Cadence Detail Modal */}
+      <Modal open={!!selectedCadence} onClose={() => setSelectedCadence(null)} title={selectedCadence?.name || "Cadência"} wide>
+        {selectedCadence && (
+          <div>
+            <div style={{ marginBottom: 12, fontSize: 12, color: T.t2 }}>{selectedCadence.description}</div>
+            <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>Steps ({selectedCadence.steps?.length || 0})</div>
+            {(selectedCadence.steps || []).map((s, i) => (
+              <div key={i} style={{ display: "flex", gap: 8, padding: "8px 0", borderBottom: `1px solid ${T.bor}`, fontSize: 12, alignItems: "center" }}>
+                <span style={{ fontWeight: 700, color: T.ac }}>#{s.step_order + 1}</span>
+                <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 10, background: T.ac + "22", color: T.ac }}>{s.channel}</span>
+                <span style={{ color: T.tm }}>+{s.delay_days}d {s.delay_hours}h</span>
+                <span style={{ flex: 1, color: T.t2 }}>{s.email_subject || s.whatsapp_message?.substring(0, 60) || s.call_script?.substring(0, 60) || ""}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
+
+      {/* Create Workflow Modal */}
+      <Modal open={showCreateWorkflow} onClose={() => setShowCreateWorkflow(false)} title="Novo Workflow" footer={<Btn v="primary" onClick={async () => {
+        try { await workflowsApi.create(editWorkflow); setShowCreateWorkflow(false); workflowsApi.getAll().then(r => setWorkflows(r.data)); } catch (e) { alert(e.response?.data?.error || "Erro"); }
+      }}>Criar</Btn>}>
+        <div style={{ display: "grid", gap: 8 }}>
+          <input placeholder="Nome do workflow" value={editWorkflow.name} onChange={e => setEditWorkflow(d => ({ ...d, name: e.target.value }))}
+            style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }} />
+          <select value={editWorkflow.trigger_type} onChange={e => setEditWorkflow(d => ({ ...d, trigger_type: e.target.value }))}
+            style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }}>
+            <option value="lead_created">Lead criado</option>
+            <option value="status_changed">Status alterado</option>
+            <option value="score_changed">Score alterado</option>
+            <option value="form_submitted">Formulário enviado</option>
+            <option value="cadence_completed">Cadência concluída</option>
+            <option value="cadence_replied">Cadência respondida</option>
+          </select>
+          <div style={{ fontSize: 11, color: T.tm, marginTop: 8 }}>Ações</div>
+          {(editWorkflow.actions || []).map((a, i) => (
+            <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <select value={a.type} onChange={e => { const acts = [...editWorkflow.actions]; acts[i] = { ...acts[i], type: e.target.value }; setEditWorkflow(d => ({ ...d, actions: acts })); }}
+                style={{ flex: 1, padding: "6px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11 }}>
+                <option value="enroll_cadence">Inscrever em cadência</option>
+                <option value="change_status">Alterar status</option>
+                <option value="assign_owner">Atribuir dono</option>
+                <option value="add_tag">Adicionar tag</option>
+                <option value="send_notification">Enviar notificação</option>
+              </select>
+              {a.type === "enroll_cadence" && <select value={a.config?.cadence_id || ""} onChange={e => { const acts = [...editWorkflow.actions]; acts[i] = { ...acts[i], config: { cadence_id: e.target.value } }; setEditWorkflow(d => ({ ...d, actions: acts })); }}
+                style={{ flex: 1, padding: "6px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11 }}>
+                <option value="">Escolher cadência</option>
+                {cadences.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>}
+              {a.type === "change_status" && <select value={a.config?.status || ""} onChange={e => { const acts = [...editWorkflow.actions]; acts[i] = { ...acts[i], config: { status: e.target.value } }; setEditWorkflow(d => ({ ...d, actions: acts })); }}
+                style={{ flex: 1, padding: "6px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11 }}>
+                {Object.entries(STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>}
+              <button onClick={() => { const acts = [...editWorkflow.actions]; acts.splice(i, 1); setEditWorkflow(d => ({ ...d, actions: acts })); }}
+                style={{ background: "none", border: "none", cursor: "pointer", color: T.er }}>✕</button>
+            </div>
+          ))}
+          <Btn v="ghost" sm onClick={() => setEditWorkflow(d => ({ ...d, actions: [...(d.actions || []), { type: "enroll_cadence", config: {} }] }))}>+ Ação</Btn>
+        </div>
+      </Modal>
+
+      {/* AI Sidebar */}
+      {aiOpen && (
+        <div style={{ position: "fixed", right: 0, top: 0, bottom: 0, width: 360, background: T.card, borderLeft: `1px solid ${T.bor}`, zIndex: 1000, display: "flex", flexDirection: "column" }}>
+          <div style={{ padding: "12px 16px", borderBottom: `1px solid ${T.bor}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontWeight: 700, fontSize: 13 }}>Agente IA</span>
+            <button onClick={() => setAiOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", color: T.tm, fontSize: 16 }}>✕</button>
+          </div>
+          <div style={{ flex: 1, overflow: "auto", padding: 12 }}>
+            {aiMessages.map((m, i) => (
+              <div key={i} style={{ marginBottom: 8, textAlign: m.role === "user" ? "right" : "left" }}>
+                <div style={{ display: "inline-block", maxWidth: "85%", padding: "8px 12px", borderRadius: 12, fontSize: 12, background: m.role === "user" ? T.ac : T.bg2, color: m.role === "user" ? "#fff" : T.txt, whiteSpace: "pre-wrap" }}>
+                  {m.content}
+                </div>
+              </div>
+            ))}
+            {aiLoading && <div style={{ textAlign: "center", color: T.tm, fontSize: 11, padding: 8 }}>Pensando...</div>}
+          </div>
+          <div style={{ padding: 12, borderTop: `1px solid ${T.bor}`, display: "flex", gap: 8 }}>
+            <input value={aiInput} onChange={e => setAiInput(e.target.value)} onKeyDown={e => e.key === "Enter" && sendAiMessage()}
+              placeholder="Pergunte sobre este lead..." style={{ flex: 1, padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }} />
+            <Btn v="primary" sm onClick={sendAiMessage} disabled={aiLoading}>Enviar</Btn>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===== LANDING PAGES PAGE =====
+function LandingPagesPage() {
+  const { user } = useAuth();
+  const T = useTheme();
+  const [pages, setPages] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [editData, setEditData] = useState({ name: "", slug: "", html_content: "", css_content: "", form_fields: [], thank_you_message: "Obrigado! Entraremos em contato.", meta_title: "" });
+
+  useEffect(() => { landingPagesApi.getAll().then(r => setPages(r.data)).catch(() => {}); }, []);
+
+  const createPage = async () => {
+    try {
+      const slug = editData.slug || editData.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      await landingPagesApi.create({ ...editData, slug });
+      setShowCreate(false);
+      setEditData({ name: "", slug: "", html_content: "", css_content: "", form_fields: [], thank_you_message: "Obrigado!", meta_title: "" });
+      landingPagesApi.getAll().then(r => setPages(r.data));
+    } catch (e) { alert(e.response?.data?.error || "Erro"); }
+  };
+
+  const updatePage = async () => {
+    if (!selected) return;
+    try {
+      await landingPagesApi.update(selected.id, editData);
+      landingPagesApi.getAll().then(r => setPages(r.data));
+      setSelected(null);
+    } catch (e) { alert(e.response?.data?.error || "Erro"); }
+  };
+
+  const publishPage = async (id, status) => {
+    try {
+      await landingPagesApi.update(id, { status });
+      landingPagesApi.getAll().then(r => setPages(r.data));
+    } catch { }
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        <Btn v="primary" sm onClick={() => { setEditData({ name: "", slug: "", html_content: "", css_content: "", form_fields: [], thank_you_message: "Obrigado!", meta_title: "" }); setShowCreate(true); }}>+ Landing Page</Btn>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(320px,1fr))", gap: 12 }}>
+        {pages.map(p => (
+          <div key={p.id} style={{ background: T.card, borderRadius: 8, border: `1px solid ${T.bor}`, padding: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+              <h4 style={{ fontSize: 13, fontWeight: 700 }}>{p.name}</h4>
+              <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 10, background: p.status === "published" ? "#22c55e22" : T.tm + "22", color: p.status === "published" ? "#22c55e" : T.tm }}>{p.status === "published" ? "Publicado" : "Rascunho"}</span>
+            </div>
+            <div style={{ fontSize: 11, color: T.tm, marginBottom: 4 }}>/{p.slug}</div>
+            <div style={{ display: "flex", gap: 16, fontSize: 11, color: T.tm, marginBottom: 8 }}>
+              <span>{p.views || 0} visualizações</span>
+              <span>{p.submissions || 0} submissões</span>
+              <span>{p.conversion_rate || 0}% conversão</span>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <Btn sm v="ghost" onClick={() => { setSelected(p); setEditData({ name: p.name, slug: p.slug, html_content: p.html_content || "", css_content: p.css_content || "", form_fields: p.form_fields || [], thank_you_message: p.thank_you_message || "", meta_title: p.meta_title || "" }); }}>Editar</Btn>
+              <Btn sm v={p.status === "published" ? "warning" : "primary"} onClick={() => publishPage(p.id, p.status === "published" ? "draft" : "published")}>{p.status === "published" ? "Despublicar" : "Publicar"}</Btn>
+              <Btn sm v="ghost" onClick={async () => { await landingPagesApi.duplicate(p.id); landingPagesApi.getAll().then(r => setPages(r.data)); }}>Duplicar</Btn>
+              {p.status === "published" && <Btn sm v="ghost" onClick={() => window.open(`/api/landing-pages/public/${p.slug}`, "_blank")}>Preview</Btn>}
+              <Btn sm v="danger" onClick={async () => { if (confirm("Excluir?")) { await landingPagesApi.delete(p.id); setPages(ps => ps.filter(x => x.id !== p.id)); } }}>X</Btn>
+            </div>
+          </div>
+        ))}
+      </div>
+      {pages.length === 0 && <div style={{ padding: 40, textAlign: "center", color: T.tm }}>Nenhuma landing page criada</div>}
+
+      {/* Create Modal */}
+      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Nova Landing Page" wide footer={<Btn v="primary" onClick={createPage}>Criar</Btn>}>
+        <div style={{ display: "grid", gap: 8 }}>
+          <input placeholder="Nome" value={editData.name} onChange={e => setEditData(d => ({ ...d, name: e.target.value }))}
+            style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }} />
+          <input placeholder="Slug (ex: promo-2024)" value={editData.slug} onChange={e => setEditData(d => ({ ...d, slug: e.target.value }))}
+            style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }} />
+          <input placeholder="Mensagem de agradecimento" value={editData.thank_you_message} onChange={e => setEditData(d => ({ ...d, thank_you_message: e.target.value }))}
+            style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }} />
+          <div style={{ fontSize: 11, fontWeight: 600, marginTop: 8 }}>Campos do Formulário</div>
+          {(editData.form_fields || []).map((f, i) => (
+            <div key={i} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <input placeholder="Nome do campo" value={f.name || ""} onChange={e => { const ff = [...editData.form_fields]; ff[i] = { ...ff[i], name: e.target.value }; setEditData(d => ({ ...d, form_fields: ff })); }}
+                style={{ flex: 1, padding: "4px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11 }} />
+              <input placeholder="Label" value={f.label || ""} onChange={e => { const ff = [...editData.form_fields]; ff[i] = { ...ff[i], label: e.target.value }; setEditData(d => ({ ...d, form_fields: ff })); }}
+                style={{ flex: 1, padding: "4px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11 }} />
+              <select value={f.type || "text"} onChange={e => { const ff = [...editData.form_fields]; ff[i] = { ...ff[i], type: e.target.value }; setEditData(d => ({ ...d, form_fields: ff })); }}
+                style={{ padding: "4px 6px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11 }}>
+                <option value="text">Texto</option><option value="email">Email</option><option value="tel">Telefone</option>
+              </select>
+              <label style={{ fontSize: 10 }}><input type="checkbox" checked={f.required || false} onChange={e => { const ff = [...editData.form_fields]; ff[i] = { ...ff[i], required: e.target.checked }; setEditData(d => ({ ...d, form_fields: ff })); }} /> Obrig.</label>
+              <button onClick={() => { const ff = [...editData.form_fields]; ff.splice(i, 1); setEditData(d => ({ ...d, form_fields: ff })); }} style={{ background: "none", border: "none", cursor: "pointer", color: T.er }}>✕</button>
+            </div>
+          ))}
+          <Btn v="ghost" sm onClick={() => setEditData(d => ({ ...d, form_fields: [...(d.form_fields || []), { name: "", label: "", type: "text", required: false }] }))}>+ Campo</Btn>
+          <div style={{ fontSize: 11, fontWeight: 600, marginTop: 8 }}>HTML Personalizado (opcional)</div>
+          <textarea value={editData.html_content} onChange={e => setEditData(d => ({ ...d, html_content: e.target.value }))} rows={6}
+            style={{ width: "100%", padding: 8, background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11, fontFamily: "monospace" }} placeholder="<div>...</div>" />
+          <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4 }}>CSS Personalizado (opcional)</div>
+          <textarea value={editData.css_content} onChange={e => setEditData(d => ({ ...d, css_content: e.target.value }))} rows={4}
+            style={{ width: "100%", padding: 8, background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11, fontFamily: "monospace" }} placeholder=".container { ... }" />
+        </div>
+      </Modal>
+
+      {/* Edit Modal */}
+      <Modal open={!!selected} onClose={() => setSelected(null)} title={`Editar: ${selected?.name || ""}`} wide footer={<Btn v="primary" onClick={updatePage}>Salvar</Btn>}>
+        <div style={{ display: "grid", gap: 8 }}>
+          <input placeholder="Nome" value={editData.name} onChange={e => setEditData(d => ({ ...d, name: e.target.value }))}
+            style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }} />
+          <input placeholder="Slug" value={editData.slug} onChange={e => setEditData(d => ({ ...d, slug: e.target.value }))}
+            style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }} />
+          <input placeholder="Mensagem de agradecimento" value={editData.thank_you_message} onChange={e => setEditData(d => ({ ...d, thank_you_message: e.target.value }))}
+            style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }} />
+          <div style={{ fontSize: 11, fontWeight: 600, marginTop: 8 }}>Campos do Formulário</div>
+          {(editData.form_fields || []).map((f, i) => (
+            <div key={i} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <input placeholder="name" value={f.name || ""} onChange={e => { const ff = [...editData.form_fields]; ff[i] = { ...ff[i], name: e.target.value }; setEditData(d => ({ ...d, form_fields: ff })); }}
+                style={{ flex: 1, padding: "4px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11 }} />
+              <input placeholder="label" value={f.label || ""} onChange={e => { const ff = [...editData.form_fields]; ff[i] = { ...ff[i], label: e.target.value }; setEditData(d => ({ ...d, form_fields: ff })); }}
+                style={{ flex: 1, padding: "4px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11 }} />
+              <button onClick={() => { const ff = [...editData.form_fields]; ff.splice(i, 1); setEditData(d => ({ ...d, form_fields: ff })); }} style={{ background: "none", border: "none", cursor: "pointer", color: T.er }}>✕</button>
+            </div>
+          ))}
+          <Btn v="ghost" sm onClick={() => setEditData(d => ({ ...d, form_fields: [...(d.form_fields || []), { name: "", label: "", type: "text", required: false }] }))}>+ Campo</Btn>
+          <textarea value={editData.html_content} onChange={e => setEditData(d => ({ ...d, html_content: e.target.value }))} rows={8}
+            style={{ width: "100%", padding: 8, background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11, fontFamily: "monospace", marginTop: 8 }} placeholder="HTML..." />
+          <textarea value={editData.css_content} onChange={e => setEditData(d => ({ ...d, css_content: e.target.value }))} rows={4}
+            style={{ width: "100%", padding: 8, background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11, fontFamily: "monospace" }} placeholder="CSS..." />
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+// ===== INBOX PAGE =====
+function InboxPage({ users }) {
+  const { user } = useAuth();
+  const T = useTheme();
+  const [threads, setThreads] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const [unread, setUnread] = useState(0);
+  const [selectedThread, setSelectedThread] = useState(null);
+  const [channelFilter, setChannelFilter] = useState("");
+  const [showCompose, setShowCompose] = useState(false);
+  const [compose, setCompose] = useState({ channel: "email", to_address: "", subject: "", body: "", lead_id: "" });
+
+  useEffect(() => {
+    inboxApi.getThreads().then(r => setThreads(r.data)).catch(() => {});
+    inboxApi.getAll().then(r => { setMessages(r.data.messages || []); setUnread(r.data.unread || 0); }).catch(() => {});
+  }, []);
+
+  const loadThread = async (thread) => {
+    setSelectedThread(thread);
+    try {
+      const { data } = await inboxApi.getAll({ lead_id: thread.lead_id });
+      setMessages(data.messages || []);
+    } catch { }
+  };
+
+  const sendMessage = async () => {
+    try {
+      await inboxApi.send(compose);
+      setShowCompose(false);
+      setCompose({ channel: "email", to_address: "", subject: "", body: "", lead_id: "" });
+      inboxApi.getAll().then(r => { setMessages(r.data.messages || []); setUnread(r.data.unread || 0); });
+      inboxApi.getThreads().then(r => setThreads(r.data));
+    } catch (e) { alert(e.response?.data?.error || "Erro"); }
+  };
+
+  const CHANNEL_ICONS = { email: "✉️", whatsapp: "📱", internal_note: "📝" };
+
+  return (
+    <div style={{ display: "flex", gap: 0, height: "calc(100vh - 160px)", border: `1px solid ${T.bor}`, borderRadius: 8, overflow: "hidden" }}>
+      {/* Threads sidebar */}
+      <div style={{ width: 280, borderRight: `1px solid ${T.bor}`, background: T.card, overflow: "auto" }}>
+        <div style={{ padding: "12px", borderBottom: `1px solid ${T.bor}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ fontWeight: 700, fontSize: 13 }}>Threads</span>
+          <div style={{ display: "flex", gap: 4 }}>
+            <Btn sm v="primary" onClick={() => setShowCompose(true)}>+</Btn>
+            {unread > 0 && <Btn sm v="ghost" onClick={async () => { await inboxApi.markAllRead(); setUnread(0); }}>Ler tudo</Btn>}
+          </div>
+        </div>
+        <div style={{ padding: "8px" }}>
+          <select value={channelFilter} onChange={e => setChannelFilter(e.target.value)}
+            style={{ width: "100%", padding: "4px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11 }}>
+            <option value="">Todos canais</option>
+            <option value="email">Email</option>
+            <option value="whatsapp">WhatsApp</option>
+          </select>
+        </div>
+        {threads.map(t => (
+          <div key={t.lead_id} onClick={() => loadThread(t)}
+            style={{ padding: "10px 12px", borderBottom: `1px solid ${T.bor}`, cursor: "pointer", background: selectedThread?.lead_id === t.lead_id ? T.ac + "0D" : "transparent" }}>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 12, fontWeight: t.unread_count > 0 ? 700 : 500 }}>{t.lead_name || t.lead_email || "Lead"}</span>
+              {t.unread_count > 0 && <span style={{ background: T.ac, color: "#fff", borderRadius: 10, padding: "1px 6px", fontSize: 10 }}>{t.unread_count}</span>}
+            </div>
+            <div style={{ fontSize: 10, color: T.tm }}>{t.lead_company || ""}</div>
+            <div style={{ fontSize: 10, color: T.t2, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.last_message || ""}</div>
+          </div>
+        ))}
+        {threads.length === 0 && <div style={{ padding: 32, textAlign: "center", color: T.tm, fontSize: 11 }}>Nenhuma thread</div>}
+      </div>
+
+      {/* Messages */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", background: T.bg }}>
+        {selectedThread ? (
+          <>
+            <div style={{ padding: "12px 16px", borderBottom: `1px solid ${T.bor}`, background: T.card }}>
+              <span style={{ fontWeight: 700, fontSize: 13 }}>{selectedThread.lead_name || "Thread"}</span>
+              <span style={{ fontSize: 11, color: T.tm, marginLeft: 8 }}>{selectedThread.lead_email}</span>
+            </div>
+            <div style={{ flex: 1, overflow: "auto", padding: 16 }}>
+              {messages.map(m => (
+                <div key={m.id} style={{ marginBottom: 12, display: "flex", flexDirection: "column", alignItems: m.direction === "outbound" ? "flex-end" : "flex-start" }}>
+                  <div style={{ maxWidth: "70%", padding: "10px 14px", borderRadius: 12, background: m.direction === "outbound" ? T.ac : T.card, color: m.direction === "outbound" ? "#fff" : T.txt, border: m.direction === "outbound" ? "none" : `1px solid ${T.bor}` }}>
+                    {m.subject && <div style={{ fontWeight: 600, fontSize: 11, marginBottom: 4 }}>{m.subject}</div>}
+                    <div style={{ fontSize: 12, whiteSpace: "pre-wrap" }}>{m.body}</div>
+                  </div>
+                  <div style={{ fontSize: 9, color: T.tm, marginTop: 2, display: "flex", gap: 4 }}>
+                    <span>{CHANNEL_ICONS[m.channel]}</span>
+                    <span>{new Date(m.created_at).toLocaleString("pt-BR")}</span>
+                    <span>{m.user_name}</span>
+                  </div>
+                </div>
+              ))}
+              {messages.length === 0 && <div style={{ textAlign: "center", color: T.tm, padding: 40 }}>Selecione uma thread</div>}
+            </div>
+            {/* Quick reply */}
+            <div style={{ padding: 12, borderTop: `1px solid ${T.bor}`, background: T.card, display: "flex", gap: 8 }}>
+              <input id="inbox-reply" placeholder="Responder..." style={{ flex: 1, padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }}
+                onKeyDown={async e => {
+                  if (e.key === "Enter" && e.target.value.trim()) {
+                    await inboxApi.send({ lead_id: selectedThread.lead_id, channel: "email", body: e.target.value, to_address: selectedThread.lead_email });
+                    e.target.value = "";
+                    loadThread(selectedThread);
+                  }
+                }} />
+            </div>
+          </>
+        ) : (
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: T.tm, fontSize: 13 }}>Selecione uma conversa</div>
+        )}
+      </div>
+
+      {/* Compose Modal */}
+      <Modal open={showCompose} onClose={() => setShowCompose(false)} title="Nova Mensagem" footer={<Btn v="primary" onClick={sendMessage}>Enviar</Btn>}>
+        <div style={{ display: "grid", gap: 8 }}>
+          <select value={compose.channel} onChange={e => setCompose(d => ({ ...d, channel: e.target.value }))}
+            style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }}>
+            <option value="email">Email</option><option value="whatsapp">WhatsApp</option>
+          </select>
+          <input placeholder="Para (email ou telefone)" value={compose.to_address} onChange={e => setCompose(d => ({ ...d, to_address: e.target.value }))}
+            style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }} />
+          {compose.channel === "email" && <input placeholder="Assunto" value={compose.subject} onChange={e => setCompose(d => ({ ...d, subject: e.target.value }))}
+            style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }} />}
+          <textarea placeholder="Mensagem" value={compose.body} onChange={e => setCompose(d => ({ ...d, body: e.target.value }))} rows={6}
+            style={{ width: "100%", padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12, resize: "vertical" }} />
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
 // ===== APP =====
 const RL = { super_admin: "Super Admin", executivo: "Diretor", diretor: "Gerente", gerente: "Executivo", convenio: "Convênio", parceiro: "Parceiro" };
 const NAV = [
@@ -8059,10 +9013,13 @@ const NAV = [
   { id: "fin", l: "Financeiro", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro"] },
   { id: "mats", l: "Material de Apoio", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro", "convenio"] },
   { id: "notifs", l: "Notificações", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro", "convenio"] },
+  { id: "prospecting", l: "Prospecção", r: ["super_admin", "executivo", "diretor", "gerente"] },
+  { id: "landing", l: "Landing Pages", r: ["super_admin", "executivo"] },
+  { id: "inbox", l: "Caixa de Entrada", r: ["super_admin", "executivo", "diretor", "gerente"] },
   { id: "cfg", l: "Configurações", r: ["super_admin", "executivo", "gerente"] },
 ];
-const TIT = { dash: "Dashboard", kanban: "Funil / Pipeline", negocios: "Negociações", bi: "BI / Analytics", inds: "Minhas Indicações", convenio: "Meu Convênio", parcs: "Parceiros Indicadores", groups: "WhatsApp - Conversas", diretoria: "Visão Diretoria", fin: "Financeiro", mats: "Material de Apoio", notifs: "Central de Notificações", cfg: "Configurações" };
-const EMO = { dash: "📊", kanban: "📋", negocios: "💼", bi: "📈", inds: "🏢", convenio: "🤝", parcs: "👥", groups: "📱", diretoria: "📈", fin: "💰", mats: "📁", notifs: "🔔", cfg: "⚙️" };
+const TIT = { dash: "Dashboard", kanban: "Funil / Pipeline", negocios: "Negociações", bi: "BI / Analytics", inds: "Minhas Indicações", convenio: "Meu Convênio", parcs: "Parceiros Indicadores", groups: "WhatsApp - Conversas", diretoria: "Visão Diretoria", fin: "Financeiro", mats: "Material de Apoio", notifs: "Central de Notificações", cfg: "Configurações", prospecting: "Prospecção", landing: "Landing Pages", inbox: "Caixa de Entrada" };
+const EMO = { dash: "📊", kanban: "📋", negocios: "💼", bi: "📈", inds: "🏢", convenio: "🤝", parcs: "👥", groups: "📱", diretoria: "📈", fin: "💰", mats: "📁", notifs: "🔔", cfg: "⚙️", prospecting: "🎯", landing: "📄", inbox: "📨" };
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -8444,6 +9401,9 @@ export default function App() {
             {pg === "fin" && <FinPage comms={comms} setComms={setComms} nfes={nfes} setNfes={setNfes} users={users} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} />}
             {pg === "mats" && <MatsPage mats={mats} />}
             {pg === "notifs" && <NotifsPage notifs={notifs} setNotifs={setNotifs} users={users} userId={user.id} />}
+            {pg === "prospecting" && <ProspectingPage users={users} hasPerm={hasPerm} />}
+            {pg === "landing" && <LandingPagesPage />}
+            {pg === "inbox" && <InboxPage users={users} />}
             {pg === "cfg" && <CfgPage mats={mats} setMats={setMats} users={users} setUsers={setUsers} inds={inds} travaDias={travaDias} setTravaDias={setTravaDias} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} setCadenceRules={setCadenceRules} myTeams={myTeams} setMyTeams={setMyTeams} />}
           </div>
         </main>

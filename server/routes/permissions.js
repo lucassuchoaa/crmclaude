@@ -7,7 +7,7 @@ const router = express.Router();
 // Default permissions per role (used when no custom config exists)
 const DEFAULT_PERMISSIONS = {
   super_admin: {
-    pages: ["dash", "kanban", "negocios", "bi", "parcs", "groups", "diretoria", "fin", "mats", "notifs", "cfg"],
+    pages: ["dash", "kanban", "negocios", "bi", "parcs", "groups", "diretoria", "fin", "mats", "notifs", "cfg", "prospecting", "landing", "inbox"],
     features: ["criar_usuario", "editar_usuario", "deletar_usuario", "reset_senha",
       "criar_indicacao", "editar_indicacao", "mover_indicacao", "liberar_indicacao",
       "criar_deal", "editar_deal", "mover_deal",
@@ -18,10 +18,11 @@ const DEFAULT_PERMISSIONS = {
       "configurar_integracoes", "gerenciar_equipes", "gerenciar_funis",
       "gerenciar_convenios", "gerenciar_produtos", "gerenciar_propostas", "gerenciar_contratos",
       "ver_auditoria", "ver_bi", "ver_diretoria",
-      "enviar_email", "criar_evento", "gerenciar_permissoes"],
+      "enviar_email", "criar_evento", "gerenciar_permissoes",
+      "gerenciar_prospecting", "criar_cadence", "enviar_cadence", "ver_landing_pages", "usar_ai_agent"],
   },
   executivo: {
-    pages: ["dash", "kanban", "negocios", "bi", "parcs", "groups", "diretoria", "fin", "mats", "notifs", "cfg"],
+    pages: ["dash", "kanban", "negocios", "bi", "parcs", "groups", "diretoria", "fin", "mats", "notifs", "cfg", "prospecting", "landing", "inbox"],
     features: ["criar_usuario", "editar_usuario", "deletar_usuario", "reset_senha",
       "criar_indicacao", "editar_indicacao", "mover_indicacao", "liberar_indicacao",
       "criar_deal", "editar_deal", "mover_deal",
@@ -32,10 +33,11 @@ const DEFAULT_PERMISSIONS = {
       "gerenciar_equipes", "gerenciar_funis",
       "gerenciar_produtos", "gerenciar_propostas", "gerenciar_contratos",
       "ver_auditoria", "ver_bi", "ver_diretoria",
-      "enviar_email", "criar_evento"],
+      "enviar_email", "criar_evento",
+      "gerenciar_prospecting", "criar_cadence", "enviar_cadence", "ver_landing_pages", "usar_ai_agent"],
   },
   diretor: {
-    pages: ["dash", "kanban", "negocios", "bi", "parcs", "groups", "diretoria", "fin", "mats", "notifs"],
+    pages: ["dash", "kanban", "negocios", "bi", "parcs", "groups", "diretoria", "fin", "mats", "notifs", "prospecting", "inbox"],
     features: ["criar_usuario", "editar_usuario",
       "criar_indicacao", "editar_indicacao", "mover_indicacao", "liberar_indicacao",
       "criar_deal", "editar_deal", "mover_deal",
@@ -44,10 +46,11 @@ const DEFAULT_PERMISSIONS = {
       "enviar_notificacao",
       "editar_material", "deletar_material",
       "ver_bi", "ver_diretoria",
-      "enviar_email", "criar_evento"],
+      "enviar_email", "criar_evento",
+      "gerenciar_prospecting", "criar_cadence", "enviar_cadence", "usar_ai_agent"],
   },
   gerente: {
-    pages: ["dash", "kanban", "negocios", "bi", "parcs", "groups", "fin", "mats", "notifs", "cfg"],
+    pages: ["dash", "kanban", "negocios", "bi", "parcs", "groups", "fin", "mats", "notifs", "cfg", "prospecting", "inbox"],
     features: ["criar_usuario",
       "criar_indicacao", "editar_indicacao", "mover_indicacao", "liberar_indicacao",
       "criar_deal", "editar_deal", "mover_deal",
@@ -56,7 +59,8 @@ const DEFAULT_PERMISSIONS = {
       "criar_material",
       "gerenciar_funis",
       "ver_bi",
-      "enviar_email", "criar_evento"],
+      "enviar_email", "criar_evento",
+      "gerenciar_prospecting", "criar_cadence", "enviar_cadence", "usar_ai_agent"],
   },
   parceiro: {
     pages: ["dash", "inds", "fin", "mats", "notifs"],
@@ -83,6 +87,9 @@ const ALL_PAGES = [
   { id: "mats", l: "Material de Apoio" },
   { id: "notifs", l: "Notificações" },
   { id: "cfg", l: "Configurações" },
+  { id: "prospecting", l: "Prospecção" },
+  { id: "landing", l: "Landing Pages" },
+  { id: "inbox", l: "Caixa de Entrada" },
 ];
 
 // All available features grouped
@@ -142,6 +149,13 @@ const ALL_FEATURES = [
   { group: "Comunicação", items: [
     { id: "enviar_email", l: "Enviar email (Google)" },
     { id: "criar_evento", l: "Criar evento (Agenda)" },
+  ]},
+  { group: "Prospecção", items: [
+    { id: "gerenciar_prospecting", l: "Gerenciar prospecção" },
+    { id: "criar_cadence", l: "Criar cadência" },
+    { id: "enviar_cadence", l: "Enviar cadência" },
+    { id: "ver_landing_pages", l: "Ver landing pages" },
+    { id: "usar_ai_agent", l: "Usar agente IA" },
   ]},
 ];
 
