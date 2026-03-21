@@ -3,7 +3,7 @@
  * Provides lead analysis, message drafting, cadence suggestions
  */
 
-const DEFAULT_MODEL = 'claude-sonnet-4-5-20250514';
+const DEFAULT_MODEL = 'claude-3-5-sonnet-20241022';
 
 export async function chatWithAI(messages, context, db) {
   // Try Claude first, fallback to OpenAI
