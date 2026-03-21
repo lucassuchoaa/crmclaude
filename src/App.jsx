@@ -8045,9 +8045,9 @@ function DiretoriaPage() {
 }
 
 // ===== PROSPECTING PAGE =====
-function ProspectingPage({ users, hasPerm }) {
+function ProspectingPage({ users, hasPerm, initialTab }) {
   const { user } = useAuth();
-  const [tab, setTab] = useState("leads");
+  const [tab, setTab] = useState(initialTab || "leads");
   const [leads, setLeads] = useState([]);
   const [totalLeads, setTotalLeads] = useState(0);
   const [leadPage, setLeadPage] = useState(1);
@@ -8216,9 +8216,9 @@ function ProspectingPage({ users, hasPerm }) {
     <div>
       {/* Tabs */}
       <div style={{ display: "flex", gap: 0, borderBottom: `1px solid ${T.bor}`, marginBottom: 16, overflowX: "auto" }}>
-        {["leads", "cadences", "scoring", "segments", "workflows", "dashboard"].map(t => (
+        {["leads", "cadences", "scoring", "segments", "workflows", "dashboard", "landing", "inbox"].map(t => (
           <button key={t} onClick={() => setTab(t)} style={tabStyle(t)}>
-            {t === "leads" ? "Leads" : t === "cadences" ? "Cadências" : t === "scoring" ? "Scoring" : t === "segments" ? "Segmentos" : t === "workflows" ? "Workflows" : "Dashboard"}
+            {t === "leads" ? "Leads" : t === "cadences" ? "Cadências" : t === "scoring" ? "Scoring" : t === "segments" ? "Segmentos" : t === "workflows" ? "Workflows" : t === "dashboard" ? "Dashboard" : t === "landing" ? "📄 Landing Pages" : "📨 Inbox"}
           </button>
         ))}
       </div>
@@ -8708,6 +8708,12 @@ function ProspectingPage({ users, hasPerm }) {
         </div>
       </Modal>
 
+      {/* ──── LANDING PAGES TAB ──── */}
+      {tab === "landing" && <LandingPagesPage />}
+
+      {/* ──── INBOX TAB ──── */}
+      {tab === "inbox" && <InboxPage users={users} />}
+
       {/* AI Sidebar */}
       {aiOpen && (
         <div style={{ position: "fixed", right: 0, top: 0, bottom: 0, width: 360, background: T.card, borderLeft: `1px solid ${T.bor}`, zIndex: 1000, display: "flex", flexDirection: "column" }}>
@@ -9011,8 +9017,6 @@ const NAV = [
   { id: "mats", l: "Material de Apoio", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro", "convenio"] },
   { id: "notifs", l: "Notificações", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro", "convenio"] },
   { id: "prospecting", l: "Prospecção", r: ["super_admin", "executivo", "diretor", "gerente"] },
-  { id: "landing", l: "Landing Pages", r: ["super_admin", "executivo"] },
-  { id: "inbox", l: "Caixa de Entrada", r: ["super_admin", "executivo", "diretor", "gerente"] },
   { id: "cfg", l: "Configurações", r: ["super_admin", "executivo", "gerente"] },
 ];
 const TIT = { dash: "Dashboard", kanban: "Funil / Pipeline", negocios: "Negociações", bi: "BI / Analytics", inds: "Minhas Indicações", convenio: "Meu Convênio", parcs: "Parceiros Indicadores", groups: "WhatsApp - Conversas", diretoria: "Visão Diretoria", fin: "Financeiro", mats: "Material de Apoio", notifs: "Central de Notificações", cfg: "Configurações", prospecting: "Prospecção", landing: "Landing Pages", inbox: "Caixa de Entrada" };
@@ -9399,8 +9403,6 @@ export default function App() {
             {pg === "mats" && <MatsPage mats={mats} />}
             {pg === "notifs" && <NotifsPage notifs={notifs} setNotifs={setNotifs} users={users} userId={user.id} />}
             {pg === "prospecting" && <ProspectingPage users={users} hasPerm={hasPerm} />}
-            {pg === "landing" && <LandingPagesPage />}
-            {pg === "inbox" && <InboxPage users={users} />}
             {pg === "cfg" && <CfgPage mats={mats} setMats={setMats} users={users} setUsers={setUsers} inds={inds} travaDias={travaDias} setTravaDias={setTravaDias} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} setCadenceRules={setCadenceRules} myTeams={myTeams} setMyTeams={setMyTeams} />}
           </div>
         </main>
