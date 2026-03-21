@@ -715,6 +715,54 @@ async function createTables(db) {
     )
   `);
 
+  // ── Migrations (must run BEFORE indexes) ──
+  if (isPg) {
+    const pgSafeAddColumn = async (table, column, definition) => {
+      try {
+        await db.exec(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${definition}`);
+      } catch { /* column already exists */ }
+    };
+
+    await pgSafeAddColumn('indications', 'hubspot_analysis', 'TEXT');
+    await pgSafeAddColumn('users', 'last_login_at', 'TEXT');
+    await pgSafeAddColumn('materials', 'file_data', 'BYTEA');
+    await pgSafeAddColumn('materials', 'file_original_name', 'TEXT');
+    await pgSafeAddColumn('pipelines', 'team_id', 'TEXT');
+    await pgSafeAddColumn('deals', 'loss_reason', 'TEXT');
+    await pgSafeAddColumn('deals', 'num_employees', 'INTEGER');
+    await pgSafeAddColumn('deals', 'product_id', 'TEXT');
+    await pgSafeAddColumn('users', 'uf', 'TEXT');
+  } else {
+    const safeAddColumn = async (table, column, definition) => {
+      try {
+        const cols = db.pragma(`table_info(${table})`).map(c => c.name);
+        if (!cols.includes(column)) {
+          await db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+        }
+      } catch { /* column already exists */ }
+    };
+
+    await safeAddColumn('users', 'empresa', 'TEXT');
+    await safeAddColumn('users', 'tel', 'TEXT');
+    await safeAddColumn('users', 'com_tipo', 'TEXT');
+    await safeAddColumn('users', 'com_val', 'REAL');
+    await safeAddColumn('users', 'cnpj', 'TEXT');
+    await safeAddColumn('users', 'must_change_password', 'INTEGER DEFAULT 0');
+    await safeAddColumn('indication_history', 'txt', 'TEXT');
+    await safeAddColumn('notifications', 'email_sent', 'INTEGER DEFAULT 0');
+    await safeAddColumn('messages', 'source', "TEXT DEFAULT 'crm'");
+    await safeAddColumn('messages', 'whatsapp_message_id', 'TEXT');
+    await safeAddColumn('indications', 'hubspot_analysis', 'TEXT');
+    await safeAddColumn('users', 'last_login_at', 'TEXT');
+    await safeAddColumn('materials', 'file_data', 'BLOB');
+    await safeAddColumn('materials', 'file_original_name', 'TEXT');
+    await safeAddColumn('pipelines', 'team_id', 'TEXT');
+    await safeAddColumn('deals', 'loss_reason', 'TEXT');
+    try { await ddl('ALTER TABLE deals ADD COLUMN num_employees INTEGER'); } catch {}
+    try { await ddl('ALTER TABLE deals ADD COLUMN product_id TEXT'); } catch {}
+    await safeAddColumn('users', 'uf', 'TEXT');
+  }
+
   // ── Indexes ──
   // PG and SQLite both support CREATE INDEX IF NOT EXISTS
   const indexes = `
@@ -776,61 +824,6 @@ async function createTables(db) {
     await db.exec(indexes);
   }
 
-  // ── PostgreSQL migrations ──
-  if (isPg) {
-    const pgSafeAddColumn = async (table, column, definition) => {
-      try {
-        await db.exec(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${definition}`);
-      } catch { /* column already exists */ }
-    };
-
-    await pgSafeAddColumn('indications', 'hubspot_analysis', 'TEXT');
-    await pgSafeAddColumn('users', 'last_login_at', 'TEXT');
-    await pgSafeAddColumn('materials', 'file_data', 'BYTEA');
-    await pgSafeAddColumn('materials', 'file_original_name', 'TEXT');
-    await pgSafeAddColumn('pipelines', 'team_id', 'TEXT');
-    await pgSafeAddColumn('deals', 'loss_reason', 'TEXT');
-    await pgSafeAddColumn('deals', 'num_employees', 'INTEGER');
-    await pgSafeAddColumn('deals', 'product_id', 'TEXT');
-    await pgSafeAddColumn('users', 'uf', 'TEXT');
-  }
-
-  // ── SQLite-only migrations ──
-  if (!isPg) {
-    // Add columns that may not exist in older SQLite databases
-    const safeAddColumn = async (table, column, definition) => {
-      try {
-        const cols = db.pragma(`table_info(${table})`).map(c => c.name);
-        if (!cols.includes(column)) {
-          await db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-        }
-      } catch { /* column already exists */ }
-    };
-
-    await safeAddColumn('users', 'empresa', 'TEXT');
-    await safeAddColumn('users', 'tel', 'TEXT');
-    await safeAddColumn('users', 'com_tipo', 'TEXT');
-    await safeAddColumn('users', 'com_val', 'REAL');
-    await safeAddColumn('users', 'cnpj', 'TEXT');
-    await safeAddColumn('users', 'must_change_password', 'INTEGER DEFAULT 0');
-    await safeAddColumn('indication_history', 'txt', 'TEXT');
-    await safeAddColumn('notifications', 'email_sent', 'INTEGER DEFAULT 0');
-    await safeAddColumn('messages', 'source', "TEXT DEFAULT 'crm'");
-    await safeAddColumn('messages', 'whatsapp_message_id', 'TEXT');
-    await safeAddColumn('indications', 'hubspot_analysis', 'TEXT');
-    await safeAddColumn('users', 'last_login_at', 'TEXT');
-    await safeAddColumn('materials', 'file_data', 'BLOB');
-    await safeAddColumn('materials', 'file_original_name', 'TEXT');
-    await safeAddColumn('pipelines', 'team_id', 'TEXT');
-    await safeAddColumn('deals', 'loss_reason', 'TEXT');
-
-    // Add num_employees and product_id to deals
-    try { await ddl('ALTER TABLE deals ADD COLUMN num_employees INTEGER'); } catch {}
-    try { await ddl('ALTER TABLE deals ADD COLUMN product_id TEXT'); } catch {}
-
-    // Add uf (estado) to users for parceiro location tracking
-    await safeAddColumn('users', 'uf', 'TEXT');
-  }
 }
 
 export default { getDatabase, initializeDatabase };
