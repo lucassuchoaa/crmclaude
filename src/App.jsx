@@ -8062,6 +8062,8 @@ function ProspectingPage({ users, hasPerm, initialTab }) {
   const [selectedCadence, setSelectedCadence] = useState(null);
   const [showCreateCadence, setShowCreateCadence] = useState(false);
   const [scoringRules, setScoringRules] = useState([]);
+  const [editScoringRule, setEditScoringRule] = useState(null);
+  const [editSegment, setEditSegment] = useState(null);
   const [segments, setSegments] = useState([]);
   const [dashData, setDashData] = useState(null);
   const [funnelData, setFunnelData] = useState([]);
@@ -8301,7 +8303,7 @@ function ProspectingPage({ users, hasPerm, initialTab }) {
                 <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 10, background: (TEMP_COLORS[selectedLead.temperature] || T.tm) + "22", color: TEMP_COLORS[selectedLead.temperature] }}>Score: {selectedLead.total_score || 0}</span>
               </div>
               {/* Fields */}
-              {[["Email", selectedLead.email], ["Telefone", selectedLead.phone], ["Empresa", selectedLead.company || selectedLead.razao_social],
+              {[["Email", selectedLead.email], ["Telefone", selectedLead.phone], ["Empresa", selectedLead.company],
                 ["CNPJ", selectedLead.cnpj], ["Cargo", selectedLead.job_title], ["LinkedIn", selectedLead.linkedin_url],
                 ["Fonte", selectedLead.source], ["Dono", selectedLead.owner_name]].map(([label, val]) => val && (
                 <div key={label} style={{ marginBottom: 6 }}>
@@ -8309,6 +8311,22 @@ function ProspectingPage({ users, hasPerm, initialTab }) {
                   <div style={{ fontSize: 12 }}>{val}</div>
                 </div>
               ))}
+              {/* Dados CNPJ Enriquecido */}
+              {selectedLead.razao_social && (
+                <div style={{ marginTop: 8, padding: 10, borderRadius: 6, background: T.bg2, border: `1px solid ${T.bor}` }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: T.ac, textTransform: "uppercase", marginBottom: 6 }}>Dados CNPJ</div>
+                  {[["Razão Social", selectedLead.razao_social], ["Nome Fantasia", selectedLead.nome_fantasia],
+                    ["Capital Social", selectedLead.capital ? `R$ ${Number(selectedLead.capital).toLocaleString("pt-BR")}` : null],
+                    ["Abertura", selectedLead.abertura], ["CNAE", selectedLead.cnae],
+                    ["Endereço", selectedLead.endereco], ["Nº Funcionários", selectedLead.num_funcionarios]
+                  ].map(([label, val]) => val && (
+                    <div key={label} style={{ marginBottom: 4 }}>
+                      <span style={{ fontSize: 10, color: T.tm }}>{label}: </span>
+                      <span style={{ fontSize: 11 }}>{val}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               {selectedLead.tags?.length > 0 && (
                 <div style={{ marginBottom: 8 }}>
                   <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", marginBottom: 4 }}>Tags</div>
@@ -8413,25 +8431,51 @@ function ProspectingPage({ users, hasPerm, initialTab }) {
       )}
 
       {/* ──── SCORING TAB ──── */}
-      {tab === "scoring" && (
+      {tab === "scoring" && (() => {
+        const SCORE_FIELDS = [
+          { id: "company", l: "Empresa" }, { id: "email", l: "Email" }, { id: "phone", l: "Telefone" },
+          { id: "job_title", l: "Cargo" }, { id: "source", l: "Fonte" }, { id: "cnpj", l: "CNPJ" },
+          { id: "razao_social", l: "Razão Social" }, { id: "capital", l: "Capital Social" },
+          { id: "cnae", l: "CNAE" }, { id: "endereco", l: "Endereço" }, { id: "linkedin_url", l: "LinkedIn" },
+          { id: "website", l: "Website" }, { id: "num_funcionarios", l: "Nº Funcionários" },
+          { id: "temperature", l: "Temperatura" }, { id: "status", l: "Status" },
+        ];
+        const SCORE_BEHAVIOR_FIELDS = [
+          { id: "email_sent", l: "Emails enviados" }, { id: "email_opened", l: "Emails abertos" },
+          { id: "whatsapp_sent", l: "WhatsApp enviados" }, { id: "whatsapp_replied", l: "WhatsApp respondidos" },
+          { id: "call", l: "Ligações" }, { id: "note", l: "Notas" }, { id: "form_submit", l: "Formulários" },
+          { id: "cadence_step", l: "Steps de cadência" },
+        ];
+        const OPS = [
+          { id: "equals", l: "Igual a" }, { id: "contains", l: "Contém" },
+          { id: "greater_than", l: "Maior que" }, { id: "less_than", l: "Menor que" },
+          { id: "exists", l: "Existe (preenchido)" },
+        ];
+        const selStyle = { padding: "6px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11 };
+        return (
         <div>
           <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-            <Btn v="primary" sm onClick={async () => {
-              const name = prompt("Nome da regra:");
-              if (!name) return;
-              await leadsApi.createScoringRule({ name, type: "profile", field: "company", operator: "exists", score: 10 });
-              leadsApi.getScoringRules().then(r => setScoringRules(r.data));
-            }}>+ Regra</Btn>
-            <Btn v="ghost" sm onClick={async () => { await leadsApi.recalculateScores(); alert("Scores recalculados"); }}>Recalcular Scores</Btn>
+            <Btn v="primary" sm onClick={() => setEditScoringRule({ name: "", type: "profile", field: "company", operator: "exists", value: "", score: 10 })}>+ Regra</Btn>
+            <Btn v="ghost" sm onClick={async () => { await leadsApi.recalculateScores(); alert("Scores recalculados"); fetchLeads(); }}>Recalcular Scores</Btn>
+          </div>
+          <div style={{ fontSize: 11, color: T.tm, marginBottom: 12, padding: "8px 12px", background: T.bg2, borderRadius: 6 }}>
+            Score total = soma dos pontos de todas as regras ativas. Temperatura: <b style={{ color: "#3b82f6" }}>Frio (&lt;30)</b> | <b style={{ color: "#f59e0b" }}>Morno (30-69)</b> | <b style={{ color: "#ef4444" }}>Quente (≥70)</b>
           </div>
           <div style={{ background: T.card, borderRadius: 8, border: `1px solid ${T.bor}` }}>
             {scoringRules.map(r => (
-              <div key={r.id} style={{ padding: "10px 16px", borderBottom: `1px solid ${T.bor}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 600 }}>{r.name}</div>
-                  <div style={{ fontSize: 11, color: T.tm }}>{r.type} | {r.field} {r.operator} {r.value || ""} = <b>{r.score > 0 ? "+" : ""}{r.score} pts</b></div>
+              <div key={r.id} style={{ padding: "12px 16px", borderBottom: `1px solid ${T.bor}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2 }}>{r.name}</div>
+                  <div style={{ fontSize: 11, color: T.tm }}>
+                    <span style={{ padding: "1px 6px", borderRadius: 4, background: r.type === "profile" ? "#3b82f622" : "#8b5cf622", color: r.type === "profile" ? "#3b82f6" : "#8b5cf6", fontSize: 10, marginRight: 6 }}>{r.type === "profile" ? "Perfil" : "Comportamento"}</span>
+                    {(r.type === "profile" ? SCORE_FIELDS : SCORE_BEHAVIOR_FIELDS).find(f => f.id === r.field)?.l || r.field}
+                    {r.operator !== "exists" && ` ${OPS.find(o => o.id === r.operator)?.l || r.operator} "${r.value}"`}
+                    {r.operator === "exists" && ` está preenchido`}
+                    {" → "}<b style={{ color: r.score > 0 ? "#22c55e" : "#ef4444" }}>{r.score > 0 ? "+" : ""}{r.score} pts</b>
+                  </div>
                 </div>
                 <div style={{ display: "flex", gap: 6 }}>
+                  <Btn sm v="ghost" onClick={() => setEditScoringRule({ ...r, _edit: true })}>Editar</Btn>
                   <Btn sm v={r.is_active ? "primary" : "ghost"} onClick={async () => {
                     await leadsApi.updateScoringRule(r.id, { ...r, is_active: !r.is_active });
                     leadsApi.getScoringRules().then(res => setScoringRules(res.data));
@@ -8440,36 +8484,163 @@ function ProspectingPage({ users, hasPerm, initialTab }) {
                 </div>
               </div>
             ))}
-            {scoringRules.length === 0 && <div style={{ padding: 32, textAlign: "center", color: T.tm }}>Nenhuma regra criada</div>}
+            {scoringRules.length === 0 && <div style={{ padding: 32, textAlign: "center", color: T.tm }}>Nenhuma regra criada. Clique em "+ Regra" para começar.</div>}
           </div>
+          {/* Scoring Rule Modal */}
+          <Modal open={!!editScoringRule} onClose={() => setEditScoringRule(null)} title={editScoringRule?._edit ? "Editar Regra" : "Nova Regra de Scoring"} footer={
+            <Btn v="primary" onClick={async () => {
+              if (!editScoringRule.name) return alert("Nome obrigatório");
+              try {
+                if (editScoringRule._edit) {
+                  await leadsApi.updateScoringRule(editScoringRule.id, editScoringRule);
+                } else {
+                  await leadsApi.createScoringRule(editScoringRule);
+                }
+                leadsApi.getScoringRules().then(r => setScoringRules(r.data));
+                setEditScoringRule(null);
+              } catch (e) { alert(e.response?.data?.error || "Erro"); }
+            }}>Salvar</Btn>
+          }>
+            {editScoringRule && (
+              <div style={{ display: "grid", gap: 10 }}>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>Nome da regra</div>
+                  <input value={editScoringRule.name} onChange={e => setEditScoringRule(d => ({ ...d, name: e.target.value }))} placeholder="Ex: Lead com cargo de diretor"
+                    style={{ width: "100%", padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }} />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>Tipo</div>
+                    <select value={editScoringRule.type} onChange={e => setEditScoringRule(d => ({ ...d, type: e.target.value, field: e.target.value === "profile" ? "company" : "email_sent" }))} style={{ ...selStyle, width: "100%" }}>
+                      <option value="profile">Perfil (campo do lead)</option>
+                      <option value="behavior">Comportamento (atividades)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>Campo</div>
+                    <select value={editScoringRule.field} onChange={e => setEditScoringRule(d => ({ ...d, field: e.target.value }))} style={{ ...selStyle, width: "100%" }}>
+                      {(editScoringRule.type === "profile" ? SCORE_FIELDS : SCORE_BEHAVIOR_FIELDS).map(f => <option key={f.id} value={f.id}>{f.l}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>Operador</div>
+                    <select value={editScoringRule.operator} onChange={e => setEditScoringRule(d => ({ ...d, operator: e.target.value }))} style={{ ...selStyle, width: "100%" }}>
+                      {OPS.map(o => <option key={o.id} value={o.id}>{o.l}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>Valor {editScoringRule.operator === "exists" && <span style={{ color: T.tm }}>(não precisa)</span>}</div>
+                    <input value={editScoringRule.value || ""} onChange={e => setEditScoringRule(d => ({ ...d, value: e.target.value }))} placeholder="Ex: diretor"
+                      disabled={editScoringRule.operator === "exists"}
+                      style={{ width: "100%", padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12, opacity: editScoringRule.operator === "exists" ? 0.5 : 1 }} />
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>Pontuação</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input type="number" value={editScoringRule.score} onChange={e => setEditScoringRule(d => ({ ...d, score: Number(e.target.value) }))}
+                      style={{ width: 100, padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 14, fontWeight: 700, textAlign: "center" }} />
+                    <span style={{ fontSize: 11, color: T.tm }}>pontos (negativo para penalizar)</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </Modal>
         </div>
-      )}
+        );
+      })()}
 
       {/* ──── SEGMENTS TAB ──── */}
-      {tab === "segments" && (
+      {tab === "segments" && (() => {
+        const SEG_FIELDS = [
+          { id: "status", l: "Status" }, { id: "temperature", l: "Temperatura" }, { id: "source", l: "Fonte" },
+          { id: "total_score", l: "Score" }, { id: "company", l: "Empresa" }, { id: "email", l: "Email" },
+          { id: "phone", l: "Telefone" }, { id: "job_title", l: "Cargo" }, { id: "cnpj", l: "CNPJ" },
+          { id: "razao_social", l: "Razão Social" }, { id: "capital", l: "Capital Social" },
+          { id: "cnae", l: "CNAE" }, { id: "owner_id", l: "Dono" }, { id: "name", l: "Nome" },
+        ];
+        const SEG_OPS = [
+          { id: "equals", l: "Igual a" }, { id: "contains", l: "Contém" },
+          { id: "greater_than", l: "Maior que" }, { id: "less_than", l: "Menor que" },
+          { id: "exists", l: "Existe" },
+        ];
+        const selS = { padding: "6px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11 };
+        return (
         <div>
-          <Btn v="primary" sm onClick={async () => {
-            const name = prompt("Nome do segmento:");
-            if (!name) return;
-            await leadsApi.createSegment({ name, filters: [], match_type: "all" });
-            leadsApi.getSegments().then(r => setSegments(r.data));
-          }} style={{ marginBottom: 12 }}>+ Segmento</Btn>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))", gap: 12 }}>
+          <Btn v="primary" sm onClick={() => setEditSegment({ name: "", description: "", filters: [{ field: "status", operator: "equals", value: "" }], match_type: "all" })} style={{ marginBottom: 12 }}>+ Segmento</Btn>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))", gap: 12 }}>
             {segments.map(s => (
               <div key={s.id} style={{ background: T.card, borderRadius: 8, border: `1px solid ${T.bor}`, padding: 16 }}>
                 <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{s.name}</div>
-                {s.description && <div style={{ fontSize: 11, color: T.t2, marginBottom: 8 }}>{s.description}</div>}
-                <div style={{ fontSize: 11, color: T.tm }}>{s.lead_count} leads | {(s.filters || []).length} filtros | {s.is_dynamic ? "Dinâmico" : "Estático"}</div>
+                {s.description && <div style={{ fontSize: 11, color: T.t2, marginBottom: 4 }}>{s.description}</div>}
+                <div style={{ fontSize: 10, color: T.tm, marginBottom: 4 }}>Match: {s.match_type === "all" ? "TODOS os filtros" : "QUALQUER filtro"}</div>
+                {(s.filters || []).map((f, i) => (
+                  <div key={i} style={{ fontSize: 10, color: T.t2, padding: "2px 0" }}>
+                    {SEG_FIELDS.find(x => x.id === f.field)?.l || f.field} {SEG_OPS.find(x => x.id === f.operator)?.l || f.operator} {f.operator !== "exists" ? `"${f.value}"` : ""}
+                  </div>
+                ))}
+                <div style={{ fontSize: 11, color: T.ac, fontWeight: 600, marginTop: 6 }}>{s.lead_count} leads</div>
                 <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                  <Btn sm v="ghost" onClick={async () => { setLeadFilter({ segment_id: s.id }); setTab("leads"); }}>Ver Leads</Btn>
+                  <Btn sm v="ghost" onClick={() => setEditSegment({ ...s, _edit: true })}>Editar</Btn>
+                  <Btn sm v="primary" onClick={async () => { setLeadFilter({ segment_id: s.id }); setTab("leads"); }}>Ver Leads</Btn>
                   <Btn sm v="danger" onClick={async () => { if (confirm("Excluir?")) { await leadsApi.deleteSegment(s.id); setSegments(ss => ss.filter(x => x.id !== s.id)); } }}>X</Btn>
                 </div>
               </div>
             ))}
           </div>
-          {segments.length === 0 && <div style={{ padding: 40, textAlign: "center", color: T.tm }}>Nenhum segmento criado</div>}
+          {segments.length === 0 && <div style={{ padding: 40, textAlign: "center", color: T.tm }}>Nenhum segmento criado. Clique em "+ Segmento" para agrupar leads por filtros.</div>}
+          {/* Segment Modal */}
+          <Modal open={!!editSegment} onClose={() => setEditSegment(null)} title={editSegment?._edit ? "Editar Segmento" : "Novo Segmento"} wide footer={
+            <Btn v="primary" onClick={async () => {
+              if (!editSegment.name) return alert("Nome obrigatório");
+              try {
+                if (editSegment._edit) {
+                  await leadsApi.updateSegment(editSegment.id, { name: editSegment.name, description: editSegment.description, filters: editSegment.filters, match_type: editSegment.match_type });
+                } else {
+                  await leadsApi.createSegment({ name: editSegment.name, description: editSegment.description, filters: editSegment.filters, match_type: editSegment.match_type });
+                }
+                leadsApi.getSegments().then(r => setSegments(r.data));
+                setEditSegment(null);
+              } catch (e) { alert(e.response?.data?.error || "Erro"); }
+            }}>Salvar</Btn>
+          }>
+            {editSegment && (
+              <div style={{ display: "grid", gap: 10 }}>
+                <input value={editSegment.name} onChange={e => setEditSegment(d => ({ ...d, name: e.target.value }))} placeholder="Nome do segmento"
+                  style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }} />
+                <input value={editSegment.description || ""} onChange={e => setEditSegment(d => ({ ...d, description: e.target.value }))} placeholder="Descrição (opcional)"
+                  style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }} />
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>Tipo de match</div>
+                  <select value={editSegment.match_type} onChange={e => setEditSegment(d => ({ ...d, match_type: e.target.value }))} style={{ ...selS, width: "100%" }}>
+                    <option value="all">TODOS os filtros (AND)</option>
+                    <option value="any">QUALQUER filtro (OR)</option>
+                  </select>
+                </div>
+                <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4 }}>Filtros</div>
+                {(editSegment.filters || []).map((f, i) => (
+                  <div key={i} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <select value={f.field} onChange={e => { const ff = [...editSegment.filters]; ff[i] = { ...ff[i], field: e.target.value }; setEditSegment(d => ({ ...d, filters: ff })); }} style={{ ...selS, flex: 1 }}>
+                      {SEG_FIELDS.map(x => <option key={x.id} value={x.id}>{x.l}</option>)}
+                    </select>
+                    <select value={f.operator} onChange={e => { const ff = [...editSegment.filters]; ff[i] = { ...ff[i], operator: e.target.value }; setEditSegment(d => ({ ...d, filters: ff })); }} style={selS}>
+                      {SEG_OPS.map(x => <option key={x.id} value={x.id}>{x.l}</option>)}
+                    </select>
+                    {f.operator !== "exists" && <input value={f.value || ""} onChange={e => { const ff = [...editSegment.filters]; ff[i] = { ...ff[i], value: e.target.value }; setEditSegment(d => ({ ...d, filters: ff })); }}
+                      placeholder="Valor" style={{ flex: 1, padding: "6px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11 }} />}
+                    <button onClick={() => { const ff = [...editSegment.filters]; ff.splice(i, 1); setEditSegment(d => ({ ...d, filters: ff })); }}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: T.er }}>✕</button>
+                  </div>
+                ))}
+                <Btn v="ghost" sm onClick={() => setEditSegment(d => ({ ...d, filters: [...(d.filters || []), { field: "status", operator: "equals", value: "" }] }))}>+ Filtro</Btn>
+              </div>
+            )}
+          </Modal>
         </div>
-      )}
+        );
+      })()}
 
       {/* ──── WORKFLOWS TAB ──── */}
       {tab === "workflows" && (
@@ -8748,7 +8919,15 @@ function LandingPagesPage() {
   const [pages, setPages] = useState([]);
   const [selected, setSelected] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
-  const [editData, setEditData] = useState({ name: "", slug: "", html_content: "", css_content: "", form_fields: [], thank_you_message: "Obrigado! Entraremos em contato.", meta_title: "" });
+  const DEFAULT_LP_FIELDS = [
+    { name: "nome", label: "Nome", type: "text", required: true },
+    { name: "email", label: "Email", type: "email", required: true },
+    { name: "empresa", label: "Empresa", type: "text", required: true },
+    { name: "cnpj", label: "CNPJ", type: "text", required: true, placeholder: "00.000.000/0000-00" },
+    { name: "telefone", label: "Telefone", type: "tel", required: false },
+    { name: "cargo", label: "Cargo", type: "text", required: false },
+  ];
+  const [editData, setEditData] = useState({ name: "", slug: "", html_content: "", css_content: "", form_fields: DEFAULT_LP_FIELDS, thank_you_message: "Obrigado! Entraremos em contato.", meta_title: "" });
 
   useEffect(() => { landingPagesApi.getAll().then(r => setPages(r.data)).catch(() => {}); }, []);
 
@@ -8757,7 +8936,7 @@ function LandingPagesPage() {
       const slug = editData.slug || editData.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
       await landingPagesApi.create({ ...editData, slug });
       setShowCreate(false);
-      setEditData({ name: "", slug: "", html_content: "", css_content: "", form_fields: [], thank_you_message: "Obrigado!", meta_title: "" });
+      setEditData({ name: "", slug: "", html_content: "", css_content: "", form_fields: DEFAULT_LP_FIELDS, thank_you_message: "Obrigado!", meta_title: "" });
       landingPagesApi.getAll().then(r => setPages(r.data));
     } catch (e) { alert(e.response?.data?.error || "Erro"); }
   };
@@ -8781,7 +8960,7 @@ function LandingPagesPage() {
   return (
     <div>
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-        <Btn v="primary" sm onClick={() => { setEditData({ name: "", slug: "", html_content: "", css_content: "", form_fields: [], thank_you_message: "Obrigado!", meta_title: "" }); setShowCreate(true); }}>+ Landing Page</Btn>
+        <Btn v="primary" sm onClick={() => { setEditData({ name: "", slug: "", html_content: "", css_content: "", form_fields: DEFAULT_LP_FIELDS, thank_you_message: "Obrigado!", meta_title: "" }); setShowCreate(true); }}>+ Landing Page</Btn>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(320px,1fr))", gap: 12 }}>
         {pages.map(p => (

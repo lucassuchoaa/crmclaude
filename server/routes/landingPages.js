@@ -4,6 +4,7 @@ import { getDatabase } from '../config/database.js';
 import { authenticate } from '../middleware/auth.js';
 import { calculateScore } from '../services/scoringEngine.js';
 import { triggerWorkflow } from '../services/workflowEngine.js';
+import { lookupCnpj } from '../utils/cnpjLookup.js';
 
 const router = express.Router();
 
@@ -189,6 +190,12 @@ router.post('/public/:slug/submit', async (req, res) => {
     const now = new Date().toISOString();
     const formData = req.body;
 
+    // Validate CNPJ if provided
+    const rawCnpj = (formData.cnpj || '').replace(/\D/g, '');
+    if (formData.cnpj && rawCnpj.length !== 14) {
+      return res.status(400).json({ error: 'CNPJ inválido. Deve conter 14 dígitos.' });
+    }
+
     // Create or find lead
     const email = formData.email;
     const phone = formData.phone || formData.telefone;
@@ -204,6 +211,8 @@ router.post('/public/:slug/submit', async (req, res) => {
         if (formData.name || formData.nome) { updates.push('name = ?'); params.push(formData.name || formData.nome); }
         if (phone) { updates.push('phone = ?'); params.push(phone); }
         if (formData.company || formData.empresa) { updates.push('company = ?'); params.push(formData.company || formData.empresa); }
+        if (rawCnpj) { updates.push('cnpj = ?'); params.push(rawCnpj); }
+        if (formData.cargo || formData.job_title) { updates.push('job_title = ?'); params.push(formData.cargo || formData.job_title); }
         if (updates.length) {
           updates.push('updated_at = ?');
           params.push(now, leadId);
@@ -215,14 +224,46 @@ router.post('/public/:slug/submit', async (req, res) => {
     if (!leadId) {
       leadId = uuidv4();
       await db.prepare(`
-        INSERT INTO leads (id, email, phone, name, company, source, source_id, owner_id, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 'landing_page', ?, ?, ?, ?)
+        INSERT INTO leads (id, email, phone, name, company, cnpj, job_title, source, source_id, owner_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'landing_page', ?, ?, ?, ?)
       `).run(leadId, email || null, phone || null,
         formData.name || formData.nome || null,
         formData.company || formData.empresa || null,
+        rawCnpj || null,
+        formData.cargo || formData.job_title || null,
         lp.id, lp.owner_id, now, now);
 
       await calculateScore(leadId);
+    }
+
+    // Auto-enrich via CNPJ if provided
+    if (rawCnpj) {
+      try {
+        const cnpjData = await lookupCnpj(rawCnpj);
+        if (cnpjData) {
+          const enrichUpdates = [];
+          const enrichParams = [];
+          if (cnpjData.razao_social) { enrichUpdates.push('razao_social = ?'); enrichParams.push(cnpjData.razao_social); }
+          if (cnpjData.nome_fantasia) { enrichUpdates.push('nome_fantasia = ?'); enrichParams.push(cnpjData.nome_fantasia); }
+          if (cnpjData.capital_social) { enrichUpdates.push('capital = ?'); enrichParams.push(cnpjData.capital_social); }
+          if (cnpjData.data_inicio_atividade) { enrichUpdates.push('abertura = ?'); enrichParams.push(cnpjData.data_inicio_atividade); }
+          if (cnpjData.cnae_principal) { enrichUpdates.push('cnae = ?'); enrichParams.push(cnpjData.cnae_principal); }
+          if (cnpjData.endereco?.completo) { enrichUpdates.push('endereco = ?'); enrichParams.push(cnpjData.endereco.completo); }
+          if (cnpjData.porte) { enrichUpdates.push('num_funcionarios = ?'); enrichParams.push(cnpjData.porte === 'MICRO EMPRESA' ? 10 : cnpjData.porte === 'PEQUENO PORTE' ? 50 : cnpjData.porte === 'DEMAIS' ? 100 : null); }
+          if (!formData.company && !formData.empresa && cnpjData.nome_fantasia) {
+            enrichUpdates.push('company = ?'); enrichParams.push(cnpjData.nome_fantasia);
+          }
+          if (enrichUpdates.length) {
+            enrichUpdates.push('updated_at = ?');
+            enrichParams.push(now, leadId);
+            await db.prepare(`UPDATE leads SET ${enrichUpdates.join(', ')} WHERE id = ?`).run(...enrichParams);
+          }
+          // Recalculate score after enrichment
+          await calculateScore(leadId);
+        }
+      } catch (enrichErr) {
+        console.error('Auto-enrich CNPJ error (non-blocking):', enrichErr.message);
+      }
     }
 
     // Record submission
@@ -315,10 +356,26 @@ function buildLandingPageHtml(lp, formFields) {
     </div>`}
   </div>
   <script>
+    // CNPJ mask
+    document.querySelectorAll('input[name="cnpj"]').forEach(el => {
+      el.addEventListener('input', function(e) {
+        let v = e.target.value.replace(/\\D/g, '').slice(0, 14);
+        if (v.length > 12) v = v.replace(/(\\d{2})(\\d{3})(\\d{3})(\\d{4})(\\d{1,2})/, '$1.$2.$3/$4-$5');
+        else if (v.length > 8) v = v.replace(/(\\d{2})(\\d{3})(\\d{3})(\\d{1,4})/, '$1.$2.$3/$4');
+        else if (v.length > 5) v = v.replace(/(\\d{2})(\\d{3})(\\d{1,3})/, '$1.$2.$3');
+        else if (v.length > 2) v = v.replace(/(\\d{2})(\\d{1,3})/, '$1.$2');
+        e.target.value = v;
+      });
+    });
     document.getElementById('lpForm')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const fd = new FormData(e.target);
       const data = Object.fromEntries(fd);
+      // Validate CNPJ if present
+      if (data.cnpj) {
+        const digits = data.cnpj.replace(/\\D/g, '');
+        if (digits.length !== 14) { alert('CNPJ inválido. Deve conter 14 dígitos.'); return; }
+      }
       // Add UTM params
       const url = new URL(window.location.href);
       ['utm_source','utm_medium','utm_campaign'].forEach(k => { if(url.searchParams.get(k)) data[k]=url.searchParams.get(k); });
@@ -327,6 +384,7 @@ function buildLandingPageHtml(lp, formFields) {
           method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)
         });
         const json = await res.json();
+        if (!res.ok) { alert(json.error || 'Erro ao enviar.'); return; }
         if (json.redirect) { window.location.href = json.redirect; return; }
         e.target.style.display='none';
         document.getElementById('thanks').style.display='block';
