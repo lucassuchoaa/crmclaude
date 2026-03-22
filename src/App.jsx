@@ -9061,10 +9061,16 @@ function InboxPage({ users }) {
   const [channelFilter, setChannelFilter] = useState("");
   const [showCompose, setShowCompose] = useState(false);
   const [compose, setCompose] = useState({ channel: "email", to_address: "", subject: "", body: "", lead_id: "" });
+  const [replyChannel, setReplyChannel] = useState("email");
 
-  useEffect(() => {
+  const refreshInbox = () => {
     inboxApi.getThreads().then(r => setThreads(r.data)).catch(() => {});
-    inboxApi.getAll().then(r => { setMessages(r.data.messages || []); setUnread(r.data.unread || 0); }).catch(() => {});
+    inboxApi.getAll().then(r => { setUnread(r.data.unread || 0); }).catch(() => {});
+  };
+  useEffect(() => {
+    refreshInbox();
+    const interval = setInterval(refreshInbox, 30000); // Auto-refresh every 30s
+    return () => clearInterval(interval);
   }, []);
 
   const loadThread = async (thread) => {
@@ -9137,19 +9143,27 @@ function InboxPage({ users }) {
                   </div>
                   <div style={{ fontSize: 9, color: T.tm, marginTop: 2, display: "flex", gap: 4 }}>
                     <span>{CHANNEL_ICONS[m.channel]}</span>
+                    <span>{m.direction === "inbound" ? "⬅ Recebido" : "➡ Enviado"}</span>
                     <span>{new Date(m.created_at).toLocaleString("pt-BR")}</span>
-                    <span>{m.user_name}</span>
+                    {m.direction === "inbound" && m.from_address && <span>de {m.from_address}</span>}
                   </div>
                 </div>
               ))}
               {messages.length === 0 && <div style={{ textAlign: "center", color: T.tm, padding: 40 }}>Selecione uma thread</div>}
             </div>
             {/* Quick reply */}
-            <div style={{ padding: 12, borderTop: `1px solid ${T.bor}`, background: T.card, display: "flex", gap: 8 }}>
-              <input id="inbox-reply" placeholder="Responder..." style={{ flex: 1, padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }}
+            <div style={{ padding: 12, borderTop: `1px solid ${T.bor}`, background: T.card, display: "flex", gap: 8, alignItems: "center" }}>
+              <select value={replyChannel} onChange={e => setReplyChannel(e.target.value)}
+                style={{ padding: "6px 8px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11, width: 100 }}>
+                <option value="email">✉️ Email</option>
+                <option value="whatsapp">📱 WhatsApp</option>
+              </select>
+              <input id="inbox-reply" placeholder={replyChannel === "email" ? "Responder por email..." : "Responder por WhatsApp..."}
+                style={{ flex: 1, padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12 }}
                 onKeyDown={async e => {
                   if (e.key === "Enter" && e.target.value.trim()) {
-                    await inboxApi.send({ lead_id: selectedThread.lead_id, channel: "email", body: e.target.value, to_address: selectedThread.lead_email });
+                    const toAddr = replyChannel === "email" ? selectedThread.lead_email : (messages.find(m => m.from_address && m.direction === "inbound")?.from_address || "");
+                    await inboxApi.send({ lead_id: selectedThread.lead_id, channel: replyChannel, body: e.target.value, to_address: toAddr });
                     e.target.value = "";
                     loadThread(selectedThread);
                   }

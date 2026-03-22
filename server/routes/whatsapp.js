@@ -4,6 +4,7 @@ import { getDatabase } from '../config/database.js';
 import { authenticate } from '../middleware/auth.js';
 import { normalizePhone, jidToPhone } from '../utils/phoneUtils.js';
 import * as evo from '../services/evolutionApi.js';
+import { recordInboxMessage } from '../services/cadenceRunner.js';
 
 const router = express.Router();
 
@@ -215,8 +216,40 @@ router.post('/webhook', async (req, res) => {
         `).all(gerenteId);
 
         const parceiro = parceiros.find(p => normalizePhone(p.tel) === senderPhone);
+
+        // Check if sender is a lead — record in inbox
+        const allLeadsWithPhone = await db.prepare(`SELECT id, phone, owner_id FROM leads WHERE phone IS NOT NULL`).all();
+        const matchedLead = allLeadsWithPhone.find(l => normalizePhone(l.phone) === senderPhone);
+
+        if (matchedLead) {
+          // Record inbound WhatsApp from lead into inbox
+          const ownerId = matchedLead.owner_id || gerenteId;
+          await recordInboxMessage(db, {
+            lead_id: matchedLead.id, user_id: ownerId,
+            channel: 'whatsapp', direction: 'inbound',
+            from_address: senderPhone, to_address: null,
+            subject: null, body: text,
+          });
+          // Record lead activity
+          const now = new Date().toISOString();
+          await db.prepare(`
+            INSERT INTO lead_activities (lead_id, user_id, type, channel, description, created_at)
+            VALUES (?, ?, 'whatsapp_replied', 'whatsapp', ?, ?)
+          `).run(matchedLead.id, ownerId, text.substring(0, 200), now);
+          await db.prepare('UPDATE leads SET last_activity_at = ?, updated_at = ? WHERE id = ?').run(now, now, matchedLead.id);
+
+          // Check if lead is in active cadence — mark as replied
+          const enrollment = await db.prepare(`
+            SELECT id, cadence_id FROM cadence_enrollments WHERE lead_id = ? AND status = 'active'
+          `).get(matchedLead.id);
+          if (enrollment) {
+            await db.prepare(`UPDATE cadence_enrollments SET status = 'replied', updated_at = ? WHERE id = ?`).run(now, enrollment.id);
+            await db.prepare(`UPDATE cadences SET replied_count = replied_count + 1, updated_at = ? WHERE id = ?`).run(now, enrollment.cadence_id);
+          }
+        }
+
         if (!parceiro) {
-          console.warn(`Webhook: no parceiro match for phone ${senderPhone} (gerente ${gerenteId})`);
+          if (!matchedLead) console.warn(`Webhook: no parceiro/lead match for phone ${senderPhone} (gerente ${gerenteId})`);
           continue;
         }
 

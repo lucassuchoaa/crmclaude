@@ -1,4 +1,5 @@
 import cron from 'node-cron';
+import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../config/database.js';
 
 /**
@@ -54,11 +55,32 @@ async function runCadenceSteps(db) {
         const result = await sendCadenceEmail(db, enrollment, step, lead);
         execStatus = result.success ? 'sent' : 'failed';
         errorMessage = result.error || null;
+        // Record in inbox
+        if (result.success) {
+          const subject = replaceVariables(step.email_subject || '', lead);
+          const body = replaceVariables(step.email_body || '', lead);
+          await recordInboxMessage(db, {
+            lead_id: enrollment.lead_id, user_id: enrollment.enrolled_by,
+            channel: 'email', direction: 'outbound',
+            to_address: lead.email, subject, body,
+            cadence_execution_id: null,
+          });
+        }
       } else if (step.channel === 'whatsapp') {
         // Try to send WhatsApp via Evolution API
         const result = await sendCadenceWhatsApp(db, enrollment, step, lead);
         execStatus = result.success ? 'sent' : 'failed';
         errorMessage = result.error || null;
+        // Record in inbox
+        if (result.success) {
+          const message = replaceVariables(step.whatsapp_message || '', lead);
+          await recordInboxMessage(db, {
+            lead_id: enrollment.lead_id, user_id: enrollment.enrolled_by,
+            channel: 'whatsapp', direction: 'outbound',
+            to_address: lead.phone, subject: null, body: message,
+            cadence_execution_id: null,
+          });
+        }
       } else if (step.channel === 'call' || step.channel === 'linkedin') {
         // Create a task/notification for the user
         await createTaskNotification(db, enrollment, step, lead);
@@ -254,6 +276,21 @@ function buildRawEmail(from, to, subject, body) {
 
   return Buffer.from(message).toString('base64url');
 }
+
+async function recordInboxMessage(db, { lead_id, user_id, channel, direction, from_address, to_address, subject, body, cadence_execution_id }) {
+  try {
+    const id = uuidv4();
+    const now = new Date().toISOString();
+    await db.prepare(`
+      INSERT INTO inbox_messages (id, lead_id, user_id, channel, direction, from_address, to_address, subject, body, is_read, cadence_execution_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+    `).run(id, lead_id || null, user_id, channel, direction, from_address || null, to_address || null, subject || null, body || '', now);
+  } catch (err) {
+    console.error('[CadenceRunner] Error recording inbox message:', err.message);
+  }
+}
+
+export { recordInboxMessage };
 
 export function startCadenceRunner(db) {
   // Run every 5 minutes
