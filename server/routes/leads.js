@@ -409,7 +409,7 @@ router.post('/list-generator/import', authenticate, async (req, res) => {
           );
         }
 
-        await calculateScore(id);
+        try { await calculateScore(id); } catch {}
         imported++;
       } catch (rowErr) {
         console.error('Import row error:', rowErr.message, c.cnpj);
