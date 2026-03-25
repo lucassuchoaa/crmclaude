@@ -362,51 +362,65 @@ router.post('/list-generator/import', authenticate, async (req, res) => {
     let skipped = 0;
 
     for (const c of companies) {
-      const cleanCnpj = (c.cnpj || '').replace(/\D/g, '');
-      if (!cleanCnpj) { skipped++; continue; }
+      try {
+        const cleanCnpj = (c.cnpj || '').replace(/\D/g, '');
+        if (!cleanCnpj) { skipped++; continue; }
 
-      // Dedup by CNPJ
-      const existing = await db.prepare('SELECT id FROM leads WHERE cnpj = ?').get(cleanCnpj);
-      if (existing) { skipped++; continue; }
+        // Dedup by CNPJ
+        const existing = await db.prepare('SELECT id FROM leads WHERE cnpj = ?').get(cleanCnpj);
+        if (existing) { skipped++; continue; }
 
-      const id = uuidv4();
-      const endereco = [c.logradouro, c.numero, c.bairro, c.municipio, c.uf].filter(Boolean).join(', ');
+        const id = uuidv4();
+        const endereco = c.endereco_completo || [c.logradouro, c.numero, c.bairro, c.municipio, c.uf].filter(Boolean).join(', ');
 
-      await db.prepare(`
-        INSERT INTO leads (id, name, company, cnpj, email, phone, source, owner_id, status,
-          razao_social, nome_fantasia, capital, abertura, cnae, endereco, uf, municipio, num_funcionarios,
-          tags, custom_fields, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, 'prospecting_list', ?, 'new',
-          ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          '[]', '{}', ?, ?)
-      `).run(
-        id,
-        c.nome_fantasia || c.razao_social || null,
-        c.nome_fantasia || c.razao_social || null,
-        cleanCnpj,
-        c.email || null,
-        c.telefone || null,
-        req.user.id,
-        c.razao_social || null,
-        c.nome_fantasia || null,
-        c.capital_social || null,
-        c.abertura || null,
-        c.cnae || null,
-        endereco || null,
-        c.uf || null,
-        c.municipio || null,
-        c.porte === 'MICRO EMPRESA' ? 10 : c.porte === 'PEQUENO PORTE' ? 50 : c.porte === 'DEMAIS' ? 100 : null,
-        now, now
-      );
+        // Try with uf/municipio columns first, fallback without
+        try {
+          await db.prepare(`
+            INSERT INTO leads (id, name, company, cnpj, email, phone, source, owner_id, status,
+              razao_social, nome_fantasia, capital, abertura, cnae, endereco, uf, municipio, num_funcionarios,
+              tags, custom_fields, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'prospecting_list', ?, 'new',
+              ?, ?, ?, ?, ?, ?, ?, ?, ?,
+              '[]', '{}', ?, ?)
+          `).run(
+            id, c.nome_fantasia || c.razao_social || null, c.nome_fantasia || c.razao_social || null,
+            cleanCnpj, c.email || null, c.telefone || null, req.user.id,
+            c.razao_social || null, c.nome_fantasia || null, c.capital_social ? Number(c.capital_social) : null,
+            c.abertura || null, c.cnae || null, endereco || null, c.uf || null, c.municipio || null,
+            c.porte === 'MICRO EMPRESA' ? 10 : c.porte === 'PEQUENO PORTE' ? 50 : c.porte === 'DEMAIS' ? 100 : null,
+            now, now
+          );
+        } catch (colErr) {
+          // Fallback: without uf/municipio columns (migration may not have run)
+          await db.prepare(`
+            INSERT INTO leads (id, name, company, cnpj, email, phone, source, owner_id, status,
+              razao_social, nome_fantasia, capital, abertura, cnae, endereco, num_funcionarios,
+              tags, custom_fields, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'prospecting_list', ?, 'new',
+              ?, ?, ?, ?, ?, ?, ?,
+              '[]', '{}', ?, ?)
+          `).run(
+            id, c.nome_fantasia || c.razao_social || null, c.nome_fantasia || c.razao_social || null,
+            cleanCnpj, c.email || null, c.telefone || null, req.user.id,
+            c.razao_social || null, c.nome_fantasia || null, c.capital_social ? Number(c.capital_social) : null,
+            c.abertura || null, c.cnae || null, endereco || null,
+            c.porte === 'MICRO EMPRESA' ? 10 : c.porte === 'PEQUENO PORTE' ? 50 : c.porte === 'DEMAIS' ? 100 : null,
+            now, now
+          );
+        }
 
-      await calculateScore(id);
-      imported++;
+        await calculateScore(id);
+        imported++;
+      } catch (rowErr) {
+        console.error('Import row error:', rowErr.message, c.cnpj);
+        skipped++;
+      }
     }
 
     res.json({ imported, skipped, total: companies.length });
   } catch (err) {
     console.error('POST /leads/list-generator/import error:', err);
-    res.status(500).json({ error: 'Erro na importação' });
+    res.status(500).json({ error: 'Erro na importação: ' + (err.message || err) });
   }
 });
 
