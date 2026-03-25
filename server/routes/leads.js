@@ -570,20 +570,41 @@ router.post('/:id/enrich', authenticate, async (req, res) => {
     if (!data) return res.status(404).json({ error: 'CNPJ não encontrado' });
 
     const now = new Date().toISOString();
-    await db.prepare(`
-      UPDATE leads SET razao_social = ?, nome_fantasia = ?, capital = ?, abertura = ?,
-        cnae = ?, endereco = ?, uf = ?, municipio = ?, company = COALESCE(company, ?), updated_at = ? WHERE id = ?
-    `).run(
-      data.razao_social, data.nome_fantasia, data.capital_social, data.data_inicio_atividade,
-      data.cnae_principal, data.endereco?.completo || null,
-      data.endereco?.uf || null, data.endereco?.municipio || null,
-      data.nome_fantasia || data.razao_social, now, req.params.id
-    );
+    const enrichPhone = data.telefone || (data.telefones?.[0]) || null;
+    const enrichEmail = data.email || (data.emails?.[0]) || null;
 
+    try {
+      await db.prepare(`
+        UPDATE leads SET razao_social = ?, nome_fantasia = ?, capital = ?, abertura = ?,
+          cnae = ?, endereco = ?, uf = ?, municipio = ?, num_funcionarios = COALESCE(?, num_funcionarios),
+          phone = COALESCE(phone, ?), email = COALESCE(email, ?),
+          company = COALESCE(company, ?), updated_at = ? WHERE id = ?
+      `).run(
+        data.razao_social, data.nome_fantasia, data.capital_social, data.data_inicio_atividade,
+        data.cnae_principal, data.endereco?.completo || null,
+        data.endereco?.uf || null, data.endereco?.municipio || null,
+        data.num_funcionarios || null, enrichPhone, enrichEmail,
+        data.nome_fantasia || data.razao_social, now, req.params.id
+      );
+    } catch {
+      // Fallback without uf/municipio columns
+      await db.prepare(`
+        UPDATE leads SET razao_social = ?, nome_fantasia = ?, capital = ?, abertura = ?,
+          cnae = ?, endereco = ?, phone = COALESCE(phone, ?), email = COALESCE(email, ?),
+          company = COALESCE(company, ?), updated_at = ? WHERE id = ?
+      `).run(
+        data.razao_social, data.nome_fantasia, data.capital_social, data.data_inicio_atividade,
+        data.cnae_principal, data.endereco?.completo || null,
+        enrichPhone, enrichEmail,
+        data.nome_fantasia || data.razao_social, now, req.params.id
+      );
+    }
+
+    const source = data._source || 'api';
     await db.prepare(`
       INSERT INTO lead_activities (lead_id, user_id, type, description, created_at)
-      VALUES (?, ?, 'note', 'Lead enriquecido via CNPJ', ?)
-    `).run(req.params.id, req.user.id, now);
+      VALUES (?, ?, 'note', ?, ?)
+    `).run(req.params.id, req.user.id, `Lead enriquecido via CNPJ (${source})`, now);
 
     await calculateScore(req.params.id);
 
