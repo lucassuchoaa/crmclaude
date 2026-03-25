@@ -221,8 +221,16 @@ router.get('/list-generator', authenticate, async (req, res) => {
     };
 
     if (cnae) addFilter(` AND l.cnae LIKE ?`, `%${cnae}%`);
-    if (uf) addFilter(` AND l.uf = ?`, uf);
-    if (municipio) addFilter(` AND l.municipio LIKE ?`, `%${municipio}%`);
+    if (uf) {
+      query += ` AND (l.uf = ? OR l.endereco LIKE ?)`;
+      countQuery += ` AND (l.uf = ? OR l.endereco LIKE ?)`;
+      params.push(uf, `%/${uf}`); countParams.push(uf, `%/${uf}`);
+    }
+    if (municipio) {
+      query += ` AND (l.municipio LIKE ? OR l.endereco LIKE ?)`;
+      countQuery += ` AND (l.municipio LIKE ? OR l.endereco LIKE ?)`;
+      params.push(`%${municipio}%`, `%${municipio}%`); countParams.push(`%${municipio}%`, `%${municipio}%`);
+    }
     if (num_func_min) addFilter(` AND l.num_funcionarios >= ?`, Number(num_func_min));
     if (num_func_max) addFilter(` AND l.num_funcionarios <= ?`, Number(num_func_max));
     if (search) {

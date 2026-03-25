@@ -8449,6 +8449,7 @@ function ProspectingPage({ users, hasPerm, initialTab }) {
           } catch (e) { alert(e.response?.data?.error || "Erro"); }
         };
         const selStyle = { padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11 };
+        const UFS = ["AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"];
         const FUNC_RANGES = [
           { label: "1-10", min: 1, max: 10 }, { label: "11-50", min: 11, max: 50 },
           { label: "51-200", min: 51, max: 200 }, { label: "201-500", min: 201, max: 500 },
@@ -8462,26 +8463,24 @@ function ProspectingPage({ users, hasPerm, initialTab }) {
               {/* Segmento / CNAE */}
               <div style={{ flex: "1 1 200px" }}>
                 <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", marginBottom: 4 }}>Segmento (CNAE)</div>
-                <select value={lgFilters.cnae} onChange={e => setLgFilters(f => ({ ...f, cnae: e.target.value }))} style={{ ...selStyle, width: "100%" }}>
-                  <option value="">Todos os segmentos</option>
-                  {lgFilterOptions.cnaes.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
+                <input list="lg-cnaes" placeholder="Ex: Consultoria, Tecnologia..." value={lgFilters.cnae} onChange={e => setLgFilters(f => ({ ...f, cnae: e.target.value }))}
+                  style={{ ...selStyle, width: "100%" }} onKeyDown={e => e.key === "Enter" && searchLg(1)} />
+                <datalist id="lg-cnaes">{lgFilterOptions.cnaes.map(c => <option key={c} value={c} />)}</datalist>
               </div>
               {/* UF */}
               <div style={{ flex: "0 1 120px" }}>
                 <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", marginBottom: 4 }}>Estado (UF)</div>
-                <select value={lgFilters.uf} onChange={e => setLgFilters(f => ({ ...f, uf: e.target.value, municipio: "" }))} style={{ ...selStyle, width: "100%" }}>
+                <select value={lgFilters.uf} onChange={e => setLgFilters(f => ({ ...f, uf: e.target.value }))} style={{ ...selStyle, width: "100%" }}>
                   <option value="">Todos</option>
-                  {lgFilterOptions.ufs.map(u => <option key={u} value={u}>{u}</option>)}
+                  {UFS.map(u => <option key={u} value={u}>{u}</option>)}
                 </select>
               </div>
               {/* Municipio */}
               <div style={{ flex: "1 1 180px" }}>
                 <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", marginBottom: 4 }}>Cidade</div>
-                <select value={lgFilters.municipio} onChange={e => setLgFilters(f => ({ ...f, municipio: e.target.value }))} style={{ ...selStyle, width: "100%" }}>
-                  <option value="">Todas</option>
-                  {(lgFilters.uf ? lgFilterOptions.municipios.filter(() => true) : lgFilterOptions.municipios).map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
+                <input list="lg-municipios" placeholder="Digite a cidade..." value={lgFilters.municipio} onChange={e => setLgFilters(f => ({ ...f, municipio: e.target.value }))}
+                  style={{ ...selStyle, width: "100%" }} onKeyDown={e => e.key === "Enter" && searchLg(1)} />
+                <datalist id="lg-municipios">{lgFilterOptions.municipios.map(m => <option key={m} value={m} />)}</datalist>
               </div>
               {/* Faixa de funcionários */}
               <div style={{ flex: "0 1 160px" }}>
