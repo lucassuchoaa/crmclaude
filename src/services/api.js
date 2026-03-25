@@ -458,7 +458,7 @@ export const leadsApi = {
   // List Generator
   listGenerator: (params) => api.get('/leads/list-generator', { params }),
   listGeneratorFilters: () => api.get('/leads/list-generator/filters'),
-  listGeneratorSearchExternal: (data) => api.post('/leads/list-generator/search-external', data),
+  listGeneratorEnrichCnpjs: (data) => api.post('/leads/list-generator/enrich-cnpjs', data),
   listGeneratorImport: (data) => api.post('/leads/list-generator/import', data),
   // Dashboard
   dashboardOverview: () => api.get('/leads/dashboard/overview'),

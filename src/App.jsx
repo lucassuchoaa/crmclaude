@@ -8088,11 +8088,11 @@ function ProspectingPage({ users, hasPerm, initialTab }) {
   const [lgFilterOptions, setLgFilterOptions] = useState({ ufs: [], municipios: [], cnaes: [] });
   const [lgSelectedIds, setLgSelectedIds] = useState([]);
   const [lgExtResults, setLgExtResults] = useState([]);
-  const [lgExtTotal, setLgExtTotal] = useState(0);
-  const [lgExtPage, setLgExtPage] = useState(1);
+  const [lgExtErrors, setLgExtErrors] = useState([]);
   const [lgExtLoading, setLgExtLoading] = useState(false);
   const [lgExtSelected, setLgExtSelected] = useState([]);
   const [lgImporting, setLgImporting] = useState(false);
+  const [lgCnpjInput, setLgCnpjInput] = useState("");
   // AI chat
   const [aiOpen, setAiOpen] = useState(false);
   const [aiMessages, setAiMessages] = useState([]);
@@ -8416,25 +8416,27 @@ function ProspectingPage({ users, hasPerm, initialTab }) {
       {/* ──── LIST GENERATOR TAB ──── */}
       {tab === "listgen" && (() => {
         const selStyle = { padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11 };
-        const UFS = ["AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"];
+        const UFS_LIST = ["AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"];
         const FUNC_RANGES = [
           { label: "1-10", min: 1, max: 10 }, { label: "11-50", min: 11, max: 50 },
           { label: "51-200", min: 51, max: 200 }, { label: "201-500", min: 201, max: 500 },
           { label: "501-1000", min: 501, max: 1000 }, { label: "1000+", min: 1001, max: "" },
         ];
-        // Busca externa (novas empresas)
-        const searchExternal = async (pg) => {
-          if (!lgFilters.cnae && !lgFilters.uf && !lgFilters.municipio) return alert("Informe pelo menos Segmento, Estado ou Cidade");
+        // Busca externa (enriquecer CNPJs)
+        const enrichCnpjs = async () => {
+          const raw = lgCnpjInput.trim();
+          if (!raw) return alert("Cole uma lista de CNPJs");
+          const cnpjs = raw.split(/[\n,;]+/).map(s => s.trim()).filter(s => s.replace(/\D/g, '').length >= 11);
+          if (cnpjs.length === 0) return alert("Nenhum CNPJ válido encontrado");
+          if (cnpjs.length > 50) return alert("Máximo 50 CNPJs por vez. Você informou " + cnpjs.length);
           setLgExtLoading(true);
+          setLgExtResults([]); setLgExtErrors([]);
           try {
-            const p = pg || 1;
-            const { data } = await leadsApi.listGeneratorSearchExternal({ cnae: lgFilters.cnae, uf: lgFilters.uf, municipio: lgFilters.municipio, page: p });
-            if (data.error) alert(data.error);
+            const { data } = await leadsApi.listGeneratorEnrichCnpjs({ cnpjs });
             setLgExtResults(data.companies || []);
-            setLgExtTotal(data.total || 0);
-            setLgExtPage(p);
+            setLgExtErrors(data.errors || []);
             setLgExtSelected([]);
-          } catch (e) { alert(e.response?.data?.error || "Erro na busca"); } finally { setLgExtLoading(false); }
+          } catch (e) { alert(e.response?.data?.error || "Erro na consulta"); } finally { setLgExtLoading(false); }
         };
         const importSelected = async () => {
           const toImport = lgExtSelected.length > 0 ? lgExtResults.filter((_, i) => lgExtSelected.includes(i)) : lgExtResults;
@@ -8451,16 +8453,28 @@ function ProspectingPage({ users, hasPerm, initialTab }) {
         const exportExtCsv = () => {
           const rows = lgExtSelected.length > 0 ? lgExtResults.filter((_, i) => lgExtSelected.includes(i)) : lgExtResults;
           if (rows.length === 0) return alert("Nenhuma empresa para exportar");
-          const headers = ["Razao Social", "Nome Fantasia", "CNPJ", "Email", "Telefone", "CNAE", "UF", "Municipio", "Porte", "Capital Social", "Situacao"];
+          const headers = ["Razao Social", "Nome Fantasia", "CNPJ", "Email", "Telefone", "CNAE", "UF", "Municipio", "Porte", "Capital Social", "Situacao", "Endereco"];
           const csv = [headers.join(","), ...rows.map(r =>
             [r.razao_social || "", r.nome_fantasia || "", r.cnpj || "", r.email || "", r.telefone || "",
-             (r.cnae || "").replace(/,/g, ";"), r.uf || "", r.municipio || "", r.porte || "", r.capital_social || "", r.situacao || ""
+             (r.cnae || "").replace(/,/g, ";"), r.uf || "", r.municipio || "", r.porte || "", r.capital_social || "", r.situacao || "", (r.endereco_completo || "").replace(/,/g, ";")
             ].map(v => `"${v}"`).join(",")
           )].join("\n");
           const blob = new Blob([csv], { type: "text/csv" });
           const url = URL.createObjectURL(blob);
           const a = document.createElement("a"); a.href = url; a.download = `empresas_prospeccao_${new Date().toISOString().slice(0,10)}.csv`; a.click();
           URL.revokeObjectURL(url);
+        };
+        const handleCsvUpload = (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = (ev) => {
+            const text = ev.target.result;
+            const cnpjs = text.split(/[\n,;]+/).map(s => s.replace(/["\s]/g, '')).filter(s => s.replace(/\D/g, '').length >= 11);
+            setLgCnpjInput(cnpjs.join('\n'));
+          };
+          reader.readAsText(file);
+          e.target.value = '';
         };
         // Busca interna (meus leads)
         const searchLg = async (pg) => {
@@ -8499,36 +8513,150 @@ function ProspectingPage({ users, hasPerm, initialTab }) {
         <div>
           {/* Sub-tabs */}
           <div style={{ display: "flex", gap: 0, borderBottom: `1px solid ${T.bor}`, marginBottom: 16 }}>
-            <button onClick={() => setLgMode("external")} style={modeTab("external")}>Buscar Novas Empresas</button>
-            <button onClick={() => setLgMode("internal")} style={modeTab("internal")}>Meus Leads</button>
+            <button onClick={() => setLgMode("external")} style={modeTab("external")}>Importar Empresas (CNPJ)</button>
+            <button onClick={() => setLgMode("internal")} style={modeTab("internal")}>Filtrar Meus Leads</button>
           </div>
 
-          {/* Filtros compartilhados */}
-          <div style={{ background: T.card, borderRadius: 8, border: `1px solid ${T.bor}`, padding: 16, marginBottom: 16 }}>
-            <h4 style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>
-              {lgMode === "external" ? "Buscar empresas na base da Receita Federal" : "Filtrar leads existentes"}
-            </h4>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-              <div style={{ flex: "1 1 220px" }}>
-                <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", marginBottom: 4 }}>Segmento (CNAE)</div>
-                <input list="lg-cnaes" placeholder="Ex: Consultoria, Tecnologia, Restaurante..." value={lgFilters.cnae} onChange={e => setLgFilters(f => ({ ...f, cnae: e.target.value }))}
-                  style={{ ...selStyle, width: "100%" }} onKeyDown={e => e.key === "Enter" && (lgMode === "external" ? searchExternal(1) : searchLg(1))} />
-                <datalist id="lg-cnaes">{lgFilterOptions.cnaes.map(c => <option key={c} value={c} />)}</datalist>
+          {/* ── MODO EXTERNO: Importar por CNPJ ── */}
+          {lgMode === "external" && (
+            <div>
+              <div style={{ background: T.card, borderRadius: 8, border: `1px solid ${T.bor}`, padding: 16, marginBottom: 16 }}>
+                <h4 style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>Importar empresas por CNPJ</h4>
+                <div style={{ fontSize: 11, color: T.tm, marginBottom: 12 }}>Cole uma lista de CNPJs (um por linha, separados por vírgula ou ponto-e-vírgula) ou faça upload de um CSV. Os dados serão consultados na Receita Federal automaticamente.</div>
+                <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                  <div style={{ flex: 1 }}>
+                    <textarea
+                      placeholder={"Cole os CNPJs aqui (máx. 50 por vez):\n\n00.000.000/0001-91\n11.222.333/0001-44\n55.666.777/0001-88"}
+                      value={lgCnpjInput} onChange={e => setLgCnpjInput(e.target.value)}
+                      rows={8} style={{ width: "100%", padding: 10, background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 12, fontFamily: "monospace", resize: "vertical" }}
+                    />
+                    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                      <Btn v="primary" onClick={enrichCnpjs} disabled={lgExtLoading}>
+                        {lgExtLoading ? "Consultando Receita Federal..." : "Consultar CNPJs"}
+                      </Btn>
+                      <label style={{ ...selStyle, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        Upload CSV
+                        <input type="file" accept=".csv,.txt" onChange={handleCsvUpload} style={{ display: "none" }} />
+                      </label>
+                      {lgCnpjInput && <Btn v="ghost" onClick={() => setLgCnpjInput("")}>Limpar</Btn>}
+                    </div>
+                    {lgCnpjInput && (
+                      <div style={{ fontSize: 10, color: T.tm, marginTop: 4 }}>
+                        {lgCnpjInput.split(/[\n,;]+/).filter(s => s.trim().replace(/\D/g, '').length >= 11).length} CNPJ(s) detectado(s)
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
-              <div style={{ flex: "0 1 120px" }}>
-                <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", marginBottom: 4 }}>Estado (UF)</div>
-                <select value={lgFilters.uf} onChange={e => setLgFilters(f => ({ ...f, uf: e.target.value }))} style={{ ...selStyle, width: "100%" }}>
-                  <option value="">Todos</option>
-                  {UFS.map(u => <option key={u} value={u}>{u}</option>)}
-                </select>
-              </div>
-              <div style={{ flex: "1 1 180px" }}>
-                <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", marginBottom: 4 }}>Cidade</div>
-                <input list="lg-municipios" placeholder="Ex: São Paulo, Recife..." value={lgFilters.municipio} onChange={e => setLgFilters(f => ({ ...f, municipio: e.target.value }))}
-                  style={{ ...selStyle, width: "100%" }} onKeyDown={e => e.key === "Enter" && (lgMode === "external" ? searchExternal(1) : searchLg(1))} />
-                <datalist id="lg-municipios">{lgFilterOptions.municipios.map(m => <option key={m} value={m} />)}</datalist>
-              </div>
-              {lgMode === "internal" && <>
+
+              {/* Resultados do enriquecimento */}
+              {lgExtResults.length > 0 && (
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <div style={{ fontSize: 12, color: T.tm }}>
+                      {lgExtResults.length} empresa{lgExtResults.length !== 1 ? "s" : ""} encontrada{lgExtResults.length !== 1 ? "s" : ""}
+                      {lgExtErrors.length > 0 && <span style={{ color: T.wn }}> | {lgExtErrors.length} erro{lgExtErrors.length !== 1 ? "s" : ""}</span>}
+                      {lgExtSelected.length > 0 && <span style={{ color: T.ac, fontWeight: 600 }}> ({lgExtSelected.length} selecionada{lgExtSelected.length !== 1 ? "s" : ""})</span>}
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <Btn sm v="primary" onClick={importSelected} disabled={lgImporting}>
+                        {lgImporting ? "Importando..." : `Importar ${lgExtSelected.length > 0 ? lgExtSelected.length : lgExtResults.length} como Leads`}
+                      </Btn>
+                      <Btn sm v="ghost" onClick={exportExtCsv}>Exportar CSV</Btn>
+                    </div>
+                  </div>
+                  {lgExtErrors.length > 0 && (
+                    <div style={{ background: T.wn + "11", border: `1px solid ${T.wn}33`, borderRadius: 6, padding: 10, marginBottom: 8, fontSize: 11 }}>
+                      <div style={{ fontWeight: 600, marginBottom: 4, color: T.wn }}>CNPJs com erro:</div>
+                      {lgExtErrors.map((e, i) => (
+                        <div key={i} style={{ color: T.t2 }}>{e.cnpj}: {e.error} {e.name ? `(${e.name})` : ''}</div>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ background: T.card, borderRadius: 8, border: `1px solid ${T.bor}`, overflow: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ background: T.bg2, borderBottom: `1px solid ${T.bor}` }}>
+                          <th style={{ padding: "8px", width: 30 }}>
+                            <input type="checkbox" onChange={e => setLgExtSelected(e.target.checked ? lgExtResults.map((_, i) => i) : [])} checked={lgExtSelected.length === lgExtResults.length && lgExtResults.length > 0} />
+                          </th>
+                          <th style={{ padding: "8px", textAlign: "left" }}>Empresa</th>
+                          <th style={{ padding: "8px", textAlign: "left" }}>CNPJ</th>
+                          <th style={{ padding: "8px", textAlign: "left" }}>CNAE</th>
+                          <th style={{ padding: "8px", textAlign: "left" }}>UF</th>
+                          <th style={{ padding: "8px", textAlign: "left" }}>Cidade</th>
+                          <th style={{ padding: "8px", textAlign: "left" }}>Porte</th>
+                          <th style={{ padding: "8px", textAlign: "center" }}>Situação</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {lgExtResults.map((c, i) => (
+                          <tr key={i} style={{ borderBottom: `1px solid ${T.bor}` }}>
+                            <td style={{ padding: "8px" }}>
+                              <input type="checkbox" checked={lgExtSelected.includes(i)} onChange={e => setLgExtSelected(prev => e.target.checked ? [...prev, i] : prev.filter(x => x !== i))} />
+                            </td>
+                            <td style={{ padding: "8px" }}>
+                              <div style={{ fontWeight: 600 }}>{c.nome_fantasia || c.razao_social || "-"}</div>
+                              {c.nome_fantasia && c.razao_social && c.nome_fantasia !== c.razao_social && <div style={{ fontSize: 10, color: T.tm }}>{c.razao_social}</div>}
+                            </td>
+                            <td style={{ padding: "8px", fontSize: 11, color: T.tm }}>{c.cnpj || "-"}</td>
+                            <td style={{ padding: "8px", fontSize: 11 }}>{c.cnae || "-"}</td>
+                            <td style={{ padding: "8px" }}>{c.uf || "-"}</td>
+                            <td style={{ padding: "8px" }}>{c.municipio || "-"}</td>
+                            <td style={{ padding: "8px", fontSize: 11 }}>{c.porte || "-"}</td>
+                            <td style={{ padding: "8px", textAlign: "center" }}>
+                              <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 10, background: c.situacao === "ATIVA" ? T.ok + "22" : T.er + "22", color: c.situacao === "ATIVA" ? T.ok : T.er }}>{c.situacao || "-"}</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {lgExtResults.length === 0 && !lgExtLoading && !lgCnpjInput && (
+                <div style={{ padding: 40, textAlign: "center", color: T.tm, background: T.card, borderRadius: 8, border: `1px solid ${T.bor}` }}>
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>🏢</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Importe empresas para prospecção</div>
+                  <div style={{ fontSize: 11, maxWidth: 500, margin: "0 auto" }}>Cole uma lista de CNPJs ou faça upload de um arquivo CSV. Os dados serão consultados automaticamente na Receita Federal e você poderá importar como leads.</div>
+                </div>
+              )}
+
+              {lgExtLoading && (
+                <div style={{ padding: 40, textAlign: "center", color: T.tm, background: T.card, borderRadius: 8, border: `1px solid ${T.bor}` }}>
+                  <div style={{ fontSize: 16, marginBottom: 8 }}>⏳</div>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>Consultando Receita Federal...</div>
+                  <div style={{ fontSize: 11, marginTop: 4 }}>Cada CNPJ leva ~2 segundos. Aguarde.</div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── MODO INTERNO: Filtrar Meus Leads ── */}
+          {lgMode === "internal" && (
+            <div style={{ background: T.card, borderRadius: 8, border: `1px solid ${T.bor}`, padding: 16, marginBottom: 16 }}>
+              <h4 style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Filtrar leads existentes</h4>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+                <div style={{ flex: "1 1 200px" }}>
+                  <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", marginBottom: 4 }}>Segmento (CNAE)</div>
+                  <input list="lg-cnaes" placeholder="Ex: Consultoria, Tecnologia..." value={lgFilters.cnae} onChange={e => setLgFilters(f => ({ ...f, cnae: e.target.value }))}
+                    style={{ ...selStyle, width: "100%" }} onKeyDown={e => e.key === "Enter" && searchLg(1)} />
+                  <datalist id="lg-cnaes">{lgFilterOptions.cnaes.map(c => <option key={c} value={c} />)}</datalist>
+                </div>
+                <div style={{ flex: "0 1 120px" }}>
+                  <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", marginBottom: 4 }}>Estado (UF)</div>
+                  <select value={lgFilters.uf} onChange={e => setLgFilters(f => ({ ...f, uf: e.target.value }))} style={{ ...selStyle, width: "100%" }}>
+                    <option value="">Todos</option>
+                    {UFS_LIST.map(u => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                </div>
+                <div style={{ flex: "1 1 180px" }}>
+                  <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", marginBottom: 4 }}>Cidade</div>
+                  <input list="lg-municipios" placeholder="Ex: São Paulo, Recife..." value={lgFilters.municipio} onChange={e => setLgFilters(f => ({ ...f, municipio: e.target.value }))}
+                    style={{ ...selStyle, width: "100%" }} onKeyDown={e => e.key === "Enter" && searchLg(1)} />
+                  <datalist id="lg-municipios">{lgFilterOptions.municipios.map(m => <option key={m} value={m} />)}</datalist>
+                </div>
                 <div style={{ flex: "0 1 160px" }}>
                   <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", marginBottom: 4 }}>Faixa de Funcionários</div>
                   <select value={`${lgFilters.num_func_min}-${lgFilters.num_func_max}`} onChange={e => {
@@ -8545,93 +8673,14 @@ function ProspectingPage({ users, hasPerm, initialTab }) {
                   <input placeholder="Nome, empresa, CNPJ..." value={lgFilters.search} onChange={e => setLgFilters(f => ({ ...f, search: e.target.value }))}
                     style={{ ...selStyle, width: "100%" }} onKeyDown={e => e.key === "Enter" && searchLg(1)} />
                 </div>
-              </>}
-            </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-              {lgMode === "external"
-                ? <Btn v="primary" onClick={() => searchExternal(1)} disabled={lgExtLoading}>{lgExtLoading ? "Buscando..." : "Buscar Empresas"}</Btn>
-                : <Btn v="primary" onClick={() => searchLg(1)} disabled={lgLoading}>{lgLoading ? "Buscando..." : "Filtrar Leads"}</Btn>
-              }
-              <Btn v="ghost" onClick={() => { setLgFilters({ cnae: "", uf: "", municipio: "", num_func_min: "", num_func_max: "", search: "" }); setLgResults([]); setLgTotal(0); setLgExtResults([]); setLgExtTotal(0); }}>Limpar</Btn>
-            </div>
-          </div>
-
-          {/* ── RESULTADOS EXTERNOS ── */}
-          {lgMode === "external" && lgExtResults.length > 0 && (
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <div style={{ fontSize: 12, color: T.tm }}>
-                  {lgExtTotal} empresa{lgExtTotal !== 1 ? "s" : ""} encontrada{lgExtTotal !== 1 ? "s" : ""} na Receita Federal
-                  {lgExtSelected.length > 0 && <span style={{ color: T.ac, fontWeight: 600 }}> ({lgExtSelected.length} selecionada{lgExtSelected.length !== 1 ? "s" : ""})</span>}
-                </div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <Btn sm v="primary" onClick={importSelected} disabled={lgImporting}>
-                    {lgImporting ? "Importando..." : `Importar ${lgExtSelected.length > 0 ? lgExtSelected.length : lgExtResults.length} como Leads`}
-                  </Btn>
-                  <Btn sm v="ghost" onClick={exportExtCsv}>Exportar CSV</Btn>
-                </div>
               </div>
-              <div style={{ background: T.card, borderRadius: 8, border: `1px solid ${T.bor}`, overflow: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                  <thead>
-                    <tr style={{ background: T.bg2, borderBottom: `1px solid ${T.bor}` }}>
-                      <th style={{ padding: "8px", width: 30 }}>
-                        <input type="checkbox" onChange={e => setLgExtSelected(e.target.checked ? lgExtResults.map((_, i) => i) : [])} checked={lgExtSelected.length === lgExtResults.length && lgExtResults.length > 0} />
-                      </th>
-                      <th style={{ padding: "8px", textAlign: "left" }}>Empresa</th>
-                      <th style={{ padding: "8px", textAlign: "left" }}>CNPJ</th>
-                      <th style={{ padding: "8px", textAlign: "left" }}>CNAE</th>
-                      <th style={{ padding: "8px", textAlign: "left" }}>UF</th>
-                      <th style={{ padding: "8px", textAlign: "left" }}>Cidade</th>
-                      <th style={{ padding: "8px", textAlign: "left" }}>Porte</th>
-                      <th style={{ padding: "8px", textAlign: "center" }}>Situação</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {lgExtResults.map((c, i) => (
-                      <tr key={i} style={{ borderBottom: `1px solid ${T.bor}` }}>
-                        <td style={{ padding: "8px" }}>
-                          <input type="checkbox" checked={lgExtSelected.includes(i)} onChange={e => setLgExtSelected(prev => e.target.checked ? [...prev, i] : prev.filter(x => x !== i))} />
-                        </td>
-                        <td style={{ padding: "8px" }}>
-                          <div style={{ fontWeight: 600 }}>{c.nome_fantasia || c.razao_social || "-"}</div>
-                          {c.nome_fantasia && c.razao_social && c.nome_fantasia !== c.razao_social && <div style={{ fontSize: 10, color: T.tm }}>{c.razao_social}</div>}
-                        </td>
-                        <td style={{ padding: "8px", fontSize: 11, color: T.tm }}>{c.cnpj || "-"}</td>
-                        <td style={{ padding: "8px", fontSize: 11 }}>{c.cnae || "-"}</td>
-                        <td style={{ padding: "8px" }}>{c.uf || "-"}</td>
-                        <td style={{ padding: "8px" }}>{c.municipio || "-"}</td>
-                        <td style={{ padding: "8px", fontSize: 11 }}>{c.porte || "-"}</td>
-                        <td style={{ padding: "8px", textAlign: "center" }}>
-                          <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 10, background: c.situacao === "ATIVA" ? T.ok + "22" : T.er + "22", color: c.situacao === "ATIVA" ? T.ok : T.er }}>{c.situacao || "-"}</span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                <Btn v="primary" onClick={() => searchLg(1)} disabled={lgLoading}>{lgLoading ? "Buscando..." : "Filtrar Leads"}</Btn>
+                <Btn v="ghost" onClick={() => { setLgFilters({ cnae: "", uf: "", municipio: "", num_func_min: "", num_func_max: "", search: "" }); setLgResults([]); setLgTotal(0); }}>Limpar</Btn>
               </div>
-              {lgExtTotal > 20 && (
-                <div style={{ display: "flex", gap: 8, marginTop: 8, justifyContent: "center" }}>
-                  <Btn sm v="ghost" disabled={lgExtPage <= 1} onClick={() => searchExternal(lgExtPage - 1)}>Anterior</Btn>
-                  <span style={{ fontSize: 11, color: T.tm, padding: "8px" }}>Pág {lgExtPage}</span>
-                  <Btn sm v="ghost" onClick={() => searchExternal(lgExtPage + 1)}>Próxima</Btn>
-                </div>
-              )}
             </div>
           )}
 
-          {lgMode === "external" && lgExtResults.length === 0 && !lgExtLoading && (
-            <div style={{ padding: 40, textAlign: "center", color: T.tm, background: T.card, borderRadius: 8, border: `1px solid ${T.bor}` }}>
-              <div style={{ fontSize: 32, marginBottom: 8 }}>🏢</div>
-              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Buscar novas empresas para prospecção</div>
-              <div style={{ fontSize: 11 }}>Preencha os filtros acima (segmento, estado ou cidade) e clique em "Buscar Empresas".</div>
-              <div style={{ fontSize: 11, marginTop: 4 }}>Os resultados vêm direto da base da Receita Federal. Selecione e importe como leads!</div>
-            </div>
-          )}
-
-          {lgExtLoading && <div style={{ padding: 40, textAlign: "center", color: T.tm }}>Buscando empresas na Receita Federal...</div>}
-
-          {/* ── RESULTADOS INTERNOS ── */}
           {lgMode === "internal" && lgResults.length > 0 && (
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
@@ -8694,11 +8743,9 @@ function ProspectingPage({ users, hasPerm, initialTab }) {
             </div>
           )}
 
-          {lgMode === "internal" && lgResults.length === 0 && !lgLoading && (
-            <div style={{ padding: 40, textAlign: "center", color: T.tm, background: T.card, borderRadius: 8, border: `1px solid ${T.bor}` }}>
-              <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
-              <div style={{ fontSize: 13, marginBottom: 4 }}>Filtre seus leads existentes</div>
-              <div style={{ fontSize: 11 }}>Use os filtros acima e clique em "Filtrar Leads" para buscar nos leads já cadastrados.</div>
+          {lgMode === "internal" && lgResults.length === 0 && !lgLoading && lgTotal === 0 && (
+            <div style={{ padding: 30, textAlign: "center", color: T.tm, background: T.card, borderRadius: 8, border: `1px solid ${T.bor}` }}>
+              Use os filtros acima e clique em "Filtrar Leads" para buscar nos leads já cadastrados.
             </div>
           )}
 

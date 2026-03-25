@@ -285,67 +285,66 @@ router.get('/list-generator/filters', authenticate, async (req, res) => {
   }
 });
 
-// POST /leads/list-generator/search-external — busca empresas em APIs externas
-router.post('/list-generator/search-external', authenticate, async (req, res) => {
+// POST /leads/list-generator/enrich-cnpjs — enriquece lista de CNPJs via BrasilAPI e importa como leads
+router.post('/list-generator/enrich-cnpjs', authenticate, async (req, res) => {
   try {
-    const { cnae, uf, municipio, page } = req.body;
-    if (!cnae && !uf && !municipio) return res.status(400).json({ error: 'Informe pelo menos um filtro (CNAE, UF ou cidade)' });
-
-    const query = [];
-    if (cnae) {
-      // Remove código numérico se tiver, pega só a descrição para busca
-      const term = cnae.replace(/^\d[\d.\-\/]*\s*-?\s*/, '').trim();
-      query.push({ term: [term || cnae] });
+    const db = getDatabase();
+    const { cnpjs } = req.body;
+    if (!cnpjs || !Array.isArray(cnpjs) || cnpjs.length === 0) {
+      return res.status(400).json({ error: 'Informe uma lista de CNPJs' });
     }
-    const where = {};
-    if (uf) where['estado'] = [uf];
-    if (municipio) where['municipio'] = [municipio.toUpperCase()];
-
-    const payload = {
-      query: query.length ? query : [{ term: ['*'] }],
-      range: {},
-      extras: {},
-      page: Number(page) || 1,
-    };
-    if (Object.keys(where).length) payload.extras = where;
-
-    // CasaDosDados API (consulta pública)
-    const response = await fetch('https://api.casadosdados.com.br/v2/public/cnpj/search', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'User-Agent': 'CRMSomapay/1.0' },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      // Fallback: tentar ReceitaWS busca simples
-      return res.json({ companies: [], total: 0, source: 'none', error: 'API externa indisponível. Tente novamente em alguns segundos.' });
+    if (cnpjs.length > 50) {
+      return res.status(400).json({ error: 'Máximo 50 CNPJs por vez' });
     }
 
-    const data = await response.json();
-    const companies = (data.cnpj || []).map(c => ({
-      cnpj: c.cnpj,
-      razao_social: c.razao_social,
-      nome_fantasia: c.nome_fantasia,
-      cnae: c.cnae_fiscal_descricao || c.cnae_fiscal,
-      cnae_codigo: c.cnae_fiscal,
-      uf: c.uf,
-      municipio: c.municipio,
-      bairro: c.bairro,
-      logradouro: c.logradouro,
-      numero: c.numero,
-      cep: c.cep,
-      abertura: c.data_inicio_atividade,
-      porte: c.porte,
-      capital_social: c.capital_social,
-      situacao: c.descricao_situacao_cadastral,
-      telefone: c.ddd_telefone_1,
-      email: c.email,
-    }));
+    const results = [];
+    const errors = [];
 
-    res.json({ companies, total: data.total || companies.length, page: Number(page) || 1, source: 'casadosdados' });
+    for (const rawCnpj of cnpjs) {
+      const clean = rawCnpj.replace(/\D/g, '');
+      if (clean.length !== 14) { errors.push({ cnpj: rawCnpj, error: 'CNPJ inválido' }); continue; }
+
+      // Check if already exists
+      const existing = await db.prepare('SELECT id, company, razao_social FROM leads WHERE cnpj = ?').get(clean);
+      if (existing) { errors.push({ cnpj: rawCnpj, error: 'Já existe como lead', name: existing.company || existing.razao_social }); continue; }
+
+      try {
+        const data = await lookupCnpj(clean);
+        if (!data) { errors.push({ cnpj: rawCnpj, error: 'Não encontrado' }); continue; }
+
+        results.push({
+          cnpj: clean,
+          razao_social: data.razao_social,
+          nome_fantasia: data.nome_fantasia,
+          cnae: data.cnae_principal,
+          cnae_codigo: data.cnae_codigo,
+          uf: data.endereco?.uf || null,
+          municipio: data.endereco?.municipio || null,
+          bairro: data.endereco?.bairro || null,
+          logradouro: data.endereco?.logradouro || null,
+          numero: data.endereco?.numero || null,
+          endereco_completo: data.endereco?.completo || null,
+          abertura: data.data_inicio_atividade,
+          porte: data.porte,
+          capital_social: data.capital_social,
+          situacao: data.situacao,
+          telefone: data.telefone,
+          email: data.email,
+        });
+      } catch (e) {
+        errors.push({ cnpj: rawCnpj, error: e.message || 'Erro na consulta' });
+      }
+
+      // Rate limit - wait 1.5s between requests to avoid 429
+      if (cnpjs.indexOf(rawCnpj) < cnpjs.length - 1) {
+        await new Promise(r => setTimeout(r, 1500));
+      }
+    }
+
+    res.json({ companies: results, errors, total: results.length });
   } catch (err) {
-    console.error('POST /leads/list-generator/search-external error:', err);
-    res.json({ companies: [], total: 0, source: 'error', error: 'Erro na busca externa: ' + err.message });
+    console.error('POST /leads/list-generator/enrich-cnpjs error:', err);
+    res.status(500).json({ error: 'Erro no enriquecimento' });
   }
 });
 
