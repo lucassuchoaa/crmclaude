@@ -285,6 +285,132 @@ router.get('/list-generator/filters', authenticate, async (req, res) => {
   }
 });
 
+// POST /leads/list-generator/search-external — busca empresas em APIs externas
+router.post('/list-generator/search-external', authenticate, async (req, res) => {
+  try {
+    const { cnae, uf, municipio, page } = req.body;
+    if (!cnae && !uf && !municipio) return res.status(400).json({ error: 'Informe pelo menos um filtro (CNAE, UF ou cidade)' });
+
+    const query = [];
+    if (cnae) {
+      // Remove código numérico se tiver, pega só a descrição para busca
+      const term = cnae.replace(/^\d[\d.\-\/]*\s*-?\s*/, '').trim();
+      query.push({ term: [term || cnae] });
+    }
+    const where = {};
+    if (uf) where['estado'] = [uf];
+    if (municipio) where['municipio'] = [municipio.toUpperCase()];
+
+    const payload = {
+      query: query.length ? query : [{ term: ['*'] }],
+      range: {},
+      extras: {},
+      page: Number(page) || 1,
+    };
+    if (Object.keys(where).length) payload.extras = where;
+
+    // CasaDosDados API (consulta pública)
+    const response = await fetch('https://api.casadosdados.com.br/v2/public/cnpj/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'User-Agent': 'CRMSomapay/1.0' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      // Fallback: tentar ReceitaWS busca simples
+      return res.json({ companies: [], total: 0, source: 'none', error: 'API externa indisponível. Tente novamente em alguns segundos.' });
+    }
+
+    const data = await response.json();
+    const companies = (data.cnpj || []).map(c => ({
+      cnpj: c.cnpj,
+      razao_social: c.razao_social,
+      nome_fantasia: c.nome_fantasia,
+      cnae: c.cnae_fiscal_descricao || c.cnae_fiscal,
+      cnae_codigo: c.cnae_fiscal,
+      uf: c.uf,
+      municipio: c.municipio,
+      bairro: c.bairro,
+      logradouro: c.logradouro,
+      numero: c.numero,
+      cep: c.cep,
+      abertura: c.data_inicio_atividade,
+      porte: c.porte,
+      capital_social: c.capital_social,
+      situacao: c.descricao_situacao_cadastral,
+      telefone: c.ddd_telefone_1,
+      email: c.email,
+    }));
+
+    res.json({ companies, total: data.total || companies.length, page: Number(page) || 1, source: 'casadosdados' });
+  } catch (err) {
+    console.error('POST /leads/list-generator/search-external error:', err);
+    res.json({ companies: [], total: 0, source: 'error', error: 'Erro na busca externa: ' + err.message });
+  }
+});
+
+// POST /leads/list-generator/import — importa empresas externas como leads
+router.post('/list-generator/import', authenticate, async (req, res) => {
+  try {
+    const db = getDatabase();
+    const { companies } = req.body;
+    if (!companies || !Array.isArray(companies) || companies.length === 0) {
+      return res.status(400).json({ error: 'Nenhuma empresa para importar' });
+    }
+
+    const now = new Date().toISOString();
+    let imported = 0;
+    let skipped = 0;
+
+    for (const c of companies) {
+      const cleanCnpj = (c.cnpj || '').replace(/\D/g, '');
+      if (!cleanCnpj) { skipped++; continue; }
+
+      // Dedup by CNPJ
+      const existing = await db.prepare('SELECT id FROM leads WHERE cnpj = ?').get(cleanCnpj);
+      if (existing) { skipped++; continue; }
+
+      const id = uuidv4();
+      const endereco = [c.logradouro, c.numero, c.bairro, c.municipio, c.uf].filter(Boolean).join(', ');
+
+      await db.prepare(`
+        INSERT INTO leads (id, name, company, cnpj, email, phone, source, owner_id, status,
+          razao_social, nome_fantasia, capital, abertura, cnae, endereco, uf, municipio, num_funcionarios,
+          tags, custom_fields, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'prospecting_list', ?, 'new',
+          ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          '[]', '{}', ?, ?)
+      `).run(
+        id,
+        c.nome_fantasia || c.razao_social || null,
+        c.nome_fantasia || c.razao_social || null,
+        cleanCnpj,
+        c.email || null,
+        c.telefone || null,
+        req.user.id,
+        c.razao_social || null,
+        c.nome_fantasia || null,
+        c.capital_social || null,
+        c.abertura || null,
+        c.cnae || null,
+        endereco || null,
+        c.uf || null,
+        c.municipio || null,
+        c.porte === 'MICRO EMPRESA' ? 10 : c.porte === 'PEQUENO PORTE' ? 50 : c.porte === 'DEMAIS' ? 100 : null,
+        now, now
+      );
+
+      await calculateScore(id);
+      imported++;
+    }
+
+    res.json({ imported, skipped, total: companies.length });
+  } catch (err) {
+    console.error('POST /leads/list-generator/import error:', err);
+    res.status(500).json({ error: 'Erro na importação' });
+  }
+});
+
 // GET /leads/:id — detail with activities
 router.get('/:id', authenticate, async (req, res) => {
   try {
