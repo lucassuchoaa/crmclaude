@@ -455,6 +455,9 @@ export const leadsApi = {
   updateSegment: (id, data) => api.put(`/leads/segments/${id}`, data),
   deleteSegment: (id) => api.delete(`/leads/segments/${id}`),
   getSegmentLeads: (id) => api.get(`/leads/segments/${id}/leads`),
+  // List Generator
+  listGenerator: (params) => api.get('/leads/list-generator', { params }),
+  listGeneratorFilters: () => api.get('/leads/list-generator/filters'),
   // Dashboard
   dashboardOverview: () => api.get('/leads/dashboard/overview'),
   dashboardFunnel: () => api.get('/leads/dashboard/funnel'),

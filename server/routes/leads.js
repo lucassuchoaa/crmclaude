@@ -198,6 +198,85 @@ router.get('/dashboard/team-performance', authenticate, async (req, res) => {
   }
 });
 
+// ══════════════════════════════════════════════
+// GERADOR DE LISTAS
+// ══════════════════════════════════════════════
+
+// GET /leads/list-generator — busca leads com filtros avançados para prospecção
+router.get('/list-generator', authenticate, async (req, res) => {
+  try {
+    const db = getDatabase();
+    const { cnae, num_func_min, num_func_max, uf, municipio, search, page, limit: lim } = req.query;
+    const limit = Math.min(Number(lim) || 50, 200);
+    const offset = ((Number(page) || 1) - 1) * limit;
+
+    let query = `SELECT l.*, u.name as owner_name FROM leads l LEFT JOIN users u ON l.owner_id = u.id WHERE 1=1`;
+    let countQuery = `SELECT COUNT(*) as total FROM leads l WHERE 1=1`;
+    const params = [];
+    const countParams = [];
+
+    const addFilter = (cond, ...vals) => {
+      query += cond; countQuery += cond;
+      params.push(...vals); countParams.push(...vals);
+    };
+
+    if (cnae) addFilter(` AND l.cnae LIKE ?`, `%${cnae}%`);
+    if (uf) addFilter(` AND l.uf = ?`, uf);
+    if (municipio) addFilter(` AND l.municipio LIKE ?`, `%${municipio}%`);
+    if (num_func_min) addFilter(` AND l.num_funcionarios >= ?`, Number(num_func_min));
+    if (num_func_max) addFilter(` AND l.num_funcionarios <= ?`, Number(num_func_max));
+    if (search) {
+      const s = `%${search}%`;
+      query += ` AND (l.name LIKE ? OR l.company LIKE ? OR l.razao_social LIKE ? OR l.cnpj LIKE ?)`;
+      countQuery += ` AND (l.name LIKE ? OR l.company LIKE ? OR l.razao_social LIKE ? OR l.cnpj LIKE ?)`;
+      params.push(s, s, s, s); countParams.push(s, s, s, s);
+    }
+
+    // Owner filter
+    query = addOwnerFilter(query, params, req.user);
+    countQuery = addOwnerFilter(countQuery, countParams, req.user);
+
+    query += ` ORDER BY l.created_at DESC LIMIT ? OFFSET ?`;
+    params.push(limit, offset);
+
+    const [rows, countRow] = await Promise.all([
+      db.prepare(query).all(...params),
+      db.prepare(countQuery).get(...countParams),
+    ]);
+
+    const leads = rows.map(r => ({
+      ...r,
+      tags: JSON.parse(r.tags || '[]'),
+      custom_fields: JSON.parse(r.custom_fields || '{}'),
+    }));
+
+    res.json({ leads, total: Number(countRow?.total || 0), page: Number(page) || 1, limit });
+  } catch (err) {
+    console.error('GET /leads/list-generator error:', err);
+    res.status(500).json({ error: 'Erro interno' });
+  }
+});
+
+// GET /leads/list-generator/filters — retorna valores únicos para filtros
+router.get('/list-generator/filters', authenticate, async (req, res) => {
+  try {
+    const db = getDatabase();
+    const [ufs, municipios, cnaes] = await Promise.all([
+      db.prepare("SELECT DISTINCT uf FROM leads WHERE uf IS NOT NULL AND uf != '' ORDER BY uf").all(),
+      db.prepare("SELECT DISTINCT municipio FROM leads WHERE municipio IS NOT NULL AND municipio != '' ORDER BY municipio").all(),
+      db.prepare("SELECT DISTINCT cnae FROM leads WHERE cnae IS NOT NULL AND cnae != '' ORDER BY cnae").all(),
+    ]);
+    res.json({
+      ufs: ufs.map(r => r.uf),
+      municipios: municipios.map(r => r.municipio),
+      cnaes: cnaes.map(r => r.cnae),
+    });
+  } catch (err) {
+    console.error('GET /leads/list-generator/filters error:', err);
+    res.status(500).json({ error: 'Erro interno' });
+  }
+});
+
 // GET /leads/:id — detail with activities
 router.get('/:id', authenticate, async (req, res) => {
   try {
@@ -346,10 +425,11 @@ router.post('/:id/enrich', authenticate, async (req, res) => {
     const now = new Date().toISOString();
     await db.prepare(`
       UPDATE leads SET razao_social = ?, nome_fantasia = ?, capital = ?, abertura = ?,
-        cnae = ?, endereco = ?, company = COALESCE(company, ?), updated_at = ? WHERE id = ?
+        cnae = ?, endereco = ?, uf = ?, municipio = ?, company = COALESCE(company, ?), updated_at = ? WHERE id = ?
     `).run(
       data.razao_social, data.nome_fantasia, data.capital_social, data.data_inicio_atividade,
       data.cnae_principal, data.endereco?.completo || null,
+      data.endereco?.uf || null, data.endereco?.municipio || null,
       data.nome_fantasia || data.razao_social, now, req.params.id
     );
 

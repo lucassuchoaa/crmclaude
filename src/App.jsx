@@ -8078,6 +8078,14 @@ function ProspectingPage({ users, hasPerm, initialTab }) {
   const [pipelines, setPipelines] = useState([]);
   const [pipelineStages, setPipelineStages] = useState([]);
   const [convertData, setConvertData] = useState({ pipeline_id: "", stage_id: "", value: 0, title: "" });
+  // List generator
+  const [lgResults, setLgResults] = useState([]);
+  const [lgTotal, setLgTotal] = useState(0);
+  const [lgPage, setLgPage] = useState(1);
+  const [lgLoading, setLgLoading] = useState(false);
+  const [lgFilters, setLgFilters] = useState({ cnae: "", uf: "", municipio: "", num_func_min: "", num_func_max: "", search: "" });
+  const [lgFilterOptions, setLgFilterOptions] = useState({ ufs: [], municipios: [], cnaes: [] });
+  const [lgSelectedIds, setLgSelectedIds] = useState([]);
   // AI chat
   const [aiOpen, setAiOpen] = useState(false);
   const [aiMessages, setAiMessages] = useState([]);
@@ -8106,6 +8114,10 @@ function ProspectingPage({ users, hasPerm, initialTab }) {
       leadsApi.dashboardFunnel().then(r => setFunnelData(r.data)).catch(() => {});
     }
     if (tab === "workflows") workflowsApi.getAll().then(r => setWorkflows(r.data)).catch(() => {});
+    if (tab === "listgen") {
+      leadsApi.listGeneratorFilters().then(r => setLgFilterOptions(r.data)).catch(() => {});
+      if (cadences.length === 0) cadencesApi.getAll().then(r => setCadences(r.data)).catch(() => {});
+    }
   }, [tab]);
 
   const selectLead = async (lead) => {
@@ -8218,9 +8230,9 @@ function ProspectingPage({ users, hasPerm, initialTab }) {
     <div>
       {/* Tabs */}
       <div style={{ display: "flex", gap: 0, borderBottom: `1px solid ${T.bor}`, marginBottom: 16, overflowX: "auto" }}>
-        {["leads", "cadences", "scoring", "segments", "workflows", "dashboard", "landing", "inbox"].map(t => (
+        {["leads", "listgen", "cadences", "scoring", "segments", "workflows", "dashboard", "landing", "inbox"].map(t => (
           <button key={t} onClick={() => setTab(t)} style={tabStyle(t)}>
-            {t === "leads" ? "Leads" : t === "cadences" ? "Cadências" : t === "scoring" ? "Scoring" : t === "segments" ? "Segmentos" : t === "workflows" ? "Workflows" : t === "dashboard" ? "Dashboard" : t === "landing" ? "📄 Landing Pages" : "📨 Inbox"}
+            {t === "leads" ? "Leads" : t === "listgen" ? "Gerador de Listas" : t === "cadences" ? "Cadências" : t === "scoring" ? "Scoring" : t === "segments" ? "Segmentos" : t === "workflows" ? "Workflows" : t === "dashboard" ? "Dashboard" : t === "landing" ? "📄 Landing Pages" : "📨 Inbox"}
           </button>
         ))}
       </div>
@@ -8393,6 +8405,185 @@ function ProspectingPage({ users, hasPerm, initialTab }) {
           )}
         </div>
       )}
+
+      {/* ──── LIST GENERATOR TAB ──── */}
+      {tab === "listgen" && (() => {
+        const searchLg = async (pg) => {
+          setLgLoading(true);
+          try {
+            const p = pg || lgPage;
+            const params = { page: p, limit: 50 };
+            if (lgFilters.cnae) params.cnae = lgFilters.cnae;
+            if (lgFilters.uf) params.uf = lgFilters.uf;
+            if (lgFilters.municipio) params.municipio = lgFilters.municipio;
+            if (lgFilters.num_func_min) params.num_func_min = lgFilters.num_func_min;
+            if (lgFilters.num_func_max) params.num_func_max = lgFilters.num_func_max;
+            if (lgFilters.search) params.search = lgFilters.search;
+            const { data } = await leadsApi.listGenerator(params);
+            setLgResults(data.leads || []);
+            setLgTotal(data.total || 0);
+            setLgPage(p);
+          } catch { } finally { setLgLoading(false); }
+        };
+        const exportCsv = () => {
+          const rows = lgSelectedIds.length > 0 ? lgResults.filter(l => lgSelectedIds.includes(l.id)) : lgResults;
+          if (rows.length === 0) return alert("Nenhum lead para exportar");
+          const headers = ["Nome", "Empresa", "CNPJ", "Email", "Telefone", "CNAE", "UF", "Municipio", "Funcionarios", "Score"];
+          const csv = [headers.join(","), ...rows.map(r =>
+            [r.name || "", r.company || r.razao_social || "", r.cnpj || "", r.email || "", r.phone || "",
+             (r.cnae || "").replace(/,/g, ";"), r.uf || "", r.municipio || "", r.num_funcionarios || "", r.total_score || 0
+            ].map(v => `"${v}"`).join(",")
+          )].join("\n");
+          const blob = new Blob([csv], { type: "text/csv" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a"); a.href = url; a.download = `lista_prospeccao_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+          URL.revokeObjectURL(url);
+        };
+        const enrollSelected = async (cadenceId) => {
+          const ids = lgSelectedIds.length > 0 ? lgSelectedIds : lgResults.map(l => l.id);
+          if (ids.length === 0) return;
+          try {
+            await cadencesApi.enroll(cadenceId, ids);
+            alert(`${ids.length} leads inscritos na cadência!`);
+            setLgSelectedIds([]);
+          } catch (e) { alert(e.response?.data?.error || "Erro"); }
+        };
+        const selStyle = { padding: "8px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontSize: 11 };
+        const FUNC_RANGES = [
+          { label: "1-10", min: 1, max: 10 }, { label: "11-50", min: 11, max: 50 },
+          { label: "51-200", min: 51, max: 200 }, { label: "201-500", min: 201, max: 500 },
+          { label: "501-1000", min: 501, max: 1000 }, { label: "1000+", min: 1001, max: "" },
+        ];
+        return (
+        <div>
+          <div style={{ background: T.card, borderRadius: 8, border: `1px solid ${T.bor}`, padding: 16, marginBottom: 16 }}>
+            <h4 style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Filtros de Prospecção</h4>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+              {/* Segmento / CNAE */}
+              <div style={{ flex: "1 1 200px" }}>
+                <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", marginBottom: 4 }}>Segmento (CNAE)</div>
+                <select value={lgFilters.cnae} onChange={e => setLgFilters(f => ({ ...f, cnae: e.target.value }))} style={{ ...selStyle, width: "100%" }}>
+                  <option value="">Todos os segmentos</option>
+                  {lgFilterOptions.cnaes.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              {/* UF */}
+              <div style={{ flex: "0 1 120px" }}>
+                <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", marginBottom: 4 }}>Estado (UF)</div>
+                <select value={lgFilters.uf} onChange={e => setLgFilters(f => ({ ...f, uf: e.target.value, municipio: "" }))} style={{ ...selStyle, width: "100%" }}>
+                  <option value="">Todos</option>
+                  {lgFilterOptions.ufs.map(u => <option key={u} value={u}>{u}</option>)}
+                </select>
+              </div>
+              {/* Municipio */}
+              <div style={{ flex: "1 1 180px" }}>
+                <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", marginBottom: 4 }}>Cidade</div>
+                <select value={lgFilters.municipio} onChange={e => setLgFilters(f => ({ ...f, municipio: e.target.value }))} style={{ ...selStyle, width: "100%" }}>
+                  <option value="">Todas</option>
+                  {(lgFilters.uf ? lgFilterOptions.municipios.filter(() => true) : lgFilterOptions.municipios).map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+              {/* Faixa de funcionários */}
+              <div style={{ flex: "0 1 160px" }}>
+                <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", marginBottom: 4 }}>Faixa de Funcionários</div>
+                <select value={`${lgFilters.num_func_min}-${lgFilters.num_func_max}`} onChange={e => {
+                  if (e.target.value === "-") { setLgFilters(f => ({ ...f, num_func_min: "", num_func_max: "" })); return; }
+                  const [min, max] = e.target.value.split("-");
+                  setLgFilters(f => ({ ...f, num_func_min: min, num_func_max: max }));
+                }} style={{ ...selStyle, width: "100%" }}>
+                  <option value="-">Todas</option>
+                  {FUNC_RANGES.map(r => <option key={r.label} value={`${r.min}-${r.max}`}>{r.label} funcionários</option>)}
+                </select>
+              </div>
+              {/* Busca textual */}
+              <div style={{ flex: "1 1 200px" }}>
+                <div style={{ fontSize: 10, color: T.tm, textTransform: "uppercase", marginBottom: 4 }}>Busca</div>
+                <input placeholder="Nome, empresa, CNPJ..." value={lgFilters.search} onChange={e => setLgFilters(f => ({ ...f, search: e.target.value }))}
+                  style={{ ...selStyle, width: "100%" }} onKeyDown={e => e.key === "Enter" && searchLg(1)} />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <Btn v="primary" onClick={() => searchLg(1)}>Buscar</Btn>
+              <Btn v="ghost" onClick={() => { setLgFilters({ cnae: "", uf: "", municipio: "", num_func_min: "", num_func_max: "", search: "" }); setLgResults([]); setLgTotal(0); }}>Limpar</Btn>
+            </div>
+          </div>
+
+          {/* Resultados */}
+          {lgResults.length > 0 && (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <div style={{ fontSize: 12, color: T.tm }}>{lgTotal} empresa{lgTotal !== 1 ? "s" : ""} encontrada{lgTotal !== 1 ? "s" : ""}
+                  {lgSelectedIds.length > 0 && <span style={{ color: T.ac, fontWeight: 600 }}> ({lgSelectedIds.length} selecionada{lgSelectedIds.length !== 1 ? "s" : ""})</span>}
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <Btn sm v="ghost" onClick={exportCsv}>Exportar CSV</Btn>
+                  {cadences.length > 0 && lgSelectedIds.length > 0 && (
+                    <select onChange={e => { if (e.target.value) enrollSelected(e.target.value); e.target.value = ""; }} style={selStyle}>
+                      <option value="">Inscrever em cadência...</option>
+                      {cadences.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  )}
+                </div>
+              </div>
+              <div style={{ background: T.card, borderRadius: 8, border: `1px solid ${T.bor}`, overflow: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: T.bg2, borderBottom: `1px solid ${T.bor}` }}>
+                      <th style={{ padding: "8px", textAlign: "left", width: 30 }}>
+                        <input type="checkbox" onChange={e => setLgSelectedIds(e.target.checked ? lgResults.map(l => l.id) : [])} checked={lgSelectedIds.length === lgResults.length && lgResults.length > 0} />
+                      </th>
+                      <th style={{ padding: "8px", textAlign: "left" }}>Empresa</th>
+                      <th style={{ padding: "8px", textAlign: "left" }}>CNPJ</th>
+                      <th style={{ padding: "8px", textAlign: "left" }}>CNAE</th>
+                      <th style={{ padding: "8px", textAlign: "center" }}>Funcionários</th>
+                      <th style={{ padding: "8px", textAlign: "left" }}>UF</th>
+                      <th style={{ padding: "8px", textAlign: "left" }}>Cidade</th>
+                      <th style={{ padding: "8px", textAlign: "center" }}>Score</th>
+                      <th style={{ padding: "8px", textAlign: "center" }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lgResults.map(l => (
+                      <tr key={l.id} style={{ borderBottom: `1px solid ${T.bor}` }}>
+                        <td style={{ padding: "8px" }}>
+                          <input type="checkbox" checked={lgSelectedIds.includes(l.id)} onChange={e => setLgSelectedIds(prev => e.target.checked ? [...prev, l.id] : prev.filter(x => x !== l.id))} />
+                        </td>
+                        <td style={{ padding: "8px", fontWeight: 600 }}>{l.company || l.razao_social || l.name || "-"}</td>
+                        <td style={{ padding: "8px", color: T.tm, fontSize: 11 }}>{l.cnpj || "-"}</td>
+                        <td style={{ padding: "8px", fontSize: 11 }}>{l.cnae || "-"}</td>
+                        <td style={{ padding: "8px", textAlign: "center" }}>{l.num_funcionarios || "-"}</td>
+                        <td style={{ padding: "8px" }}>{l.uf || "-"}</td>
+                        <td style={{ padding: "8px" }}>{l.municipio || "-"}</td>
+                        <td style={{ padding: "8px", textAlign: "center", fontWeight: 700, color: (l.total_score || 0) >= 70 ? "#ef4444" : (l.total_score || 0) >= 30 ? "#f59e0b" : T.tm }}>{l.total_score || 0}</td>
+                        <td style={{ padding: "8px", textAlign: "center" }}><span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 10, background: (STATUS_COLORS[l.status] || T.tm) + "22", color: STATUS_COLORS[l.status] || T.tm }}>{STATUS_LABELS[l.status] || l.status}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {lgTotal > 50 && (
+                <div style={{ display: "flex", gap: 8, marginTop: 8, justifyContent: "center" }}>
+                  <Btn sm v="ghost" disabled={lgPage <= 1} onClick={() => searchLg(lgPage - 1)}>Anterior</Btn>
+                  <span style={{ fontSize: 11, color: T.tm, padding: "8px" }}>Pág {lgPage} de {Math.ceil(lgTotal / 50)}</span>
+                  <Btn sm v="ghost" disabled={lgPage >= Math.ceil(lgTotal / 50)} onClick={() => searchLg(lgPage + 1)}>Próxima</Btn>
+                </div>
+              )}
+            </div>
+          )}
+
+          {lgResults.length === 0 && !lgLoading && (
+            <div style={{ padding: 40, textAlign: "center", color: T.tm, background: T.card, borderRadius: 8, border: `1px solid ${T.bor}` }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
+              <div style={{ fontSize: 13, marginBottom: 4 }}>Gere listas de empresas para prospecção</div>
+              <div style={{ fontSize: 11 }}>Use os filtros acima para buscar por segmento (CNAE), faixa de funcionários e localidade.</div>
+              <div style={{ fontSize: 11, color: T.ac, marginTop: 8 }}>Dica: Enriqueça seus leads via CNPJ para ter dados de UF, cidade e CNAE disponíveis nos filtros.</div>
+            </div>
+          )}
+
+          {lgLoading && <div style={{ padding: 40, textAlign: "center", color: T.tm }}>Buscando...</div>}
+        </div>
+        );
+      })()}
 
       {/* ──── CADENCES TAB ──── */}
       {tab === "cadences" && (

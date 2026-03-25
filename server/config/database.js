@@ -737,6 +737,7 @@ async function createTables(db) {
       custom_fields TEXT DEFAULT '{}',
       razao_social TEXT, nome_fantasia TEXT, capital REAL,
       abertura TEXT, cnae TEXT, endereco TEXT, num_funcionarios INTEGER,
+      uf TEXT, municipio TEXT,
       converted_deal_id TEXT, converted_at TEXT, lost_reason TEXT,
       last_activity_at TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -1030,6 +1031,8 @@ async function createTables(db) {
     try { await ddl('ALTER TABLE deals ADD COLUMN num_employees INTEGER'); } catch {}
     try { await ddl('ALTER TABLE deals ADD COLUMN product_id TEXT'); } catch {}
     await safeAddColumn('users', 'uf', 'TEXT');
+    await safeAddColumn('leads', 'uf', 'TEXT');
+    await safeAddColumn('leads', 'municipio', 'TEXT');
   }
 
   // ── Indexes ──

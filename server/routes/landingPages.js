@@ -250,6 +250,8 @@ router.post('/public/:slug/submit', async (req, res) => {
           if (cnpjData.cnae_principal) { enrichUpdates.push('cnae = ?'); enrichParams.push(cnpjData.cnae_principal); }
           if (cnpjData.endereco?.completo) { enrichUpdates.push('endereco = ?'); enrichParams.push(cnpjData.endereco.completo); }
           if (cnpjData.porte) { enrichUpdates.push('num_funcionarios = ?'); enrichParams.push(cnpjData.porte === 'MICRO EMPRESA' ? 10 : cnpjData.porte === 'PEQUENO PORTE' ? 50 : cnpjData.porte === 'DEMAIS' ? 100 : null); }
+          if (cnpjData.endereco?.uf) { enrichUpdates.push('uf = ?'); enrichParams.push(cnpjData.endereco.uf); }
+          if (cnpjData.endereco?.municipio) { enrichUpdates.push('municipio = ?'); enrichParams.push(cnpjData.endereco.municipio); }
           if (!formData.company && !formData.empresa && cnpjData.nome_fantasia) {
             enrichUpdates.push('company = ?'); enrichParams.push(cnpjData.nome_fantasia);
           }
