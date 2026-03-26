@@ -145,22 +145,53 @@ app.get('/api/test-lemit', async (req, res) => {
     });
     const saldoBody = await saldoRes.text();
 
-    // Testa consulta empresa
-    const empRes = await fetch('https://api.lemit.com.br/api/v1/consulta/empresa', {
+    // Testa consulta empresa - varias formas
+    const tests = {};
+
+    // Forma 1: x-www-form-urlencoded (como na doc)
+    const emp1 = await fetch('https://api.lemit.com.br/api/v1/consulta/empresa', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
+      headers: { 'Authorization': `Bearer ${token}` },
       body: 'documento=33000167000101',
     });
-    const empBody = await empRes.text();
+    tests.form_default = { status: emp1.status, body: await emp1.text() };
+
+    // Forma 2: com Content-Type explícito
+    const emp2 = await fetch('https://api.lemit.com.br/api/v1/consulta/empresa', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'documento=33000167000101',
+    });
+    tests.form_explicit = { status: emp2.status, body: await emp2.text() };
+
+    // Forma 3: com CNPJ no path (como na doc mostra /empresa/{cnpj})
+    const emp3 = await fetch('https://api.lemit.com.br/api/v1/consulta/empresa/33000167000101', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    tests.path_param = { status: emp3.status, body: await emp3.text() };
+
+    // Forma 4: JSON body
+    const emp4 = await fetch('https://api.lemit.com.br/api/v1/consulta/empresa', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ documento: '33000167000101' }),
+    });
+    tests.json_body = { status: emp4.status, body: await emp4.text() };
+
+    // Forma 5: URLSearchParams
+    const emp5 = await fetch('https://api.lemit.com.br/api/v1/consulta/empresa', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+      body: new URLSearchParams({ documento: '33000167000101' }),
+    });
+    tests.urlsearchparams = { status: emp5.status, body: await emp5.text() };
 
     res.json({
       server_ip: serverIp,
       lemit_token_preview: token.substring(0, 8) + '...',
       saldo: { status: saldoRes.status, body: saldoBody },
-      empresa: { status: empRes.status, body: empBody },
+      tests,
     });
   } catch (err) {
     res.json({ error: err.message });
