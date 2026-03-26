@@ -6,6 +6,9 @@
 
 /**
  * Consulta CNPJ via Lemit Dados API
+ * Doc: POST https://api.lemit.com.br/api/v1/consulta/empresa
+ * Body: documento=CNPJ (apenas números)
+ * Auth: Bearer token no header Authorization
  */
 async function lookupLemit(cleanCnpj) {
   const token = process.env.LEMIT_API_TOKEN;
@@ -21,44 +24,61 @@ async function lookupLemit(cleanCnpj) {
   });
 
   if (!response.ok) {
-    const errBody = await response.text().catch(() => '');
-    console.log(`Lemit API error ${response.status}: ${errBody}`);
+    console.log(`Lemit API HTTP error: ${response.status}`);
     return null;
   }
 
-  const data = await response.json();
-  if (data.error || !data.razao_social) return null;
+  const result = await response.json();
+  if (result.error) {
+    console.log(`Lemit API error: ${result.error}`);
+    return null;
+  }
 
-  // Normaliza para formato padrão
+  const emp = result.empresa;
+  if (!emp) return null;
+
+  // Monta telefone principal (celular com melhor ranking, senão fixo)
+  const bestPhone = emp.celulares?.[0] || emp.fixos?.[0];
+  const phoneStr = bestPhone ? `(${bestPhone.ddd}) ${bestPhone.numero}` : null;
+
+  // Monta lista de todos os telefones
+  const allPhones = [
+    ...(emp.celulares || []).map(t => ({ ddd: t.ddd, numero: t.numero, tipo: 'celular', whatsapp: t.whatsapp, ranking: t.ranking })),
+    ...(emp.fixos || []).map(t => ({ ddd: t.ddd, numero: t.numero, tipo: 'fixo', ranking: t.ranking })),
+  ];
+
+  // Email principal
+  const bestEmail = emp.emails?.[0]?.email || null;
+
   return {
-    cnpj: data.cnpj || cleanCnpj,
-    razao_social: data.razao_social,
-    nome_fantasia: data.nome_fantasia || data.razao_social,
-    descricao_situacao_cadastral: data.situacao_cadastral || data.situacao,
-    capital_social: parseFloat(data.capital_social) || 0,
-    data_inicio_atividade: data.data_abertura || data.data_inicio_atividade,
-    cnae_fiscal_descricao: data.cnae_principal_descricao || data.cnae_principal?.descricao || data.atividade_principal,
-    cnae_fiscal: data.cnae_principal_codigo || data.cnae_principal?.codigo || data.cnae,
-    natureza_juridica: data.natureza_juridica,
-    porte: data.porte,
-    logradouro: data.logradouro || data.endereco?.logradouro,
-    numero: data.numero || data.endereco?.numero,
-    complemento: data.complemento || data.endereco?.complemento,
-    bairro: data.bairro || data.endereco?.bairro,
-    municipio: data.municipio || data.endereco?.municipio || data.cidade,
-    uf: data.uf || data.endereco?.uf || data.estado,
-    cep: data.cep || data.endereco?.cep,
-    ddd_telefone_1: data.telefone_1 || data.telefone || data.ddd_telefone_1,
-    email: data.email,
-    qsa: (data.socios || data.qsa || []).map(s => ({
-      nome_socio: s.nome || s.nome_socio,
-      qualificacao_socio: s.qualificacao || s.qualificacao_socio,
-      data_entrada_sociedade: s.data_entrada || s.data_entrada_sociedade,
+    cnpj: emp.cnpj,
+    razao_social: emp.razao_social,
+    nome_fantasia: emp.nome_fantasia || emp.razao_social,
+    descricao_situacao_cadastral: emp.situacao,
+    capital_social: emp.socios?.reduce((s, sc) => s + (sc.capital_social || 0), 0) || 0,
+    data_inicio_atividade: emp.data_fundacao ? emp.data_fundacao.split('T')[0] : null,
+    cnae_fiscal_descricao: emp.cnae?.descricao,
+    cnae_fiscal: emp.cnae?.numero,
+    natureza_juridica: emp.tipo,
+    porte: emp.tipo,
+    logradouro: emp.endereco?.logradouro || emp.endereco?.endereco,
+    numero: emp.endereco?.numero,
+    complemento: emp.endereco?.complemento,
+    bairro: emp.endereco?.bairro,
+    municipio: emp.endereco?.cidade,
+    uf: emp.endereco?.uf,
+    cep: emp.endereco?.cep,
+    ddd_telefone_1: phoneStr,
+    email: bestEmail,
+    qsa: (emp.socios || []).map(s => ({
+      nome_socio: s.nome,
+      qualificacao_socio: s.participacao ? `${s.participacao}%` : null,
+      data_entrada_sociedade: null,
     })),
     // Dados extras da Lemit
-    telefones: data.telefones || [],
-    emails: data.emails || [],
-    num_funcionarios: data.quantidade_funcionarios || data.num_funcionarios || null,
+    telefones: allPhones,
+    emails: (emp.emails || []).map(e => e.email),
+    num_funcionarios: null,
     _source: 'lemit',
   };
 }
@@ -134,7 +154,7 @@ async function lookupReceitaWS(cleanCnpj) {
 export async function lookupCnpj(cleanCnpj) {
   let data = null;
 
-  // 1. Tenta Lemit primeiro (dados mais completos)
+  // 1. Tenta Lemit primeiro (dados mais completos: telefones, emails, sócios)
   try {
     data = await lookupLemit(cleanCnpj);
     if (data) console.log(`CNPJ ${cleanCnpj} consultado via Lemit`);

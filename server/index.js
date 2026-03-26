@@ -158,7 +158,7 @@ app.get('/api/test-lemit', async (req, res) => {
 
     res.json({
       server_ip: serverIp,
-      lemit_token_configured: !!token,
+      lemit_token_preview: token.substring(0, 8) + '...',
       saldo: { status: saldoRes.status, body: saldoBody },
       empresa: { status: empRes.status, body: empBody },
     });
