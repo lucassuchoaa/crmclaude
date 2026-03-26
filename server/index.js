@@ -124,6 +124,49 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', database: db.type, timestamp: new Date().toISOString() });
 });
 
+// Teste temporário da Lemit API — remover depois
+app.get('/api/test-lemit', async (req, res) => {
+  try {
+    const token = process.env.LEMIT_API_TOKEN;
+    if (!token) return res.json({ error: 'LEMIT_API_TOKEN não configurado' });
+
+    // Descobre o IP de saída do servidor
+    let serverIp = 'unknown';
+    try {
+      const ipRes = await fetch('https://api.ipify.org?format=json');
+      const ipData = await ipRes.json();
+      serverIp = ipData.ip;
+    } catch {}
+
+    // Testa saldo
+    const saldoRes = await fetch('https://api.lemit.com.br/api/v1/saldo', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    const saldoBody = await saldoRes.text();
+
+    // Testa consulta empresa
+    const empRes = await fetch('https://api.lemit.com.br/api/v1/consulta/empresa', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: 'documento=33000167000101',
+    });
+    const empBody = await empRes.text();
+
+    res.json({
+      server_ip: serverIp,
+      lemit_token_configured: !!token,
+      saldo: { status: saldoRes.status, body: saldoBody },
+      empresa: { status: empRes.status, body: empBody },
+    });
+  } catch (err) {
+    res.json({ error: err.message });
+  }
+});
+
 // Serve frontend static files in production/staging
 if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging') {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
