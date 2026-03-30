@@ -65,9 +65,14 @@ export const ROLE_HIERARCHY = {
   executivo: 5,
   diretor: 4,
   gerente: 3,
+  financeiro: 2,
   convenio: 2,
   parceiro: 1
 };
+
+export function canViewAllFinancial(role) {
+  return ['super_admin', 'executivo', 'diretor', 'financeiro'].includes(role);
+}
 
 export function hasPermission(userRole, requiredRole) {
   return ROLE_HIERARCHY[userRole] >= ROLE_HIERARCHY[requiredRole];
@@ -87,5 +92,6 @@ export default {
   verifyRefreshToken,
   hasPermission,
   canManageUser,
+  canViewAllFinancial,
   ROLE_HIERARCHY
 };

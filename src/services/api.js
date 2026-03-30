@@ -282,6 +282,16 @@ export const hubspotApi = {
     api.post('/hubspot/sync'),
 };
 
+// NetSuite API
+export const netsuiteApi = {
+  getConfig: () => api.get('/netsuite/config'),
+  saveConfig: (data) => api.post('/netsuite/config', data),
+  test: () => api.get('/netsuite/test'),
+  sync: () => api.post('/netsuite/sync'),
+  getSyncLog: () => api.get('/netsuite/sync-log'),
+  getMappings: () => api.get('/netsuite/mappings'),
+};
+
 // Groups API (Chat Gerente-Parceiro)
 export const groupsApi = {
   getAll: () => api.get('/groups'),

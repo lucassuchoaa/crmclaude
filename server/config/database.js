@@ -325,6 +325,20 @@ async function createTables(db) {
     )
   `);
 
+  // NetSuite sync log
+  await ddl(`
+    CREATE TABLE IF NOT EXISTS netsuite_sync_log (
+      id TEXT PRIMARY KEY,
+      sync_type TEXT NOT NULL,
+      status TEXT NOT NULL,
+      details TEXT,
+      records_pushed INTEGER DEFAULT 0,
+      records_pulled INTEGER DEFAULT 0,
+      error_message TEXT,
+      synced_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   // Materials table
   await ddl(`
     CREATE TABLE IF NOT EXISTS materials (
@@ -1033,6 +1047,11 @@ async function createTables(db) {
     await safeAddColumn('users', 'uf', 'TEXT');
     await safeAddColumn('leads', 'uf', 'TEXT');
     await safeAddColumn('leads', 'municipio', 'TEXT');
+
+    // NetSuite integration columns
+    await safeAddColumn('users', 'netsuite_vendor_id', 'TEXT');
+    await safeAddColumn('nfes', 'netsuite_id', 'TEXT');
+    await safeAddColumn('commissions', 'netsuite_id', 'TEXT');
   }
 
   // ── Indexes ──

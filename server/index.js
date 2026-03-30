@@ -36,8 +36,10 @@ import landingPagesRoutes from './routes/landingPages.js';
 import workflowsRoutes from './routes/workflows.js';
 import inboxRoutes from './routes/inbox.js';
 import aiAgentRoutes from './routes/aiAgent.js';
+import netsuiteRoutes from './routes/netsuite.js';
 import { startHubSpotScheduler } from './services/hubspotSync.js';
 import { startCadenceRunner } from './services/cadenceRunner.js';
+import { startNetSuiteScheduler } from './services/netsuiteSync.js';
 
 dotenv.config();
 
@@ -117,6 +119,7 @@ app.use('/api/landing-pages', landingPagesRoutes);
 app.use('/api/workflows', workflowsRoutes);
 app.use('/api/inbox', inboxRoutes);
 app.use('/api/ai', aiAgentRoutes);
+app.use('/api/netsuite', netsuiteRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -229,6 +232,7 @@ app.listen(PORT, () => {
   seedIfEmpty(getDatabase()).catch(e => console.error('Seed error:', e.message));
   startHubSpotScheduler(getDatabase());
   startCadenceRunner(getDatabase());
+  startNetSuiteScheduler(getDatabase());
 });
 
 export default app;

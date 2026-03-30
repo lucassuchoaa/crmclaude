@@ -15,7 +15,7 @@ const DEFAULT_PERMISSIONS = {
       "criar_comissao", "editar_comissao", "criar_nfe", "editar_nfe",
       "enviar_notificacao", "broadcast_notificacao",
       "criar_material", "editar_material", "deletar_material",
-      "configurar_integracoes", "gerenciar_equipes", "gerenciar_funis",
+      "configurar_integracoes", "configurar_netsuite", "gerenciar_equipes", "gerenciar_funis",
       "gerenciar_convenios", "gerenciar_produtos", "gerenciar_propostas", "gerenciar_contratos",
       "ver_auditoria", "ver_bi", "ver_diretoria",
       "enviar_email", "criar_evento", "gerenciar_permissoes",
@@ -34,6 +34,7 @@ const DEFAULT_PERMISSIONS = {
       "gerenciar_produtos", "gerenciar_propostas", "gerenciar_contratos",
       "ver_auditoria", "ver_bi", "ver_diretoria",
       "enviar_email", "criar_evento",
+      "configurar_netsuite",
       "gerenciar_prospecting", "criar_cadence", "enviar_cadence", "ver_landing_pages", "usar_ai_agent"],
   },
   diretor: {
@@ -61,6 +62,10 @@ const DEFAULT_PERMISSIONS = {
       "ver_bi",
       "enviar_email", "criar_evento",
       "gerenciar_prospecting", "criar_cadence", "enviar_cadence", "usar_ai_agent"],
+  },
+  financeiro: {
+    pages: ["dash", "fin", "diretoria", "bi", "notifs", "mats"],
+    features: ["ver_bi", "ver_diretoria", "download_nfe"],
   },
   parceiro: {
     pages: ["dash", "inds", "fin", "mats", "notifs"],
@@ -121,6 +126,7 @@ const ALL_FEATURES = [
     { id: "editar_comissao", l: "Editar comissão" },
     { id: "criar_nfe", l: "Criar NF-e" },
     { id: "editar_nfe", l: "Editar NF-e" },
+    { id: "download_nfe", l: "Download NF-e" },
   ]},
   { group: "Notificações", items: [
     { id: "enviar_notificacao", l: "Enviar notificação" },
@@ -133,6 +139,7 @@ const ALL_FEATURES = [
   ]},
   { group: "Configurações", items: [
     { id: "configurar_integracoes", l: "Configurar integrações" },
+    { id: "configurar_netsuite", l: "Configurar NetSuite" },
     { id: "gerenciar_equipes", l: "Gerenciar equipes" },
     { id: "gerenciar_funis", l: "Gerenciar funis" },
     { id: "gerenciar_convenios", l: "Gerenciar convênios" },
@@ -159,7 +166,7 @@ const ALL_FEATURES = [
   ]},
 ];
 
-const ROLES = ["super_admin", "executivo", "diretor", "gerente", "parceiro", "convenio"];
+const ROLES = ["super_admin", "executivo", "diretor", "gerente", "financeiro", "parceiro", "convenio"];
 
 // GET /permissions - Get all role permissions
 router.get('/', authenticate, async (req, res) => {

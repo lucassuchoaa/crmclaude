@@ -1,6 +1,6 @@
 import express from 'express';
 import { getDatabase } from '../config/database.js';
-import { hasPermission } from '../config/auth.js';
+import { hasPermission, canViewAllFinancial } from '../config/auth.js';
 import { authenticate } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -10,7 +10,7 @@ router.get('/summary', authenticate, async (req, res) => {
     const db = getDatabase();
     const { role, id: userId } = req.user;
 
-    if (!hasPermission(role, 'diretor')) return res.status(403).json({ error: 'Acesso restrito à diretoria.' });
+    if (!hasPermission(role, 'diretor') && !canViewAllFinancial(role)) return res.status(403).json({ error: 'Acesso restrito à diretoria.' });
 
     let gerenteQuery = `
       SELECT g.id, g.name, g.avatar, g.email, g.manager_id,
@@ -24,6 +24,7 @@ router.get('/summary', authenticate, async (req, res) => {
       gerenteQuery += ' AND g.manager_id = ?';
       params.push(userId);
     }
+    // financeiro vê todos (sem filtro por manager_id, como executivo)
 
     gerenteQuery += ' ORDER BY g.name ASC';
 

@@ -1,9 +1,16 @@
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../config/database.js';
-import { hasPermission } from '../config/auth.js';
+import { hasPermission, canViewAllFinancial } from '../config/auth.js';
 import { authenticate } from '../middleware/auth.js';
 import { requireMinRole } from '../middleware/rbac.js';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const uploadsDir = path.resolve(__dirname, '..', 'uploads', 'nfes');
 import { validateStatus, NFE_STATUSES } from '../utils/validators.js';
 import { createNotification } from '../utils/notificationHelper.js';
 
@@ -23,7 +30,7 @@ router.get('/', authenticate, async (req, res) => {
     `;
     const params = [];
 
-    if (!hasPermission(req.user.role, 'diretor')) {
+    if (!hasPermission(req.user.role, 'diretor') && !canViewAllFinancial(req.user.role)) {
       if (req.user.role === 'gerente') {
         query += ` AND (n.user_id = ? OR n.user_id IN (SELECT id FROM users WHERE manager_id = ?))`;
         params.push(req.user.id, req.user.id);
@@ -59,7 +66,7 @@ router.get('/:id', authenticate, async (req, res) => {
     `).get(req.params.id);
 
     if (!nfe) return res.status(404).json({ error: 'NFE not found' });
-    if (!hasPermission(req.user.role, 'diretor') && nfe.user_id !== req.user.id) {
+    if (!hasPermission(req.user.role, 'diretor') && !canViewAllFinancial(req.user.role) && nfe.user_id !== req.user.id) {
       return res.status(403).json({ error: 'Access denied' });
     }
     res.json({ nfe });
@@ -154,7 +161,7 @@ router.delete('/:id', authenticate, async (req, res) => {
     const db = getDatabase();
     const nfe = await db.prepare('SELECT * FROM nfes WHERE id = ?').get(req.params.id);
     if (!nfe) return res.status(404).json({ error: 'NFE not found' });
-    if (nfe.user_id !== req.user.id && !hasPermission(req.user.role, 'diretor')) {
+    if (nfe.user_id !== req.user.id && !hasPermission(req.user.role, 'diretor') && !canViewAllFinancial(req.user.role)) {
       return res.status(403).json({ error: 'Access denied' });
     }
     if (nfe.status !== 'pending') return res.status(400).json({ error: 'Can only delete pending NFEs' });
@@ -167,9 +174,78 @@ router.delete('/:id', authenticate, async (req, res) => {
   }
 });
 
-// Get NFE summary
-router.get('/stats/summary', authenticate, requireMinRole('diretor'), async (req, res) => {
+// Download NFE file
+router.get('/:id/download', authenticate, async (req, res) => {
   try {
+    const db = getDatabase();
+    const nfe = await db.prepare('SELECT * FROM nfes WHERE id = ?').get(req.params.id);
+    if (!nfe) return res.status(404).json({ error: 'NFE not found' });
+
+    if (!hasPermission(req.user.role, 'diretor') && !canViewAllFinancial(req.user.role) && nfe.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    if (!nfe.file_path) return res.status(404).json({ error: 'Nenhum arquivo anexado a esta NFE' });
+
+    const filePath = path.resolve(uploadsDir, path.basename(nfe.file_path));
+    if (!filePath.startsWith(uploadsDir) || !fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Arquivo não encontrado no servidor' });
+    }
+    res.download(filePath);
+  } catch (error) {
+    console.error('Download NFE error:', error);
+    res.status(500).json({ error: 'Failed to download NFE' });
+  }
+});
+
+// Export NFEs as CSV
+router.get('/export/csv', authenticate, async (req, res) => {
+  try {
+    if (!hasPermission(req.user.role, 'diretor') && !canViewAllFinancial(req.user.role)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const db = getDatabase();
+    const { status, from_date, to_date } = req.query;
+
+    let query = `
+      SELECT n.number, n.value, n.status, n.notes, n.created_at, n.updated_at,
+             u.name as user_name, u.email as user_email
+      FROM nfes n
+      LEFT JOIN users u ON n.user_id = u.id
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (status) { query += ` AND n.status = ?`; params.push(status); }
+    if (from_date) { query += ` AND n.created_at >= ?`; params.push(from_date); }
+    if (to_date) { query += ` AND n.created_at <= ?`; params.push(to_date); }
+
+    query += ` ORDER BY n.created_at DESC`;
+
+    const nfes = await db.prepare(query).all(...params);
+
+    const header = 'Numero,Valor,Status,Notas,Parceiro,Email,Criado_em,Atualizado_em\n';
+    const csvRows = nfes.map(n => {
+      const esc = (v) => `"${String(v || '').replace(/"/g, '""')}"`;
+      return [esc(n.number), n.value, n.status, esc(n.notes), esc(n.user_name), esc(n.user_email), n.created_at, n.updated_at].join(',');
+    }).join('\n');
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename=nfes_export_${new Date().toISOString().slice(0,10)}.csv`);
+    res.send('\uFEFF' + header + csvRows);
+  } catch (error) {
+    console.error('Export NFEs CSV error:', error);
+    res.status(500).json({ error: 'Failed to export NFEs' });
+  }
+});
+
+// Get NFE summary
+router.get('/stats/summary', authenticate, async (req, res) => {
+  try {
+    if (!hasPermission(req.user.role, 'diretor') && !canViewAllFinancial(req.user.role)) {
+      return res.status(403).json({ error: 'Insufficient permissions' });
+    }
     const db = getDatabase();
     const summary = await db.prepare(`
       SELECT

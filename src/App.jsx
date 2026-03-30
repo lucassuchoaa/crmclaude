@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback } from "react";
-import { authApi, usersApi, indicationsApi, commissionsApi, nfesApi, materialsApi, notificationsApi, hubspotApi, groupsApi, cnpjAgentApi, diretoriaApi, whatsappApi, conveniosApi, pipelinesApi, dealsApi, teamsApi, productsApi, googleApi, proposalsApi, contractsApi, permissionsApi, leadsApi, cadencesApi, landingPagesApi, workflowsApi, inboxApi, aiApi, setTokens, clearTokens } from "./services/api";
+import { authApi, usersApi, indicationsApi, commissionsApi, nfesApi, materialsApi, notificationsApi, hubspotApi, netsuiteApi, groupsApi, cnpjAgentApi, diretoriaApi, whatsappApi, conveniosApi, pipelinesApi, dealsApi, teamsApi, productsApi, googleApi, proposalsApi, contractsApi, permissionsApi, leadsApi, cadencesApi, landingPagesApi, workflowsApi, inboxApi, aiApi, setTokens, clearTokens } from "./services/api";
 import { useBreakpoint } from "./hooks/useBreakpoint";
 
 const AuthCtx = createContext(null);
@@ -4820,6 +4820,13 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
   const [hsLoading, setHsLoading] = useState(false);
   const [hsSaving, setHsSaving] = useState(false);
   const [hsKeyPreview, setHsKeyPreview] = useState(null);
+  // NetSuite state
+  const [nsConfig, setNsConfig] = useState({ account_id: "", consumer_key: "", consumer_secret: "", token_id: "", token_secret: "" });
+  const [nsStatus, setNsStatus] = useState({ connected: null, message: "" });
+  const [nsSaving, setNsSaving] = useState(false);
+  const [nsSyncLog, setNsSyncLog] = useState([]);
+  const [nsMappings, setNsMappings] = useState(null);
+  const [nsHasCredentials, setNsHasCredentials] = useState(false);
 
   // Load pipelines for funis tab
   const loadCfgPipelines = useCallback(() => {
@@ -5229,7 +5236,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
 
   const cfgGroups = isSA ? [
     { label: "Sistema", items: ["geral", "permissões", "notificações", "auditoria"] },
-    { label: "Integrações", items: ["google", "hubspot", "clicksign"] },
+    { label: "Integrações", items: ["google", "hubspot", "netsuite", "clicksign"] },
     { label: "Cadastros", items: ["usuários", "parceiros", "convênios", "equipes", "produtos"] },
     { label: "Pipeline", items: ["funis", "propostas", "contratos", "materiais"] },
   ] : [{ label: "Pipeline", items: ["funis"] }];
@@ -5464,6 +5471,130 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
           {saved && <span style={{ marginLeft: 10, fontSize: 13, color: T.ok, fontWeight: 600 }}>Salvo!</span>}
         </>}
       </div>}
+      {/* NETSUITE TAB */}
+      {tab === "netsuite" && (isSA || user.role === "executivo") && <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 24 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+          <div style={{ width: 40, height: 40, borderRadius: 10, background: "#0070C0" + "15", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>☁️</div>
+          <div><h3 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>NetSuite Oracle</h3><p style={{ fontSize: 12, color: T.tm, margin: 0 }}>Integração bidirecional: NFes, comissões, fornecedores e pagamentos</p></div>
+        </div>
+
+        {/* Credenciais */}
+        <div style={{ marginBottom: 16 }}>
+          <h4 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Credenciais OAuth 1.0 TBA</h4>
+          <div className="grid r-grid" style={{ gap: 12 }}>
+            <Inp label="Account ID" value={nsConfig.account_id} onChange={v => setNsConfig({ ...nsConfig, account_id: v })} placeholder="Ex: 1234567_SB1" />
+            <Inp label="Consumer Key" value={nsConfig.consumer_key} onChange={v => setNsConfig({ ...nsConfig, consumer_key: v })} placeholder={nsHasCredentials ? "...configurado" : "Consumer Key"} type="password" />
+            <Inp label="Consumer Secret" value={nsConfig.consumer_secret} onChange={v => setNsConfig({ ...nsConfig, consumer_secret: v })} placeholder={nsHasCredentials ? "...configurado" : "Consumer Secret"} type="password" />
+            <Inp label="Token ID" value={nsConfig.token_id} onChange={v => setNsConfig({ ...nsConfig, token_id: v })} placeholder={nsHasCredentials ? "...configurado" : "Token ID"} type="password" />
+            <Inp label="Token Secret" value={nsConfig.token_secret} onChange={v => setNsConfig({ ...nsConfig, token_secret: v })} placeholder={nsHasCredentials ? "...configurado" : "Token Secret"} type="password" />
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+          <Btn onClick={async () => {
+            setNsSaving(true);
+            try {
+              await netsuiteApi.saveConfig(nsConfig);
+              setNsConfig({ account_id: nsConfig.account_id, consumer_key: "", consumer_secret: "", token_id: "", token_secret: "" });
+              setNsHasCredentials(true);
+              setSaved(true); setTimeout(() => setSaved(false), 2000);
+            } catch (e) { alert(e.response?.data?.error || "Erro ao salvar"); }
+            setNsSaving(false);
+          }} disabled={nsSaving}>{nsSaving ? "Salvando..." : "Salvar Credenciais"}</Btn>
+
+          <Btn v="secondary" onClick={async () => {
+            setNsSaving(true);
+            try {
+              const r = await netsuiteApi.test();
+              setNsStatus(r.data);
+            } catch (e) { setNsStatus({ connected: false, message: "Erro: " + (e.response?.data?.message || e.message) }); }
+            setNsSaving(false);
+          }} disabled={nsSaving}>{nsSaving ? "Testando..." : "Testar Conexão"}</Btn>
+
+          <Btn v="secondary" onClick={async () => {
+            setNsSaving(true);
+            try {
+              const r = await netsuiteApi.sync();
+              alert(r.data.success ? `Sincronização concluída! Vendors: ${r.data.result?.vendors_pushed || 0}, Bills: ${r.data.result?.bills_pushed || 0}, Journals: ${r.data.result?.journals_pushed || 0}, Pagamentos: ${r.data.result?.payments_pulled || 0}` : r.data.message);
+            } catch (e) { alert("Erro na sincronização: " + (e.response?.data?.error || e.message)); }
+            setNsSaving(false);
+          }} disabled={nsSaving}>{nsSaving ? "Sincronizando..." : "Sincronizar Agora"}</Btn>
+        </div>
+
+        {saved && <div style={{ marginBottom: 12, fontSize: 13, color: T.ok, fontWeight: 600 }}>Credenciais salvas!</div>}
+
+        {nsStatus.connected !== null && (
+          <div style={{ marginBottom: 16, padding: 12, borderRadius: 8, background: nsStatus.connected ? T.ok + "15" : T.er + "15", border: `1px solid ${nsStatus.connected ? T.ok : T.er}25` }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: nsStatus.connected ? T.ok : T.er }}>{nsStatus.connected ? "Conectado" : "Desconectado"}</div>
+            <div style={{ fontSize: 12, color: T.tm, marginTop: 4 }}>{nsStatus.message}</div>
+          </div>
+        )}
+
+        {/* Mapeamentos */}
+        <div style={{ borderTop: `1px solid ${T.bor}`, paddingTop: 16, marginBottom: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <h4 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>Status dos Mapeamentos</h4>
+            <Btn v="ghost" onClick={async () => {
+              try {
+                const r = await netsuiteApi.getMappings();
+                setNsMappings(r.data);
+              } catch {}
+            }}>Atualizar</Btn>
+          </div>
+          {nsMappings && (
+            <div className="grid r-grid-3" style={{ gap: 12 }}>
+              <div style={{ background: T.bg2, borderRadius: 8, padding: 14, textAlign: "center" }}>
+                <div style={{ fontSize: 11, color: T.tm, textTransform: "uppercase", marginBottom: 4 }}>Fornecedores</div>
+                <div style={{ fontSize: 18, fontWeight: 700 }}>{nsMappings.vendors?.synced || 0}<span style={{ fontSize: 12, color: T.tm, fontWeight: 400 }}>/{nsMappings.vendors?.total || 0}</span></div>
+              </div>
+              <div style={{ background: T.bg2, borderRadius: 8, padding: 14, textAlign: "center" }}>
+                <div style={{ fontSize: 11, color: T.tm, textTransform: "uppercase", marginBottom: 4 }}>NFes (Vendor Bills)</div>
+                <div style={{ fontSize: 18, fontWeight: 700 }}>{nsMappings.vendor_bills?.synced || 0}<span style={{ fontSize: 12, color: T.tm, fontWeight: 400 }}>/{nsMappings.vendor_bills?.total || 0}</span></div>
+              </div>
+              <div style={{ background: T.bg2, borderRadius: 8, padding: 14, textAlign: "center" }}>
+                <div style={{ fontSize: 11, color: T.tm, textTransform: "uppercase", marginBottom: 4 }}>Comissões (Journal)</div>
+                <div style={{ fontSize: 18, fontWeight: 700 }}>{nsMappings.journal_entries?.synced || 0}<span style={{ fontSize: 12, color: T.tm, fontWeight: 400 }}>/{nsMappings.journal_entries?.total || 0}</span></div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Sync Log */}
+        <div style={{ borderTop: `1px solid ${T.bor}`, paddingTop: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <h4 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>Histórico de Sincronização</h4>
+            <Btn v="ghost" onClick={async () => {
+              try {
+                const r = await netsuiteApi.getSyncLog();
+                setNsSyncLog(r.data.logs || []);
+              } catch {}
+            }}>Carregar</Btn>
+          </div>
+          {nsSyncLog.length > 0 && (
+            <div style={{ maxHeight: 300, overflow: "auto" }}>
+              <table style={{ width: "100%", fontSize: 12 }}>
+                <thead><tr style={{ textAlign: "left", color: T.tm, borderBottom: `1px solid ${T.bor}` }}>
+                  <th style={{ padding: "8px 6px" }}>Data</th><th style={{ padding: "8px 6px" }}>Tipo</th><th style={{ padding: "8px 6px" }}>Status</th><th style={{ padding: "8px 6px" }}>Enviados</th><th style={{ padding: "8px 6px" }}>Recebidos</th><th style={{ padding: "8px 6px" }}>Erro</th>
+                </tr></thead>
+                <tbody>
+                  {nsSyncLog.map(log => (
+                    <tr key={log.id} style={{ borderBottom: `1px solid ${T.bor}22` }}>
+                      <td style={{ padding: "6px" }}>{log.synced_at?.replace('T', ' ').slice(0, 19)}</td>
+                      <td style={{ padding: "6px" }}><Badge type="info">{log.sync_type}</Badge></td>
+                      <td style={{ padding: "6px" }}><Badge type={log.status === 'completed' ? 'success' : log.status === 'partial' ? 'warning' : 'danger'}>{log.status}</Badge></td>
+                      <td style={{ padding: "6px" }}>{log.records_pushed}</td>
+                      <td style={{ padding: "6px" }}>{log.records_pulled}</td>
+                      <td style={{ padding: "6px", fontSize: 11, color: T.er, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis" }}>{log.error_message || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {nsSyncLog.length === 0 && <p style={{ fontSize: 12, color: T.tm }}>Nenhuma sincronização registrada. Clique "Carregar" ou "Sincronizar Agora".</p>}
+        </div>
+      </div>}
+
       {/* PERMISSÕES TAB */}
       {tab === "permissões" && permData && (
         <div>
@@ -5481,7 +5612,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
             {/* Role Selector */}
             <div style={{ display: "flex", gap: 6, marginBottom: 20, flexWrap: "wrap" }}>
               {permData.roles.filter(r => r !== "super_admin").map(role => {
-                const rl = { executivo: "Executivo (Diretor)", diretor: "Gerente (Diretor)", gerente: "Executivo (Gerente)", parceiro: "Parceiro", convenio: "Convênio" };
+                const rl = { executivo: "Executivo (Diretor)", diretor: "Gerente (Diretor)", gerente: "Executivo (Gerente)", financeiro: "Visualizador Financeiro", parceiro: "Parceiro", convenio: "Convênio" };
                 return (
                   <button key={role} onClick={() => setPermSelRole(role)}
                     style={{ padding: "8px 16px", fontSize: 12, fontWeight: permSelRole === role ? 700 : 500, cursor: "pointer",
@@ -5838,6 +5969,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
               <option value="executivo">Diretor</option>
               <option value="diretor">Gerente</option>
               <option value="gerente">Executivo</option>
+              <option value="financeiro">Visualizador Financeiro</option>
             </select>
             {(uSearch || uRoleFilter) && <Btn v="secondary" sm onClick={() => { setUSearch(""); setURoleFilter(""); }}>Limpar</Btn>}
           </div>
@@ -5889,6 +6021,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
                   <option value="gerente">Executivo</option>
                   <option value="diretor">Gerente</option>
                   <option value="executivo">Diretor</option>
+                  <option value="financeiro">Visualizador Financeiro</option>
                   <option value="convenio">Convênio</option>
                   <option value="super_admin">Super Admin</option>
                 </select>
@@ -5959,6 +6092,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
                     <option value="gerente">Executivo</option>
                     <option value="diretor">Gerente</option>
                     <option value="executivo">Diretor</option>
+                    <option value="financeiro">Visualizador Financeiro</option>
                     <option value="super_admin">Super Admin</option>
                   </select>
                 </div>
@@ -7028,8 +7162,10 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
   const { user } = useAuth();
   const { breakpoint } = useBreakpoint();
   const isParceiro = user.role === "parceiro";
+  const isFinanceiro = user.role === "financeiro";
   const isAdmin = user.role === "super_admin" || user.role === "diretor" || user.role === "executivo";
   const isGerente = user.role === "gerente";
+  const canWrite = (isAdmin || isGerente) && !isFinanceiro;
   const [tab, setTab] = useState(isParceiro ? "meusRel" : "relatorios");
   const [commModal, setCommModal] = useState(false);
   const [nfeModal, setNfeModal] = useState(false);
@@ -7038,9 +7174,9 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
 
   // Filter data by role
   const myComms = isParceiro ? comms.filter(r => r.pId === user.id) :
-    isGerente ? comms.filter(r => { const p = users.find(u => u.id === r.pId); return p && p.gId === user.id; }) : comms;
+    (isGerente && !isFinanceiro) ? comms.filter(r => { const p = users.find(u => u.id === r.pId); return p && p.gId === user.id; }) : comms;
   const myNfes = isParceiro ? nfes.filter(n => n.pId === user.id) :
-    isGerente ? nfes.filter(n => { const p = users.find(u => u.id === n.pId); return p && p.gId === user.id; }) : nfes;
+    (isGerente && !isFinanceiro) ? nfes.filter(n => { const p = users.find(u => u.id === n.pId); return p && p.gId === user.id; }) : nfes;
 
   const parceiros = isGerente ? users.filter(u => u.role === "parceiro" && u.gId === user.id) : users.filter(u => u.role === "parceiro");
 
@@ -7159,8 +7295,9 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
       {/* === ADMIN/GERENTE: Relatórios de Comissão === */}
       {(tab === "relatorios") && (
         <div>
-          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
-            <Btn onClick={() => setCommModal(true)}>📤 Enviar Relatório</Btn>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 14 }}>
+            {(isAdmin || isFinanceiro) && <Btn v="secondary" onClick={() => { window.open(`${import.meta.env.VITE_API_URL || ''}/api/commissions/export/csv`, '_blank'); }}>📥 Exportar CSV</Btn>}
+            {canWrite && <Btn onClick={() => setCommModal(true)}>📤 Enviar Relatório</Btn>}
           </div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
             <div className="table-responsive"><table className="data-table">
@@ -7195,6 +7332,9 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
       {/* === ADMIN/GERENTE: NFes Recebidas === */}
       {(tab === "nfes") && (
         <div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 14 }}>
+            {(isAdmin || isFinanceiro) && <Btn v="secondary" onClick={() => { window.open(`${import.meta.env.VITE_API_URL || ''}/api/nfes/export/csv`, '_blank'); }}>📥 Exportar CSV</Btn>}
+          </div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
             <div className="table-responsive"><table className="data-table">
               <thead><tr>{["Parceiro", "Nº NFe", "Valor", "Arquivo", "Data Envio", "Status", "Dt Pagamento", "Ações"].map(h => <th key={h} style={thStyle}>{h}</th>)}</tr></thead>
@@ -7217,8 +7357,8 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
                       <td style={{ ...tdStyle, fontSize: 11, color: T.tm }}>{n.pgDt || "—"}</td>
                       <td style={tdStyle}>
                         <div style={{ display: "flex", gap: 6 }}>
-                          <Btn v="secondary" sm>⬇</Btn>
-                          {n.st === "pendente" && <Btn v="success" sm onClick={() => markPago(n.id)}>💰 Pagar</Btn>}
+                          <Btn v="secondary" sm onClick={() => { window.open(`${import.meta.env.VITE_API_URL || ''}/api/nfes/${n.id}/download`, '_blank'); }}>⬇</Btn>
+                          {n.st === "pendente" && canWrite && <Btn v="success" sm onClick={() => markPago(n.id)}>💰 Pagar</Btn>}
                         </div>
                       </td>
                     </tr>
@@ -9555,20 +9695,20 @@ function InboxPage({ users }) {
 }
 
 // ===== APP =====
-const RL = { super_admin: "Super Admin", executivo: "Diretor", diretor: "Gerente", gerente: "Executivo", convenio: "Convênio", parceiro: "Parceiro" };
+const RL = { super_admin: "Super Admin", executivo: "Diretor", diretor: "Gerente", gerente: "Executivo", financeiro: "Visualizador Financeiro", convenio: "Convênio", parceiro: "Parceiro" };
 const NAV = [
-  { id: "dash", l: "Dashboard", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro", "convenio"] },
+  { id: "dash", l: "Dashboard", r: ["super_admin", "executivo", "diretor", "gerente", "financeiro", "parceiro", "convenio"] },
   { id: "kanban", l: "Funil/Pipeline", r: ["super_admin", "executivo", "diretor", "gerente"] },
   { id: "negocios", l: "Negociações", r: ["super_admin", "executivo", "diretor", "gerente"] },
-  { id: "bi", l: "BI / Analytics", r: ["super_admin", "executivo", "diretor", "gerente"] },
+  { id: "bi", l: "BI / Analytics", r: ["super_admin", "executivo", "diretor", "gerente", "financeiro"] },
   { id: "inds", l: "Minhas Indicações", r: ["parceiro"] },
   { id: "convenio", l: "Meu Convênio", r: ["convenio"] },
   { id: "parcs", l: "Parceiros", r: ["super_admin", "executivo", "diretor", "gerente"] },
   { id: "groups", l: "WhatsApp", r: ["super_admin", "executivo", "diretor", "gerente"] },
-  { id: "diretoria", l: "Visão Diretoria", r: ["super_admin", "executivo", "diretor"] },
-  { id: "fin", l: "Financeiro", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro"] },
-  { id: "mats", l: "Material de Apoio", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro", "convenio"] },
-  { id: "notifs", l: "Notificações", r: ["super_admin", "executivo", "diretor", "gerente", "parceiro", "convenio"] },
+  { id: "diretoria", l: "Visão Diretoria", r: ["super_admin", "executivo", "diretor", "financeiro"] },
+  { id: "fin", l: "Financeiro", r: ["super_admin", "executivo", "diretor", "gerente", "financeiro", "parceiro"] },
+  { id: "mats", l: "Material de Apoio", r: ["super_admin", "executivo", "diretor", "gerente", "financeiro", "parceiro", "convenio"] },
+  { id: "notifs", l: "Notificações", r: ["super_admin", "executivo", "diretor", "gerente", "financeiro", "parceiro", "convenio"] },
   { id: "prospecting", l: "Prospecção", r: ["super_admin", "executivo", "diretor", "gerente"] },
   { id: "cfg", l: "Configurações", r: ["super_admin", "executivo", "gerente"] },
 ];

@@ -1,6 +1,6 @@
 import express from 'express';
 import { getDatabase } from '../config/database.js';
-import { hasPermission } from '../config/auth.js';
+import { hasPermission, canViewAllFinancial } from '../config/auth.js';
 import { authenticate } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -9,7 +9,7 @@ const router = express.Router();
 router.get('/stats', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
-    const isAdmin = hasPermission(req.user.role, 'executivo');
+    const isAdmin = hasPermission(req.user.role, 'executivo') || canViewAllFinancial(req.user.role);
 
     let indicationsQuery = `
       SELECT
@@ -145,7 +145,7 @@ router.get('/team-performance', authenticate, async (req, res) => {
     if (!hasPermission(req.user.role, 'gerente')) return res.status(403).json({ error: 'Access denied' });
 
     const db = getDatabase();
-    const isAdmin = hasPermission(req.user.role, 'executivo');
+    const isAdmin = hasPermission(req.user.role, 'executivo') || canViewAllFinancial(req.user.role);
 
     let query = `
       SELECT u.id, u.name, u.avatar, u.role,
@@ -178,7 +178,7 @@ router.get('/charts', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
     const { period = '30' } = req.query;
-    const isAdmin = hasPermission(req.user.role, 'executivo');
+    const isAdmin = hasPermission(req.user.role, 'executivo') || canViewAllFinancial(req.user.role);
 
     const daysAgo = new Date();
     daysAgo.setDate(daysAgo.getDate() - parseInt(period));

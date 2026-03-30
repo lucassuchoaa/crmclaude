@@ -1,7 +1,7 @@
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../config/database.js';
-import { hasPermission } from '../config/auth.js';
+import { hasPermission, canViewAllFinancial } from '../config/auth.js';
 import { authenticate } from '../middleware/auth.js';
 import { requireMinRole } from '../middleware/rbac.js';
 import { validateStatus, COMMISSION_STATUSES } from '../utils/validators.js';
@@ -26,7 +26,7 @@ router.get('/', authenticate, async (req, res) => {
     `;
     const params = [];
 
-    if (!hasPermission(req.user.role, 'executivo')) {
+    if (!hasPermission(req.user.role, 'executivo') && !canViewAllFinancial(req.user.role)) {
       query += ` AND c.user_id = ?`;
       params.push(req.user.id);
     } else if (user_id) {
@@ -52,7 +52,7 @@ router.get('/', authenticate, async (req, res) => {
     `;
     const totalsParams = [];
 
-    if (!hasPermission(req.user.role, 'executivo')) {
+    if (!hasPermission(req.user.role, 'executivo') && !canViewAllFinancial(req.user.role)) {
       totalsQuery += ` AND user_id = ?`; totalsParams.push(req.user.id);
     } else if (user_id) {
       totalsQuery += ` AND user_id = ?`; totalsParams.push(user_id);
@@ -161,9 +161,56 @@ router.patch('/:id/status', authenticate, requireMinRole('diretor'), async (req,
   }
 });
 
-// Get commission summary by user
-router.get('/summary', authenticate, requireMinRole('diretor'), async (req, res) => {
+// Export commissions as CSV
+router.get('/export/csv', authenticate, async (req, res) => {
   try {
+    if (!hasPermission(req.user.role, 'diretor') && !canViewAllFinancial(req.user.role)) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const db = getDatabase();
+    const { status, from_date, to_date } = req.query;
+
+    let query = `
+      SELECT c.amount, c.percentage, c.status, c.payment_date, c.created_at,
+             i.cnpj, i.razao_social, i.nome_fantasia,
+             u.name as user_name, u.email as user_email
+      FROM commissions c
+      LEFT JOIN indications i ON c.indication_id = i.id
+      LEFT JOIN users u ON c.user_id = u.id
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (status) { query += ` AND c.status = ?`; params.push(status); }
+    if (from_date) { query += ` AND c.created_at >= ?`; params.push(from_date); }
+    if (to_date) { query += ` AND c.created_at <= ?`; params.push(to_date); }
+
+    query += ` ORDER BY c.created_at DESC`;
+
+    const commissions = await db.prepare(query).all(...params);
+
+    const header = 'Parceiro,Email,CNPJ,Razao_Social,Valor,Percentual,Status,Data_Pagamento,Criado_em\n';
+    const csvRows = commissions.map(c => {
+      const esc = (v) => `"${String(v || '').replace(/"/g, '""')}"`;
+      return [esc(c.user_name), esc(c.user_email), esc(c.cnpj), esc(c.razao_social), c.amount, c.percentage, c.status, c.payment_date || '', c.created_at].join(',');
+    }).join('\n');
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename=comissoes_export_${new Date().toISOString().slice(0,10)}.csv`);
+    res.send('\uFEFF' + header + csvRows);
+  } catch (error) {
+    console.error('Export commissions CSV error:', error);
+    res.status(500).json({ error: 'Failed to export commissions' });
+  }
+});
+
+// Get commission summary by user
+router.get('/summary', authenticate, async (req, res) => {
+  try {
+    if (!hasPermission(req.user.role, 'diretor') && !canViewAllFinancial(req.user.role)) {
+      return res.status(403).json({ error: 'Insufficient permissions' });
+    }
     const db = getDatabase();
     const { from_date, to_date } = req.query;
 
