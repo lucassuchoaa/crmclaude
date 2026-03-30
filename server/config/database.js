@@ -709,7 +709,7 @@ async function createTables(db) {
   // ClickSign config table
   await ddl(`
     CREATE TABLE IF NOT EXISTS clicksign_config (
-      id INTEGER PRIMARY KEY ${isPg ? '' : 'AUTOINCREMENT'},
+      id ${isPg ? 'SERIAL PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT'},
       api_key TEXT NOT NULL,
       environment TEXT DEFAULT 'sandbox',
       updated_by TEXT,
@@ -720,7 +720,7 @@ async function createTables(db) {
   // Role permissions table (custom access control)
   await ddl(`
     CREATE TABLE IF NOT EXISTS role_permissions (
-      id INTEGER PRIMARY KEY ${isPg ? '' : 'AUTOINCREMENT'},
+      id ${isPg ? 'SERIAL PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT'},
       role TEXT NOT NULL UNIQUE,
       pages TEXT DEFAULT '[]',
       features TEXT DEFAULT '[]',

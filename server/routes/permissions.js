@@ -248,9 +248,12 @@ router.put('/:role', authenticate, async (req, res) => {
         UPDATE role_permissions SET pages = ?, features = ?, updated_by = ?, updated_at = ? WHERE role = ?
       `).run(JSON.stringify(pages || []), JSON.stringify(features || []), req.user.id, new Date().toISOString(), role);
     } else {
+      // Get next id manually (safe for both SQLite and PG without SERIAL)
+      const maxRow = await db.prepare('SELECT COALESCE(MAX(id), 0) + 1 as next_id FROM role_permissions').get();
+      const nextId = maxRow?.next_id || 1;
       await db.prepare(`
-        INSERT INTO role_permissions (role, pages, features, updated_by, updated_at) VALUES (?, ?, ?, ?, ?)
-      `).run(role, JSON.stringify(pages || []), JSON.stringify(features || []), req.user.id, new Date().toISOString());
+        INSERT INTO role_permissions (id, role, pages, features, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+      `).run(nextId, role, JSON.stringify(pages || []), JSON.stringify(features || []), req.user.id, new Date().toISOString());
     }
 
     res.json({ message: 'Permissões atualizadas', role, pages, features });
