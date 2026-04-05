@@ -7186,7 +7186,6 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
     if (!editNfe || editNfeSaving) return;
     setEditNfeSaving(true);
     try {
-      // Update status if changed
       if (editNfeForm.status !== editNfe.origStatus) {
         await nfesApi.updateStatus(editNfe.id, editNfeForm.status === "pago" ? "paid" : "pending", null);
       }
@@ -7195,7 +7194,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
         num: editNfeForm.num,
         valor: parseFloat(editNfeForm.valor) || n.valor,
         st: editNfeForm.status,
-        pgDt: editNfeForm.status === "pago" ? (n.pgDt || new Date().toISOString().split("T")[0]) : null,
+        pgDt: editNfeForm.status === "pago" ? (editNfeForm.pgDt || new Date().toISOString().split("T")[0]) : null,
       } : n));
       setEditNfe(null);
     } catch (e) {
@@ -7461,7 +7460,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
                       <td style={tdStyle}>
                         <div style={{ display: "flex", gap: 6 }}>
                           <Btn v="secondary" sm onClick={() => { window.open(`${import.meta.env.VITE_API_URL || '/api'}/nfes/${n.id}/download`, '_blank'); }}>⬇</Btn>
-                          {canWrite && <Btn v="secondary" sm onClick={() => { setEditNfe({ id: n.id, origStatus: n.st }); setEditNfeForm({ num: n.num, valor: String(n.valor), status: n.st }); }}>✏️</Btn>}
+                          {canWrite && <Btn v="secondary" sm onClick={() => { setEditNfe({ id: n.id, origStatus: n.st }); setEditNfeForm({ num: n.num, valor: String(n.valor), status: n.st, pgDt: n.pgDt || "" }); }}>✏️</Btn>}
                           {n.st === "pendente" && canWrite && <Btn v="success" sm onClick={() => markPago(n.id)}>💰 Pagar</Btn>}
                         </div>
                       </td>
@@ -7590,11 +7589,17 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
           <Inp label="Valor (R$)" value={editNfeForm.valor} onChange={v => setEditNfeForm({ ...editNfeForm, valor: v })} type="number" />
           <div style={{ marginBottom: 14 }}>
             <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Status</label>
-            <select value={editNfeForm.status} onChange={e => setEditNfeForm({ ...editNfeForm, status: e.target.value })} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+            <select value={editNfeForm.status} onChange={e => { const st = e.target.value; setEditNfeForm(f => ({ ...f, status: st, pgDt: st === "pago" && !f.pgDt ? new Date().toISOString().split("T")[0] : st === "pendente" ? "" : f.pgDt })); }} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
               <option value="pendente">Pendente</option>
               <option value="pago">Pago</option>
             </select>
           </div>
+          {editNfeForm.status === "pago" && (
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Data de Pagamento</label>
+              <input type="date" value={editNfeForm.pgDt} onChange={e => setEditNfeForm({ ...editNfeForm, pgDt: e.target.value })} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }} />
+            </div>
+          )}
         </div>
       </Modal>
     </div>
