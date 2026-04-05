@@ -7247,7 +7247,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
       }
     } catch (e) {
       console.error("Erro ao criar comissão:", e);
-      alert(e.response?.data?.error || "Erro ao criar comissão");
+      alert(e.response?.data?.detail || e.response?.data?.error || "Erro ao criar comissão");
     }
     setCommSaving(false);
   };

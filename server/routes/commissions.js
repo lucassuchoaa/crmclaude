@@ -90,10 +90,11 @@ router.post('/', authenticate, requireMinRole('gerente'), async (req, res) => {
 
     const id = uuidv4();
 
+    const indIdValue = indication_id || '';
     await db.prepare(`
       INSERT INTO commissions (id, indication_id, user_id, amount, percentage)
       VALUES (?, ?, ?, ?, ?)
-    `).run(id, indication_id || null, user_id, amount, percentage || 0);
+    `).run(id, indIdValue, user_id, amount, percentage || 0);
 
     const commission = await db.prepare(`
       SELECT c.*, i.razao_social, u.name as user_name
@@ -113,8 +114,8 @@ router.post('/', authenticate, requireMinRole('gerente'), async (req, res) => {
 
     res.status(201).json({ commission });
   } catch (error) {
-    console.error('Create commission error:', error);
-    res.status(500).json({ error: 'Failed to create commission' });
+    console.error('Create commission error:', error.message, error.stack);
+    res.status(500).json({ error: 'Failed to create commission', detail: error.message });
   }
 });
 
