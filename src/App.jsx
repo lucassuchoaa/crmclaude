@@ -7169,7 +7169,13 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
   const [tab, setTab] = useState(isParceiro ? "meusRel" : "relatorios");
   const [commModal, setCommModal] = useState(false);
   const [nfeModal, setNfeModal] = useState(false);
-  const [cf, setCf] = useState({ pId: "", titulo: "", periodo: "", valor: "" });
+  const MESES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+  const cfAnoAtual = new Date().getFullYear();
+  const cfMesAtual = new Date().getMonth(); // 0-indexed
+  const [cf, setCf] = useState({ pId: "", mes: String(cfMesAtual), ano: String(cfAnoAtual), valor: "" });
+  const [cfFile, setCfFile] = useState(null);
+  const cfTitulo = `Comissão ${MESES[parseInt(cf.mes)] || ""} ${cf.ano}`;
+  const cfPeriodo = `${(MESES[parseInt(cf.mes)] || "").slice(0,3)}/${cf.ano}`;
   const [nf, setNf] = useState({ num: "", valor: "", arq: "" });
 
   // Date filter
@@ -7219,7 +7225,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
 
   const [commSaving, setCommSaving] = useState(false);
   const addComm = async () => {
-    if (!cf.pId || !cf.titulo || !cf.periodo || !cf.valor || commSaving) return;
+    if (!cf.pId || !cf.valor || commSaving) return;
     setCommSaving(true);
     try {
       // Find an indication for this user to link to (use most recent ativo indication)
@@ -7233,14 +7239,15 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
       });
       const c = res.data.commission;
       setComms(prev => [...prev, {
-        id: c.id, pId: c.user_id, titulo: cf.titulo, periodo: cf.periodo,
-        valor: c.amount, arq: null,
+        id: c.id, pId: c.user_id, titulo: cfTitulo, periodo: cfPeriodo,
+        valor: c.amount, arq: cfFile ? cfFile.name : null,
         dt: c.created_at?.split('T')[0] || new Date().toISOString().split("T")[0], by: user.id
       }]);
       setCommModal(false);
-      setCf({ pId: "", titulo: "", periodo: "", valor: "" });
+      setCf({ pId: "", mes: String(cfMesAtual), ano: String(cfAnoAtual), valor: "" });
+      setCfFile(null);
       if (isCadenceActive(cadenceRules, "cad_comissao")) {
-        addNotif(setNotifs, { tipo: "financeiro", titulo: "Relatório de comissão", msg: `Novo relatório de comissão: ${cf.titulo} — R$ ${parseFloat(cf.valor).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}.`, para: cf.pId, de: user.id, link: "fin" });
+        addNotif(setNotifs, { tipo: "financeiro", titulo: "Relatório de comissão", msg: `Novo relatório de comissão: ${cfTitulo} — R$ ${parseFloat(cf.valor).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}.`, para: cf.pId, de: user.id, link: "fin" });
       }
     } catch (e) {
       console.error("Erro ao criar comissão:", e);
@@ -7498,7 +7505,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
 
       {/* Modal: Enviar Relatório de Comissão */}
       <Modal open={commModal} onClose={() => setCommModal(false)} title="Enviar Relatório de Comissão"
-        footer={<><Btn v="secondary" onClick={() => setCommModal(false)}>Cancelar</Btn><Btn onClick={addComm} disabled={!cf.pId || !cf.titulo || !cf.periodo || !cf.valor}>Enviar</Btn></>}>
+        footer={<><Btn v="secondary" onClick={() => setCommModal(false)}>Cancelar</Btn><Btn onClick={addComm} disabled={!cf.pId || !cf.valor}>Enviar</Btn></>}>
         <div className="grid r-grid" style={{ gap: 14 }}>
           <div style={{ gridColumn: "1/-1", marginBottom: 14 }}>
             <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Parceiro *</label>
@@ -7507,14 +7514,28 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
               {parceiros.map(p => <option key={p.id} value={p.id}>{p.name} — {p.empresa || "Sem empresa"}</option>)}
             </select>
           </div>
-          <Inp label="Título *" value={cf.titulo} onChange={v => setCf({ ...cf, titulo: v })} placeholder="Ex: Comissão Fevereiro 2025" />
-          <Inp label="Período *" value={cf.periodo} onChange={v => setCf({ ...cf, periodo: v })} placeholder="Ex: Fev/2025" />
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Periodo *</label>
+            <div style={{ display: "flex", gap: 10 }}>
+              <select value={cf.mes} onChange={e => setCf({ ...cf, mes: e.target.value })} style={{ flex: 1, padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+                {MESES.map((m, i) => <option key={i} value={String(i)}>{m}</option>)}
+              </select>
+              <select value={cf.ano} onChange={e => setCf({ ...cf, ano: e.target.value })} style={{ width: 100, padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+                {[cfAnoAtual - 1, cfAnoAtual, cfAnoAtual + 1].map(a => <option key={a} value={String(a)}>{a}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Titulo</label>
+            <div style={{ padding: "10px 12px", background: T.bg2, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.tm, fontSize: 13 }}>{cfTitulo}</div>
+          </div>
           <Inp label="Valor (R$) *" value={cf.valor} onChange={v => setCf({ ...cf, valor: v })} type="number" placeholder="0.00" />
           <div style={{ marginBottom: 14 }}>
             <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Arquivo</label>
-            <div style={{ padding: "20px 14px", background: T.inp, border: `2px dashed ${T.bor}`, borderRadius: 6, textAlign: "center", fontSize: 12, color: T.tm, cursor: "pointer" }}>
-              📎 Clique para anexar PDF
-            </div>
+            <label style={{ display: "block", padding: "20px 14px", background: cfFile ? T.ok + "0D" : T.inp, border: `2px dashed ${cfFile ? T.ok : T.bor}`, borderRadius: 6, textAlign: "center", fontSize: 12, color: cfFile ? T.ok : T.tm, cursor: "pointer", transition: "all 0.2s" }}>
+              <input type="file" accept=".pdf,.xlsx,.xls,.docx,.doc,.png,.jpg,.jpeg" style={{ display: "none" }} onChange={e => { if (e.target.files[0]) setCfFile(e.target.files[0]); }} />
+              {cfFile ? `✓ ${cfFile.name}` : "📎 Clique para anexar PDF"}
+            </label>
           </div>
         </div>
       </Modal>
