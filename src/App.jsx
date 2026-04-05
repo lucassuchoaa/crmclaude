@@ -7276,7 +7276,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
       }
     } catch (e) {
       console.error("Erro ao enviar NFe:", e);
-      alert(e.response?.data?.error || "Erro ao enviar NFe");
+      alert(e.response?.data?.detail || e.response?.data?.error || "Erro ao enviar NFe");
     }
     setNfeSaving(false);
   };
@@ -7539,7 +7539,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
 
       {/* Modal: Enviar NFe */}
       <Modal open={nfeModal} onClose={() => setNfeModal(false)} title="Enviar Nota Fiscal (NFe)"
-        footer={<><Btn v="secondary" onClick={() => setNfeModal(false)}>Cancelar</Btn><Btn onClick={addNfe} disabled={!nf.num || !nf.valor}>Enviar NFe</Btn></>}>
+        footer={<><Btn v="secondary" onClick={() => setNfeModal(false)}>Cancelar</Btn><Btn onClick={addNfe} disabled={!nf.num || !nf.valor || !nfFile}>Enviar NFe</Btn></>}>
         <div style={{ marginBottom: 16, padding: 12, background: T.inp, borderRadius: 6, fontSize: 12, color: T.t2 }}>
           📋 Envie a nota fiscal referente à comissão do período. O pagamento será processado após validação.
         </div>

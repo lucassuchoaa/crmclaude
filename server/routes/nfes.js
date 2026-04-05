@@ -89,12 +89,13 @@ router.post('/', authenticate, upload.single('file'), async (req, res) => {
 
     const db = getDatabase();
     const id = uuidv4();
+    const numericValue = parseFloat(value) || 0;
     const fileData = req.file ? req.file.buffer : null;
     const fileName = req.file ? req.file.originalname : null;
 
     await db.prepare(`
       INSERT INTO nfes (id, user_id, number, value, notes, file_data, file_name) VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(id, req.user.id, number, value, notes || null, fileData, fileName);
+    `).run(id, req.user.id, number, numericValue, notes || null, fileData, fileName);
 
     const nfe = await db.prepare('SELECT id, user_id, number, value, status, file_name, notes, created_at, updated_at FROM nfes WHERE id = ?').get(id);
 
@@ -120,8 +121,8 @@ router.post('/', authenticate, upload.single('file'), async (req, res) => {
 
     res.status(201).json({ nfe });
   } catch (error) {
-    console.error('Create NFE error:', error);
-    res.status(500).json({ error: 'Failed to create NFE' });
+    console.error('Create NFE error:', error.message, error.stack);
+    res.status(500).json({ error: 'Failed to create NFE', detail: error.message });
   }
 });
 

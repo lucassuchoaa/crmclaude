@@ -103,12 +103,14 @@ router.post('/', authenticate, requireMinRole('gerente'), upload.single('file'),
     const id = uuidv4();
 
     const indIdValue = indication_id || '';
+    const numericAmount = parseFloat(amount) || 0;
+    const numericPercentage = parseFloat(percentage) || 0;
     const fileData = req.file ? req.file.buffer : null;
     const fileName = req.file ? req.file.originalname : null;
     await db.prepare(`
       INSERT INTO commissions (id, indication_id, user_id, amount, percentage, file_data, file_name)
       VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(id, indIdValue, user_id, amount, percentage || 0, fileData, fileName);
+    `).run(id, indIdValue, user_id, numericAmount, numericPercentage, fileData, fileName);
 
     const commission = await db.prepare(`
       SELECT c.*, i.razao_social, u.name as user_name
