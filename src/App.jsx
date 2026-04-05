@@ -7176,7 +7176,8 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
   const [cfFile, setCfFile] = useState(null);
   const cfTitulo = `Comissão ${MESES[parseInt(cf.mes)] || ""} ${cf.ano}`;
   const cfPeriodo = `${(MESES[parseInt(cf.mes)] || "").slice(0,3)}/${cf.ano}`;
-  const [nf, setNf] = useState({ num: "", valor: "", arq: "" });
+  const [nf, setNf] = useState({ num: "", valor: "" });
+  const [nfFile, setNfFile] = useState(null);
 
   // Date filter
   const now = new Date();
@@ -7260,16 +7261,16 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
       const res = await nfesApi.create({
         number: nf.num,
         value: parseFloat(nf.valor) || 0,
-        notes: nf.arq || null,
-      });
+      }, nfFile || null);
       const n = res.data.nfe;
       setNfes(prev => [...prev, {
         id: n.id, pId: n.user_id, num: n.number,
-        valor: n.value, arq: n.file_path,
+        valor: n.value, arq: n.file_name || null,
         dt: n.created_at?.split('T')[0] || new Date().toISOString().split("T")[0], st: "pendente", pgDt: null
       }]);
       setNfeModal(false);
-      setNf({ num: "", valor: "", arq: "" });
+      setNf({ num: "", valor: "" });
+      setNfFile(null);
       if (user.gId && isCadenceActive(cadenceRules, "cad_nfe_enviada")) {
         addNotif(setNotifs, { tipo: "financeiro", titulo: "NFe recebida", msg: `Parceiro ${user.name} enviou ${nf.num} — R$ ${parseFloat(nf.valor).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}.`, para: user.gId, de: user.id, link: "fin" });
       }
@@ -7547,9 +7548,10 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
           <Inp label="Valor (R$) *" value={nf.valor} onChange={v => setNf({ ...nf, valor: v })} type="number" placeholder="0.00" />
           <div style={{ gridColumn: "1/-1", marginBottom: 14 }}>
             <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Arquivo da NFe</label>
-            <div style={{ padding: "24px 14px", background: T.inp, border: `2px dashed ${T.bor}`, borderRadius: 6, textAlign: "center", fontSize: 12, color: T.tm, cursor: "pointer" }}>
-              📎 Clique para anexar o PDF da NFe
-            </div>
+            <label style={{ display: "block", padding: "24px 14px", background: nfFile ? T.ok + "0D" : T.inp, border: `2px dashed ${nfFile ? T.ok : T.bor}`, borderRadius: 6, textAlign: "center", fontSize: 12, color: nfFile ? T.ok : T.tm, cursor: "pointer", transition: "all 0.2s" }}>
+              <input type="file" accept=".pdf,.xlsx,.xls,.docx,.doc,.png,.jpg,.jpeg" style={{ display: "none" }} onChange={e => { if (e.target.files[0]) setNfFile(e.target.files[0]); }} />
+              {nfFile ? `✓ ${nfFile.name}` : "📎 Clique para anexar o PDF da NFe"}
+            </label>
           </div>
         </div>
       </Modal>

@@ -1,18 +1,22 @@
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
+import multer from 'multer';
 import { getDatabase } from '../config/database.js';
 import { hasPermission, canViewAllFinancial } from '../config/auth.js';
 import { authenticate } from '../middleware/auth.js';
 import { requireMinRole } from '../middleware/rbac.js';
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const uploadsDir = path.resolve(__dirname, '..', 'uploads', 'nfes');
 import { validateStatus, NFE_STATUSES } from '../utils/validators.js';
 import { createNotification } from '../utils/notificationHelper.js';
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = ['.pdf', '.xlsx', '.xls', '.docx', '.doc', '.png', '.jpg', '.jpeg'];
+    const ext = file.originalname.toLowerCase().match(/\.[^.]+$/)?.[0] || '';
+    cb(null, allowed.includes(ext));
+  }
+});
 
 const router = express.Router();
 
@@ -23,7 +27,8 @@ router.get('/', authenticate, async (req, res) => {
     const { user_id, status, limit = 100, offset = 0 } = req.query;
 
     let query = `
-      SELECT n.*, u.name as user_name, u.avatar as user_avatar
+      SELECT n.id, n.user_id, n.number, n.value, n.status, n.file_name, n.file_path, n.notes, n.created_at, n.updated_at, n.netsuite_id,
+             u.name as user_name, u.avatar as user_avatar
       FROM nfes n
       LEFT JOIN users u ON n.user_id = u.id
       WHERE 1=1
@@ -77,19 +82,21 @@ router.get('/:id', authenticate, async (req, res) => {
 });
 
 // Create NFE
-router.post('/', authenticate, async (req, res) => {
+router.post('/', authenticate, upload.single('file'), async (req, res) => {
   try {
     const { number, value, notes } = req.body;
     if (!number || !value) return res.status(400).json({ error: 'Number and value required' });
 
     const db = getDatabase();
     const id = uuidv4();
+    const fileData = req.file ? req.file.buffer : null;
+    const fileName = req.file ? req.file.originalname : null;
 
     await db.prepare(`
-      INSERT INTO nfes (id, user_id, number, value, notes) VALUES (?, ?, ?, ?, ?)
-    `).run(id, req.user.id, number, value, notes || null);
+      INSERT INTO nfes (id, user_id, number, value, notes, file_data, file_name) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(id, req.user.id, number, value, notes || null, fileData, fileName);
 
-    const nfe = await db.prepare('SELECT * FROM nfes WHERE id = ?').get(id);
+    const nfe = await db.prepare('SELECT id, user_id, number, value, status, file_name, notes, created_at, updated_at FROM nfes WHERE id = ?').get(id);
 
     const admins = await db.prepare(`
       SELECT id FROM users WHERE role IN ('super_admin', 'executivo') AND is_active = 1
@@ -178,20 +185,20 @@ router.delete('/:id', authenticate, async (req, res) => {
 router.get('/:id/download', authenticate, async (req, res) => {
   try {
     const db = getDatabase();
-    const nfe = await db.prepare('SELECT * FROM nfes WHERE id = ?').get(req.params.id);
+    const nfe = await db.prepare('SELECT file_data, file_name, user_id FROM nfes WHERE id = ?').get(req.params.id);
     if (!nfe) return res.status(404).json({ error: 'NFE not found' });
 
     if (!hasPermission(req.user.role, 'diretor') && !canViewAllFinancial(req.user.role) && nfe.user_id !== req.user.id) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    if (!nfe.file_path) return res.status(404).json({ error: 'Nenhum arquivo anexado a esta NFE' });
+    if (!nfe.file_data) return res.status(404).json({ error: 'Nenhum arquivo anexado a esta NFE' });
 
-    const filePath = path.resolve(uploadsDir, path.basename(nfe.file_path));
-    if (!filePath.startsWith(uploadsDir) || !fs.existsSync(filePath)) {
-      return res.status(404).json({ error: 'Arquivo não encontrado no servidor' });
-    }
-    res.download(filePath);
+    const ext = (nfe.file_name || '').match(/\.[^.]+$/)?.[0] || '.pdf';
+    const mimeMap = { '.pdf': 'application/pdf', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '.xls': 'application/vnd.ms-excel', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' };
+    res.setHeader('Content-Type', mimeMap[ext] || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${nfe.file_name || 'nfe' + ext}"`);
+    res.send(Buffer.from(nfe.file_data));
   } catch (error) {
     console.error('Download NFE error:', error);
     res.status(500).json({ error: 'Failed to download NFE' });

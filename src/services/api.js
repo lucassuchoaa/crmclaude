@@ -190,8 +190,15 @@ export const nfesApi = {
   getById: (id) =>
     api.get(`/nfes/${id}`),
 
-  create: (data) =>
-    api.post('/nfes', data),
+  create: (data, file) => {
+    if (file) {
+      const fd = new FormData();
+      Object.entries(data).forEach(([k, v]) => { if (v !== undefined && v !== null) fd.append(k, v); });
+      fd.append('file', file);
+      return api.post('/nfes', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+    }
+    return api.post('/nfes', data);
+  },
 
   updateStatus: (id, status, notes) =>
     api.patch(`/nfes/${id}/status`, { status, notes }),
