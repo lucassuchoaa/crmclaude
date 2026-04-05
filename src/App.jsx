@@ -7172,11 +7172,43 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
   const [cf, setCf] = useState({ pId: "", titulo: "", periodo: "", valor: "" });
   const [nf, setNf] = useState({ num: "", valor: "", arq: "" });
 
+  // Date filter
+  const now = new Date();
+  const mesAtualDe = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  const mesAtualAte = now.toISOString().split('T')[0];
+  const mesPasDe = (() => { const d = new Date(now.getFullYear(), now.getMonth() - 1, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`; })();
+  const mesPasAte = (() => { const d = new Date(now.getFullYear(), now.getMonth(), 0); return d.toISOString().split('T')[0]; })();
+  const [datePreset, setDatePreset] = useState("mes_atual");
+  const [dateFrom, setDateFrom] = useState(mesAtualDe);
+  const [dateTo, setDateTo] = useState(mesAtualAte);
+
+  const applyPreset = (preset) => {
+    setDatePreset(preset);
+    if (preset === "mes_atual") { setDateFrom(mesAtualDe); setDateTo(mesAtualAte); }
+    else if (preset === "mes_passado") { setDateFrom(mesPasDe); setDateTo(mesPasAte); }
+    else if (preset === "todos") { setDateFrom(""); setDateTo(""); }
+    // "custom" keeps current values
+  };
+
+  const filterByDate = (items) => {
+    if (!dateFrom && !dateTo) return items;
+    return items.filter(item => {
+      const dt = item.dt || "";
+      if (dateFrom && dt < dateFrom) return false;
+      if (dateTo && dt > dateTo) return false;
+      return true;
+    });
+  };
+
   // Filter data by role
-  const myComms = isParceiro ? comms.filter(r => r.pId === user.id) :
+  const roleComms = isParceiro ? comms.filter(r => r.pId === user.id) :
     (isGerente && !isFinanceiro) ? comms.filter(r => { const p = users.find(u => u.id === r.pId); return p && p.gId === user.id; }) : comms;
-  const myNfes = isParceiro ? nfes.filter(n => n.pId === user.id) :
+  const roleNfes = isParceiro ? nfes.filter(n => n.pId === user.id) :
     (isGerente && !isFinanceiro) ? nfes.filter(n => { const p = users.find(u => u.id === n.pId); return p && p.gId === user.id; }) : nfes;
+
+  // Apply date filter
+  const myComms = filterByDate(roleComms);
+  const myNfes = filterByDate(roleNfes);
 
   const parceiros = isGerente ? users.filter(u => u.role === "parceiro" && u.gId === user.id) : users.filter(u => u.role === "parceiro");
 
@@ -7287,6 +7319,35 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
         </div>
       </div>
 
+      {/* Date filter */}
+      <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 14, marginBottom: 16, display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: T.t2, textTransform: "uppercase", letterSpacing: 0.5 }}>Periodo:</span>
+        {[
+          { id: "mes_atual", l: "Mês Atual" },
+          { id: "mes_passado", l: "Mês Passado" },
+          { id: "todos", l: "Todos" },
+          { id: "custom", l: "Personalizado" },
+        ].map(p => (
+          <button key={p.id} onClick={() => applyPreset(p.id)} style={{
+            padding: "6px 14px", fontSize: 12, fontWeight: 500, cursor: "pointer",
+            border: `1px solid ${datePreset === p.id ? T.ac : T.bor}`,
+            background: datePreset === p.id ? T.ac + "15" : "transparent",
+            color: datePreset === p.id ? T.ac : T.tm,
+            borderRadius: 20, fontFamily: "'DM Sans',sans-serif", transition: "all 0.15s",
+          }}>{p.l}</button>
+        ))}
+        {datePreset === "custom" && (
+          <>
+            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ padding: "6px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12 }} />
+            <span style={{ fontSize: 12, color: T.tm }}>até</span>
+            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ padding: "6px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12 }} />
+          </>
+        )}
+        {datePreset !== "todos" && datePreset !== "custom" && (
+          <span style={{ fontSize: 11, color: T.tm, marginLeft: 4 }}>{dateFrom} → {dateTo}</span>
+        )}
+      </div>
+
       {/* Tabs */}
       <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${T.bor}`, marginBottom: 20 }}>
         {tabs.map(t => <button key={t} onClick={() => setTab(t)} style={{ padding: "10px 16px", fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: "none", color: tab === t ? T.ac : T.tm, fontFamily: "'DM Sans',sans-serif", borderBottom: `2px solid ${tab === t ? T.ac : "transparent"}`, marginBottom: -1 }}>{tabLabels[t]}</button>)}
@@ -7296,7 +7357,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
       {(tab === "relatorios") && (
         <div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 14 }}>
-            {(isAdmin || isFinanceiro) && <Btn v="secondary" onClick={() => { window.open(`${import.meta.env.VITE_API_URL || ''}/api/commissions/export/csv`, '_blank'); }}>📥 Exportar CSV</Btn>}
+            {(isAdmin || isFinanceiro) && <Btn v="secondary" onClick={() => { const params = new URLSearchParams(); if (dateFrom) params.set('from_date', dateFrom); if (dateTo) params.set('to_date', dateTo); window.open(`${import.meta.env.VITE_API_URL || ''}/api/commissions/export/csv?${params}`, '_blank'); }}>📥 Exportar CSV</Btn>}
             {canWrite && <Btn onClick={() => setCommModal(true)}>📤 Enviar Relatório</Btn>}
           </div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
@@ -7333,7 +7394,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
       {(tab === "nfes") && (
         <div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 14 }}>
-            {(isAdmin || isFinanceiro) && <Btn v="secondary" onClick={() => { window.open(`${import.meta.env.VITE_API_URL || ''}/api/nfes/export/csv`, '_blank'); }}>📥 Exportar CSV</Btn>}
+            {(isAdmin || isFinanceiro) && <Btn v="secondary" onClick={() => { const params = new URLSearchParams(); if (dateFrom) params.set('from_date', dateFrom); if (dateTo) params.set('to_date', dateTo); window.open(`${import.meta.env.VITE_API_URL || ''}/api/nfes/export/csv?${params}`, '_blank'); }}>📥 Exportar CSV</Btn>}
           </div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
             <div className="table-responsive"><table className="data-table">
