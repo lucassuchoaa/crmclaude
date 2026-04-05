@@ -123,7 +123,7 @@ router.post('/', authenticate, requireMinRole('gerente'), upload.single('file'),
     await createNotification({
       userId: user_id,
       title: 'Nova comissao',
-      message: `Voce tem uma nova comissao de R$ ${amount.toFixed(2)} pendente`,
+      message: `Voce tem uma nova comissao de R$ ${numericAmount.toFixed(2)} pendente`,
       type: 'success',
       link: `/commissions/${id}`
     });
