@@ -7275,16 +7275,19 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
         percentage: 0,
       }, cfFile || null);
       const c = res.data.commission;
+      const savedTitulo = cfTitulo;
+      const savedValor = c.amount;
+      const savedPId = cf.pId;
       setComms(prev => [...prev, {
-        id: c.id, pId: c.user_id, titulo: cfTitulo, periodo: cfPeriodo,
-        valor: c.amount, arq: cfFile ? cfFile.name : null,
-        dt: c.created_at?.split('T')[0] || new Date().toISOString().split("T")[0], by: user.id
+        id: c.id, pId: c.user_id, titulo: savedTitulo, periodo: cfPeriodo,
+        valor: savedValor, arq: cfFile ? cfFile.name : null,
+        dt: (c.created_at || '').replace(' ', 'T').split('T')[0] || new Date().toISOString().split("T")[0], by: user.id
       }]);
       setCommModal(false);
       setCf({ pId: "", mes: String(cfMesAtual), ano: String(cfAnoAtual), valor: "" });
       setCfFile(null);
       if (isCadenceActive(cadenceRules, "cad_comissao")) {
-        addNotif(setNotifs, { tipo: "financeiro", titulo: "Relatório de comissão", msg: `Novo relatório de comissão: ${cfTitulo} — R$ ${parseFloat(cf.valor).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}.`, para: cf.pId, de: user.id, link: "fin" });
+        addNotif(setNotifs, { tipo: "financeiro", titulo: "Relatório de comissão", msg: `Novo relatório de comissão: ${savedTitulo} — R$ ${savedValor.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}.`, para: savedPId, de: user.id, link: "fin" });
       }
     } catch (e) {
       console.error("Erro ao criar comissão:", e);
