@@ -1,11 +1,23 @@
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
+import multer from 'multer';
 import { getDatabase } from '../config/database.js';
 import { hasPermission, canViewAllFinancial } from '../config/auth.js';
 import { authenticate } from '../middleware/auth.js';
 import { requireMinRole } from '../middleware/rbac.js';
 import { validateStatus, COMMISSION_STATUSES } from '../utils/validators.js';
 import { createNotification } from '../utils/notificationHelper.js';
+
+const isPg = !!process.env.DATABASE_URL;
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = ['.pdf', '.xlsx', '.xls', '.docx', '.doc', '.png', '.jpg', '.jpeg'];
+    const ext = file.originalname.toLowerCase().match(/\.[^.]+$/)?.[0] || '';
+    cb(null, allowed.includes(ext));
+  }
+});
 
 const router = express.Router();
 
@@ -68,7 +80,7 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // Create commission
-router.post('/', authenticate, requireMinRole('gerente'), async (req, res) => {
+router.post('/', authenticate, requireMinRole('gerente'), upload.single('file'), async (req, res) => {
   try {
     const { indication_id, user_id, amount, percentage } = req.body;
 
@@ -91,10 +103,12 @@ router.post('/', authenticate, requireMinRole('gerente'), async (req, res) => {
     const id = uuidv4();
 
     const indIdValue = indication_id || '';
+    const fileData = req.file ? req.file.buffer : null;
+    const fileName = req.file ? req.file.originalname : null;
     await db.prepare(`
-      INSERT INTO commissions (id, indication_id, user_id, amount, percentage)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(id, indIdValue, user_id, amount, percentage || 0);
+      INSERT INTO commissions (id, indication_id, user_id, amount, percentage, file_data, file_name)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(id, indIdValue, user_id, amount, percentage || 0, fileData, fileName);
 
     const commission = await db.prepare(`
       SELECT c.*, i.razao_social, u.name as user_name
@@ -162,6 +176,30 @@ router.patch('/:id/status', authenticate, requireMinRole('diretor'), async (req,
   } catch (error) {
     console.error('Update commission error:', error);
     res.status(500).json({ error: 'Failed to update commission' });
+  }
+});
+
+// Download commission file
+router.get('/:id/download', authenticate, async (req, res) => {
+  try {
+    const db = getDatabase();
+    const comm = await db.prepare('SELECT file_data, file_name, user_id FROM commissions WHERE id = ?').get(req.params.id);
+    if (!comm) return res.status(404).json({ error: 'Commission not found' });
+
+    if (!hasPermission(req.user.role, 'diretor') && !canViewAllFinancial(req.user.role) && comm.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    if (!comm.file_data) return res.status(404).json({ error: 'Nenhum arquivo anexado a esta comissão' });
+
+    const ext = (comm.file_name || '').match(/\.[^.]+$/)?.[0] || '.pdf';
+    const mimeMap = { '.pdf': 'application/pdf', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '.xls': 'application/vnd.ms-excel', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' };
+    res.setHeader('Content-Type', mimeMap[ext] || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${comm.file_name || 'comissao' + ext}"`);
+    res.send(Buffer.from(comm.file_data));
+  } catch (error) {
+    console.error('Download commission file error:', error);
+    res.status(500).json({ error: 'Failed to download file' });
   }
 });
 

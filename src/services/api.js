@@ -165,8 +165,15 @@ export const commissionsApi = {
   getAll: (params) =>
     api.get('/commissions', { params }),
 
-  create: (data) =>
-    api.post('/commissions', data),
+  create: (data, file) => {
+    if (file) {
+      const fd = new FormData();
+      Object.entries(data).forEach(([k, v]) => { if (v !== undefined && v !== null) fd.append(k, v); });
+      fd.append('file', file);
+      return api.post('/commissions', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+    }
+    return api.post('/commissions', data);
+  },
 
   updateStatus: (id, status, paymentDate) =>
     api.patch(`/commissions/${id}/status`, { status, payment_date: paymentDate }),

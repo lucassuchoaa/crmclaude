@@ -1057,6 +1057,10 @@ async function createTables(db) {
     if (isPg) {
       try { await ddl('ALTER TABLE commissions ALTER COLUMN indication_id DROP NOT NULL'); } catch {}
     }
+
+    // Commission file upload columns
+    await safeAddColumn('commissions', 'file_data', isPg ? 'BYTEA' : 'BLOB');
+    await safeAddColumn('commissions', 'file_name', 'TEXT');
   }
 
   // ── Indexes ──

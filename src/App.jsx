@@ -7232,7 +7232,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
         user_id: cf.pId,
         amount: parseFloat(cf.valor) || 0,
         percentage: 0,
-      });
+      }, cfFile || null);
       const c = res.data.commission;
       setComms(prev => [...prev, {
         id: c.id, pId: c.user_id, titulo: cfTitulo, periodo: cfPeriodo,
@@ -7395,7 +7395,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
                       <td style={{ ...tdStyle, fontFamily: "'Space Mono',monospace", fontWeight: 600 }}>{fmtBRL(r.valor)}</td>
                       <td style={{ ...tdStyle, fontSize: 11, color: T.t2 }}>📄 {r.arq}</td>
                       <td style={{ ...tdStyle, fontSize: 11, color: T.tm }}>{r.dt}</td>
-                      <td style={tdStyle}><Btn v="secondary" sm onClick={() => alert("Arquivo de comissão não disponível para download")}>⬇ Download</Btn></td>
+                      <td style={tdStyle}><Btn v="secondary" sm onClick={() => { window.open(`${import.meta.env.VITE_API_URL || ''}/api/commissions/${r.id}/download`, '_blank'); }}>⬇ Download</Btn></td>
                     </tr>
                   );
                 })}
@@ -7462,7 +7462,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
                     <td style={{ ...tdStyle, fontFamily: "'Space Mono',monospace", fontWeight: 600, color: T.ok }}>{fmtBRL(r.valor)}</td>
                     <td style={{ ...tdStyle, fontSize: 11, color: T.t2 }}>📄 {r.arq}</td>
                     <td style={{ ...tdStyle, fontSize: 11, color: T.tm }}>{r.dt}</td>
-                    <td style={tdStyle}><Btn v="secondary" sm onClick={() => alert("Arquivo de comissão não disponível para download")}>⬇ Download</Btn></td>
+                    <td style={tdStyle}><Btn v="secondary" sm onClick={() => { window.open(`${import.meta.env.VITE_API_URL || ''}/api/commissions/${r.id}/download`, '_blank'); }}>⬇ Download</Btn></td>
                   </tr>
                 ))}
                 {myComms.length === 0 && <tr><td colSpan={6} style={{ padding: 40, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhum relatório disponível.</td></tr>}
