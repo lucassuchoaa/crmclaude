@@ -7200,17 +7200,22 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
     });
   };
 
+  // Parceiro filter (for gestores)
+  const canFilterParceiro = !isParceiro;
+  const [filterParceiro, setFilterParceiro] = useState("");
+
+  const parceiros = isGerente ? users.filter(u => u.role === "parceiro" && u.gId === user.id) : users.filter(u => u.role === "parceiro");
+
   // Filter data by role
   const roleComms = isParceiro ? comms.filter(r => r.pId === user.id) :
     (isGerente && !isFinanceiro) ? comms.filter(r => { const p = users.find(u => u.id === r.pId); return p && p.gId === user.id; }) : comms;
   const roleNfes = isParceiro ? nfes.filter(n => n.pId === user.id) :
     (isGerente && !isFinanceiro) ? nfes.filter(n => { const p = users.find(u => u.id === n.pId); return p && p.gId === user.id; }) : nfes;
 
-  // Apply date filter
-  const myComms = filterByDate(roleComms);
-  const myNfes = filterByDate(roleNfes);
-
-  const parceiros = isGerente ? users.filter(u => u.role === "parceiro" && u.gId === user.id) : users.filter(u => u.role === "parceiro");
+  // Apply date + parceiro filters
+  const filterByParceiro = (items) => filterParceiro ? items.filter(i => i.pId === filterParceiro) : items;
+  const myComms = filterByParceiro(filterByDate(roleComms));
+  const myNfes = filterByParceiro(filterByDate(roleNfes));
 
   const [commSaving, setCommSaving] = useState(false);
   const addComm = async () => {
@@ -7346,6 +7351,14 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
         {datePreset !== "todos" && datePreset !== "custom" && (
           <span style={{ fontSize: 11, color: T.tm, marginLeft: 4 }}>{dateFrom} → {dateTo}</span>
         )}
+        {canFilterParceiro && parceiros.length > 0 && <>
+          <div style={{ width: 1, height: 24, background: T.bor, margin: "0 4px" }} />
+          <select value={filterParceiro} onChange={e => setFilterParceiro(e.target.value)} style={{ padding: "6px 10px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 12, minWidth: 180 }}>
+            <option value="">Todos os parceiros</option>
+            {parceiros.map(p => <option key={p.id} value={p.id}>{p.name}{p.empresa ? ` — ${p.empresa}` : ""}</option>)}
+          </select>
+          {filterParceiro && <button onClick={() => setFilterParceiro("")} style={{ padding: "4px 10px", fontSize: 11, cursor: "pointer", border: `1px solid ${T.bor}`, background: "transparent", color: T.tm, borderRadius: 20, fontFamily: "'DM Sans',sans-serif" }}>Limpar</button>}
+        </>}
       </div>
 
       {/* Tabs */}
