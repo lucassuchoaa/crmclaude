@@ -1016,6 +1016,22 @@ async function createTables(db) {
     await pgSafeAddColumn('deals', 'num_employees', 'INTEGER');
     await pgSafeAddColumn('deals', 'product_id', 'TEXT');
     await pgSafeAddColumn('users', 'uf', 'TEXT');
+    await pgSafeAddColumn('leads', 'uf', 'TEXT');
+    await pgSafeAddColumn('leads', 'municipio', 'TEXT');
+
+    // NetSuite integration columns
+    await pgSafeAddColumn('users', 'netsuite_vendor_id', 'TEXT');
+    await pgSafeAddColumn('nfes', 'netsuite_id', 'TEXT');
+    await pgSafeAddColumn('commissions', 'netsuite_id', 'TEXT');
+
+    // Allow commissions without indication
+    try { await db.exec('ALTER TABLE commissions ALTER COLUMN indication_id DROP NOT NULL'); } catch {}
+
+    // File upload columns
+    await pgSafeAddColumn('commissions', 'file_data', 'BYTEA');
+    await pgSafeAddColumn('commissions', 'file_name', 'TEXT');
+    await pgSafeAddColumn('nfes', 'file_data', 'BYTEA');
+    await pgSafeAddColumn('nfes', 'file_name', 'TEXT');
   } else {
     const safeAddColumn = async (table, column, definition) => {
       try {
