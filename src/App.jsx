@@ -7200,7 +7200,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
   const filterByDate = (items) => {
     if (!dateFrom && !dateTo) return items;
     return items.filter(item => {
-      const dt = item.dt || "";
+      const dt = (item.dt || "").slice(0, 10);
       if (dateFrom && dt < dateFrom) return false;
       if (dateTo && dt > dateTo) return false;
       return true;
@@ -9926,7 +9926,7 @@ export default function App() {
             periodo: c.created_at?.slice(0, 7) || '',
             valor: c.amount,
             arq: null,
-            dt: c.created_at?.split('T')[0] || c.created_at,
+            dt: (c.created_at || '').replace(' ', 'T').split('T')[0],
             by: c.manager_id || 'g1',
           }));
           setComms(commissions);
@@ -9938,7 +9938,7 @@ export default function App() {
             num: n.number,
             valor: n.value,
             arq: n.file_path,
-            dt: n.created_at?.split('T')[0] || n.created_at,
+            dt: (n.created_at || '').replace(' ', 'T').split('T')[0],
             st: n.status === 'paid' ? 'pago' : 'pendente',
             pgDt: n.payment_date,
           }));
