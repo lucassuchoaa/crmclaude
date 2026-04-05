@@ -7178,6 +7178,31 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
   const cfPeriodo = `${(MESES[parseInt(cf.mes)] || "").slice(0,3)}/${cf.ano}`;
   const [nf, setNf] = useState({ num: "", valor: "" });
   const [nfFile, setNfFile] = useState(null);
+  const [editNfe, setEditNfe] = useState(null);
+  const [editNfeForm, setEditNfeForm] = useState({ num: "", valor: "", status: "" });
+  const [editNfeSaving, setEditNfeSaving] = useState(false);
+
+  const saveEditNfe = async () => {
+    if (!editNfe || editNfeSaving) return;
+    setEditNfeSaving(true);
+    try {
+      // Update status if changed
+      if (editNfeForm.status !== editNfe.origStatus) {
+        await nfesApi.updateStatus(editNfe.id, editNfeForm.status === "pago" ? "paid" : "pending", null);
+      }
+      setNfes(prev => prev.map(n => n.id === editNfe.id ? {
+        ...n,
+        num: editNfeForm.num,
+        valor: parseFloat(editNfeForm.valor) || n.valor,
+        st: editNfeForm.status,
+        pgDt: editNfeForm.status === "pago" ? (n.pgDt || new Date().toISOString().split("T")[0]) : null,
+      } : n));
+      setEditNfe(null);
+    } catch (e) {
+      alert(e.response?.data?.detail || e.response?.data?.error || "Erro ao editar NFe");
+    }
+    setEditNfeSaving(false);
+  };
 
   // Date filter
   const now = new Date();
@@ -7374,7 +7399,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
       {(tab === "relatorios") && (
         <div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 14 }}>
-            {(isAdmin || isFinanceiro) && <Btn v="secondary" onClick={() => { const params = new URLSearchParams(); if (dateFrom) params.set('from_date', dateFrom); if (dateTo) params.set('to_date', dateTo); window.open(`${import.meta.env.VITE_API_URL || ''}/api/commissions/export/csv?${params}`, '_blank'); }}>📥 Exportar CSV</Btn>}
+            {(isAdmin || isFinanceiro) && <Btn v="secondary" onClick={() => { const params = new URLSearchParams(); if (dateFrom) params.set('from_date', dateFrom); if (dateTo) params.set('to_date', dateTo); window.open(`${import.meta.env.VITE_API_URL || '/api'}/commissions/export/csv?${params}`, '_blank'); }}>📥 Exportar CSV</Btn>}
             {canWrite && <Btn onClick={() => setCommModal(true)}>📤 Enviar Relatório</Btn>}
           </div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
@@ -7396,7 +7421,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
                       <td style={{ ...tdStyle, fontFamily: "'Space Mono',monospace", fontWeight: 600 }}>{fmtBRL(r.valor)}</td>
                       <td style={{ ...tdStyle, fontSize: 11, color: T.t2 }}>📄 {r.arq}</td>
                       <td style={{ ...tdStyle, fontSize: 11, color: T.tm }}>{r.dt}</td>
-                      <td style={tdStyle}><Btn v="secondary" sm onClick={() => { window.open(`${import.meta.env.VITE_API_URL || ''}/api/commissions/${r.id}/download`, '_blank'); }}>⬇ Download</Btn></td>
+                      <td style={tdStyle}><Btn v="secondary" sm onClick={() => { window.open(`${import.meta.env.VITE_API_URL || '/api'}/commissions/${r.id}/download`, '_blank'); }}>⬇ Download</Btn></td>
                     </tr>
                   );
                 })}
@@ -7411,7 +7436,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
       {(tab === "nfes") && (
         <div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 14 }}>
-            {(isAdmin || isFinanceiro) && <Btn v="secondary" onClick={() => { const params = new URLSearchParams(); if (dateFrom) params.set('from_date', dateFrom); if (dateTo) params.set('to_date', dateTo); window.open(`${import.meta.env.VITE_API_URL || ''}/api/nfes/export/csv?${params}`, '_blank'); }}>📥 Exportar CSV</Btn>}
+            {(isAdmin || isFinanceiro) && <Btn v="secondary" onClick={() => { const params = new URLSearchParams(); if (dateFrom) params.set('from_date', dateFrom); if (dateTo) params.set('to_date', dateTo); window.open(`${import.meta.env.VITE_API_URL || '/api'}/nfes/export/csv?${params}`, '_blank'); }}>📥 Exportar CSV</Btn>}
           </div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
             <div className="table-responsive"><table className="data-table">
@@ -7435,7 +7460,8 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
                       <td style={{ ...tdStyle, fontSize: 11, color: T.tm }}>{n.pgDt || "—"}</td>
                       <td style={tdStyle}>
                         <div style={{ display: "flex", gap: 6 }}>
-                          <Btn v="secondary" sm onClick={() => { window.open(`${import.meta.env.VITE_API_URL || ''}/api/nfes/${n.id}/download`, '_blank'); }}>⬇</Btn>
+                          <Btn v="secondary" sm onClick={() => { window.open(`${import.meta.env.VITE_API_URL || '/api'}/nfes/${n.id}/download`, '_blank'); }}>⬇</Btn>
+                          {canWrite && <Btn v="secondary" sm onClick={() => { setEditNfe({ id: n.id, origStatus: n.st }); setEditNfeForm({ num: n.num, valor: String(n.valor), status: n.st }); }}>✏️</Btn>}
                           {n.st === "pendente" && canWrite && <Btn v="success" sm onClick={() => markPago(n.id)}>💰 Pagar</Btn>}
                         </div>
                       </td>
@@ -7463,7 +7489,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
                     <td style={{ ...tdStyle, fontFamily: "'Space Mono',monospace", fontWeight: 600, color: T.ok }}>{fmtBRL(r.valor)}</td>
                     <td style={{ ...tdStyle, fontSize: 11, color: T.t2 }}>📄 {r.arq}</td>
                     <td style={{ ...tdStyle, fontSize: 11, color: T.tm }}>{r.dt}</td>
-                    <td style={tdStyle}><Btn v="secondary" sm onClick={() => { window.open(`${import.meta.env.VITE_API_URL || ''}/api/commissions/${r.id}/download`, '_blank'); }}>⬇ Download</Btn></td>
+                    <td style={tdStyle}><Btn v="secondary" sm onClick={() => { window.open(`${import.meta.env.VITE_API_URL || '/api'}/commissions/${r.id}/download`, '_blank'); }}>⬇ Download</Btn></td>
                   </tr>
                 ))}
                 {myComms.length === 0 && <tr><td colSpan={6} style={{ padding: 40, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhum relatório disponível.</td></tr>}
@@ -7552,6 +7578,22 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
               <input type="file" accept=".pdf,.xlsx,.xls,.docx,.doc,.png,.jpg,.jpeg" style={{ display: "none" }} onChange={e => { if (e.target.files[0]) setNfFile(e.target.files[0]); }} />
               {nfFile ? `✓ ${nfFile.name}` : "📎 Clique para anexar o PDF da NFe"}
             </label>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal: Editar NFe */}
+      <Modal open={!!editNfe} onClose={() => setEditNfe(null)} title="Editar NFe"
+        footer={<><Btn v="secondary" onClick={() => setEditNfe(null)}>Cancelar</Btn><Btn onClick={saveEditNfe} disabled={editNfeSaving}>{editNfeSaving ? "Salvando..." : "Salvar"}</Btn></>}>
+        <div className="grid r-grid" style={{ gap: 14 }}>
+          <Inp label="Número da NFe" value={editNfeForm.num} onChange={v => setEditNfeForm({ ...editNfeForm, num: v })} />
+          <Inp label="Valor (R$)" value={editNfeForm.valor} onChange={v => setEditNfeForm({ ...editNfeForm, valor: v })} type="number" />
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Status</label>
+            <select value={editNfeForm.status} onChange={e => setEditNfeForm({ ...editNfeForm, status: e.target.value })} style={{ width: "100%", padding: "10px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
+              <option value="pendente">Pendente</option>
+              <option value="pago">Pago</option>
+            </select>
           </div>
         </div>
       </Modal>
