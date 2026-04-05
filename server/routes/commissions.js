@@ -68,19 +68,22 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // Create commission
-router.post('/', authenticate, requireMinRole('diretor'), async (req, res) => {
+router.post('/', authenticate, requireMinRole('gerente'), async (req, res) => {
   try {
     const { indication_id, user_id, amount, percentage } = req.body;
 
-    if (!indication_id || !user_id || !amount || !percentage) {
-      return res.status(400).json({ error: 'All fields required' });
+    if (!user_id || amount === undefined || amount === null) {
+      return res.status(400).json({ error: 'user_id and amount are required' });
     }
 
     const db = getDatabase();
 
-    const indication = await db.prepare('SELECT * FROM indications WHERE id = ?').get(indication_id);
-    if (!indication) return res.status(404).json({ error: 'Indication not found' });
-    if (indication.status !== 'fechado') return res.status(400).json({ error: 'Indication must be closed to create commission' });
+    // Validate indication if provided
+    if (indication_id) {
+      const indication = await db.prepare('SELECT * FROM indications WHERE id = ?').get(indication_id);
+      if (!indication) return res.status(404).json({ error: 'Indication not found' });
+      if (indication.status !== 'fechado') return res.status(400).json({ error: 'Indication must be closed to create commission' });
+    }
 
     const user = await db.prepare('SELECT id FROM users WHERE id = ?').get(user_id);
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -90,7 +93,7 @@ router.post('/', authenticate, requireMinRole('diretor'), async (req, res) => {
     await db.prepare(`
       INSERT INTO commissions (id, indication_id, user_id, amount, percentage)
       VALUES (?, ?, ?, ?, ?)
-    `).run(id, indication_id, user_id, amount, percentage);
+    `).run(id, indication_id || null, user_id, amount, percentage || 0);
 
     const commission = await db.prepare(`
       SELECT c.*, i.razao_social, u.name as user_name
