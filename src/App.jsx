@@ -7228,11 +7228,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
     if (!cf.pId || !cf.valor || commSaving) return;
     setCommSaving(true);
     try {
-      // Find an indication for this user to link to (use most recent ativo indication)
-      const parcInds = inds.filter(i => i.pId === cf.pId && i.st === "ativo");
-      const indId = parcInds.length > 0 ? parcInds[0].id : inds.find(i => i.pId === cf.pId)?.id;
       const res = await commissionsApi.create({
-        indication_id: indId || null,
         user_id: cf.pId,
         amount: parseFloat(cf.valor) || 0,
         percentage: 0,
