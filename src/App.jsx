@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, createContext, useContext, useCallback } from "react";
-import { authApi, usersApi, indicationsApi, commissionsApi, nfesApi, materialsApi, notificationsApi, hubspotApi, netsuiteApi, groupsApi, cnpjAgentApi, diretoriaApi, whatsappApi, conveniosApi, pipelinesApi, dealsApi, teamsApi, productsApi, googleApi, proposalsApi, contractsApi, permissionsApi, leadsApi, cadencesApi, landingPagesApi, workflowsApi, inboxApi, aiApi, setTokens, clearTokens } from "./services/api";
+import api, { authApi, usersApi, indicationsApi, commissionsApi, nfesApi, materialsApi, notificationsApi, hubspotApi, netsuiteApi, groupsApi, cnpjAgentApi, diretoriaApi, whatsappApi, conveniosApi, pipelinesApi, dealsApi, teamsApi, productsApi, googleApi, proposalsApi, contractsApi, permissionsApi, leadsApi, cadencesApi, landingPagesApi, workflowsApi, inboxApi, aiApi, setTokens, clearTokens } from "./services/api";
 import { useBreakpoint } from "./hooks/useBreakpoint";
 
 const AuthCtx = createContext(null);
@@ -7161,6 +7161,22 @@ function fmtBRL(v) { return v.toLocaleString("pt-BR", { style: "currency", curre
 function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cadenceRules }) {
   const { user } = useAuth();
   const { breakpoint } = useBreakpoint();
+  const downloadFile = async (url, fallbackName) => {
+    try {
+      const res = await api.get(url, { responseType: 'blob' });
+      const contentDisp = res.headers['content-disposition'] || '';
+      const match = contentDisp.match(/filename="?(.+?)"?$/);
+      const fileName = match ? match[1] : fallbackName;
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(res.data);
+      a.download = fileName;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      alert(e.response?.data?.error || "Erro ao baixar arquivo");
+    }
+  };
+
   const isParceiro = user.role === "parceiro";
   const isFinanceiro = user.role === "financeiro";
   const isAdmin = user.role === "super_admin" || user.role === "diretor" || user.role === "executivo";
@@ -7398,7 +7414,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
       {(tab === "relatorios") && (
         <div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 14 }}>
-            {(isAdmin || isFinanceiro) && <Btn v="secondary" onClick={() => { const params = new URLSearchParams(); if (dateFrom) params.set('from_date', dateFrom); if (dateTo) params.set('to_date', dateTo); window.open(`${import.meta.env.VITE_API_URL || '/api'}/commissions/export/csv?${params}`, '_blank'); }}>📥 Exportar CSV</Btn>}
+            {(isAdmin || isFinanceiro) && <Btn v="secondary" onClick={() => { const params = new URLSearchParams(); if (dateFrom) params.set('from_date', dateFrom); if (dateTo) params.set('to_date', dateTo); downloadFile(`/commissions/export/csv?${params}`, `comissoes_${new Date().toISOString().slice(0,10)}.csv`); }}>📥 Exportar CSV</Btn>}
             {canWrite && <Btn onClick={() => setCommModal(true)}>📤 Enviar Relatório</Btn>}
           </div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
@@ -7420,7 +7436,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
                       <td style={{ ...tdStyle, fontFamily: "'Space Mono',monospace", fontWeight: 600 }}>{fmtBRL(r.valor)}</td>
                       <td style={{ ...tdStyle, fontSize: 11, color: T.t2 }}>📄 {r.arq}</td>
                       <td style={{ ...tdStyle, fontSize: 11, color: T.tm }}>{r.dt}</td>
-                      <td style={tdStyle}><Btn v="secondary" sm onClick={() => { window.open(`${import.meta.env.VITE_API_URL || '/api'}/commissions/${r.id}/download`, '_blank'); }}>⬇ Download</Btn></td>
+                      <td style={tdStyle}><Btn v="secondary" sm onClick={() => { downloadFile(`/commissions/${r.id}/download`, `comissao_${r.id}.pdf`); }}>⬇ Download</Btn></td>
                     </tr>
                   );
                 })}
@@ -7435,7 +7451,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
       {(tab === "nfes") && (
         <div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 14 }}>
-            {(isAdmin || isFinanceiro) && <Btn v="secondary" onClick={() => { const params = new URLSearchParams(); if (dateFrom) params.set('from_date', dateFrom); if (dateTo) params.set('to_date', dateTo); window.open(`${import.meta.env.VITE_API_URL || '/api'}/nfes/export/csv?${params}`, '_blank'); }}>📥 Exportar CSV</Btn>}
+            {(isAdmin || isFinanceiro) && <Btn v="secondary" onClick={() => { const params = new URLSearchParams(); if (dateFrom) params.set('from_date', dateFrom); if (dateTo) params.set('to_date', dateTo); downloadFile(`/nfes/export/csv?${params}`, `nfes_${new Date().toISOString().slice(0,10)}.csv`); }}>📥 Exportar CSV</Btn>}
           </div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
             <div className="table-responsive"><table className="data-table">
@@ -7459,7 +7475,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
                       <td style={{ ...tdStyle, fontSize: 11, color: T.tm }}>{n.pgDt || "—"}</td>
                       <td style={tdStyle}>
                         <div style={{ display: "flex", gap: 6 }}>
-                          <Btn v="secondary" sm onClick={() => { window.open(`${import.meta.env.VITE_API_URL || '/api'}/nfes/${n.id}/download`, '_blank'); }}>⬇</Btn>
+                          <Btn v="secondary" sm onClick={() => { downloadFile(`/nfes/${n.id}/download`, `nfe_${n.id}.pdf`); }}>⬇</Btn>
                           {canWrite && <Btn v="secondary" sm onClick={() => { setEditNfe({ id: n.id, origStatus: n.st }); setEditNfeForm({ num: n.num, valor: String(n.valor), status: n.st, pgDt: n.pgDt || "" }); }}>✏️</Btn>}
                           {n.st === "pendente" && canWrite && <Btn v="success" sm onClick={() => markPago(n.id)}>💰 Pagar</Btn>}
                         </div>
@@ -7488,7 +7504,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
                     <td style={{ ...tdStyle, fontFamily: "'Space Mono',monospace", fontWeight: 600, color: T.ok }}>{fmtBRL(r.valor)}</td>
                     <td style={{ ...tdStyle, fontSize: 11, color: T.t2 }}>📄 {r.arq}</td>
                     <td style={{ ...tdStyle, fontSize: 11, color: T.tm }}>{r.dt}</td>
-                    <td style={tdStyle}><Btn v="secondary" sm onClick={() => { window.open(`${import.meta.env.VITE_API_URL || '/api'}/commissions/${r.id}/download`, '_blank'); }}>⬇ Download</Btn></td>
+                    <td style={tdStyle}><Btn v="secondary" sm onClick={() => { downloadFile(`/commissions/${r.id}/download`, `comissao_${r.id}.pdf`); }}>⬇ Download</Btn></td>
                   </tr>
                 ))}
                 {myComms.length === 0 && <tr><td colSpan={6} style={{ padding: 40, textAlign: "center", color: T.tm, fontSize: 13 }}>Nenhum relatório disponível.</td></tr>}
