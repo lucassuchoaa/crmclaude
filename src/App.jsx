@@ -9982,7 +9982,7 @@ export default function App() {
       if (teams.length > 0 && !selectedTeam) setSelectedTeam(null); // null = ver todas
 
       // Load commissions and NFes based on role
-      if (['super_admin', 'executivo', 'diretor', 'gerente', 'parceiro'].includes(user.role)) {
+      if (['super_admin', 'executivo', 'diretor', 'gerente', 'financeiro', 'parceiro'].includes(user.role)) {
         try {
           const commsRes = await commissionsApi.getAll();
           const commissions = (commsRes.data.commissions || commsRes.data || []).map(c => ({
@@ -10006,7 +10006,7 @@ export default function App() {
             arq: n.file_path,
             dt: (n.created_at || '').replace(' ', 'T').split('T')[0],
             st: n.status === 'paid' ? 'pago' : 'pendente',
-            pgDt: n.payment_date,
+            pgDt: n.status === 'paid' ? (n.updated_at || '').replace(' ', 'T').split('T')[0] : null,
           }));
           setNfes(nfesData);
         } catch {
