@@ -300,7 +300,7 @@ async function createTables(db) {
   await ddl(`
     CREATE TABLE IF NOT EXISTS commissions (
       id TEXT PRIMARY KEY,
-      indication_id TEXT NOT NULL,
+      indication_id TEXT,
       user_id TEXT NOT NULL,
       amount REAL NOT NULL,
       percentage REAL NOT NULL,
@@ -1052,6 +1052,11 @@ async function createTables(db) {
     await safeAddColumn('users', 'netsuite_vendor_id', 'TEXT');
     await safeAddColumn('nfes', 'netsuite_id', 'TEXT');
     await safeAddColumn('commissions', 'netsuite_id', 'TEXT');
+
+    // Allow commissions without indication
+    if (isPg) {
+      try { await ddl('ALTER TABLE commissions ALTER COLUMN indication_id DROP NOT NULL'); } catch {}
+    }
   }
 
   // ── Indexes ──
