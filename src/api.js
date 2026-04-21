@@ -12,7 +12,9 @@ import axios from 'axios';
 // Axios instance
 // ---------------------------------------------------------------------------
 
-const BASE_URL = 'http://localhost:3001/api';
+// Allows overriding the API base URL in production/staging via VITE_API_URL.
+// Falls back to localhost for local development.
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
 const api = axios.create({
   baseURL: BASE_URL,

@@ -214,7 +214,19 @@ if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging')
 
 // Error handling middleware
 app.use((err, req, res, _next) => {
-  console.error(err.stack);
+  if (process.env.NODE_ENV === 'production') {
+    // Sanitized log: avoid leaking stack traces / tokens / PII in production.
+    console.error('[error]', {
+      timestamp: new Date().toISOString(),
+      status: err.status || 500,
+      message: (err.message || '').slice(0, 200),
+      method: req.method,
+      path: req.path,
+      userId: req.user?.id,
+    });
+  } else {
+    console.error(err.stack);
+  }
   res.status(err.status || 500).json({
     error: process.env.NODE_ENV === 'production'
       ? 'Internal server error'

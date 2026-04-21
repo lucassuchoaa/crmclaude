@@ -1,5 +1,5 @@
 # Stage 1: Build frontend
-FROM node:20-alpine AS builder
+FROM node:20.18-alpine3.20 AS builder
 
 WORKDIR /app
 
@@ -14,7 +14,7 @@ ENV VITE_API_URL=$VITE_API_URL
 RUN npm run build
 
 # Stage 2: Production
-FROM node:20-alpine
+FROM node:20.18-alpine3.20
 
 RUN apk add --no-cache tini su-exec python3 make g++
 
