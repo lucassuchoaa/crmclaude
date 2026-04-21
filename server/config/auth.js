@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 
@@ -5,15 +6,21 @@ const SALT_ROUNDS = 12;
 const ACCESS_TOKEN_EXPIRY = '15m';
 const REFRESH_TOKEN_EXPIRY = '7d';
 
+const IS_TEST = process.env.NODE_ENV === 'test';
+
 if (!process.env.JWT_SECRET || !process.env.REFRESH_SECRET) {
-  console.error('FATAL: JWT_SECRET and REFRESH_SECRET must be set in environment variables');
-  if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging') {
+  if (IS_TEST) {
+    // Tests get ephemeral per-process secrets — never reused across runs, never known outside
+  } else {
+    console.error('FATAL: JWT_SECRET and REFRESH_SECRET must be set in environment variables');
     process.exit(1);
   }
 }
 
-export const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-jwt-secret-do-not-use-in-prod';
-export const REFRESH_SECRET = process.env.REFRESH_SECRET || 'dev-only-refresh-secret-do-not-use-in-prod';
+export const JWT_SECRET =
+  process.env.JWT_SECRET || (IS_TEST ? crypto.randomBytes(64).toString('hex') : '');
+export const REFRESH_SECRET =
+  process.env.REFRESH_SECRET || (IS_TEST ? crypto.randomBytes(64).toString('hex') : '');
 
 export async function hashPassword(password) {
   return bcrypt.hash(password, SALT_ROUNDS);

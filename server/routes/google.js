@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { getDatabase } from '../config/database.js';
 import { authenticate } from '../middleware/auth.js';
+import { safeErrorBody } from '../utils/errorResponse.js';
 
 const router = Router();
 
@@ -105,7 +106,7 @@ router.get('/config', authenticate, async (req, res) => {
       redirectUri: redirectUri || '',
     });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json(safeErrorBody(e, 'Google integration error'));
   }
 });
 
@@ -118,7 +119,7 @@ router.post('/config', authenticate, async (req, res) => {
     if (redirectUri !== undefined) await setSetting('google_redirect_uri', redirectUri);
     res.json({ ok: true });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json(safeErrorBody(e, 'Google integration error'));
   }
 });
 
@@ -149,7 +150,7 @@ router.get('/auth-url', authenticate, async (req, res) => {
     });
     res.json({ url: `https://accounts.google.com/o/oauth2/v2/auth?${params}` });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json(safeErrorBody(e, 'Google integration error'));
   }
 });
 
@@ -208,7 +209,7 @@ router.get('/status', authenticate, async (req, res) => {
     const tokens = await db.prepare('SELECT email, created_at FROM google_tokens WHERE user_id = ?').get(req.user.id);
     res.json({ connected: !!tokens, email: tokens?.email || null, since: tokens?.created_at || null });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json(safeErrorBody(e, 'Google integration error'));
   }
 });
 
@@ -220,7 +221,7 @@ router.post('/disconnect', authenticate, async (req, res) => {
     await db.prepare('DELETE FROM google_tokens WHERE user_id = ?').run(req.user.id);
     res.json({ ok: true });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json(safeErrorBody(e, 'Google integration error'));
   }
 });
 
@@ -243,7 +244,7 @@ router.get('/calendar/events', authenticate, async (req, res) => {
     const data = await resp.json();
     res.json(data.items || []);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json(safeErrorBody(e, 'Google integration error'));
   }
 });
 
@@ -277,7 +278,7 @@ router.post('/calendar/events', authenticate, async (req, res) => {
     const created = await resp.json();
     res.json(created);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json(safeErrorBody(e, 'Google integration error'));
   }
 });
 
@@ -317,7 +318,7 @@ router.post('/gmail/send', authenticate, async (req, res) => {
     const sent = await resp.json();
     res.json({ ok: true, messageId: sent.id });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json(safeErrorBody(e, 'Google integration error'));
   }
 });
 

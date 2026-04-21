@@ -5,9 +5,10 @@ import { getDatabase } from '../config/database.js';
 import { hashPassword, hasPermission, canManageUser } from '../config/auth.js';
 import { authenticate } from '../middleware/auth.js';
 import { requireMinRole } from '../middleware/rbac.js';
+import { safeErrorBody } from '../utils/errorResponse.js';
 
-function generatePassword(len = 8) {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+function generatePassword(len = 14) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%&*';
   return Array.from(crypto.randomBytes(len), b => chars[b % chars.length]).join('');
 }
 
@@ -368,7 +369,7 @@ router.post('/:id/reset-password', authenticate, requireMinRole('gerente'), asyn
       return res.status(403).json({ error: 'Cannot reset password for this user' });
     }
 
-    const newPassword = generatePassword(8);
+    const newPassword = generatePassword(14);
     const hashed = await hashPassword(newPassword);
 
     await db.prepare('UPDATE users SET password = ?, must_change_password = 1, updated_at = ? WHERE id = ?')
@@ -439,7 +440,7 @@ router.post('/populate-uf', authenticate, async (req, res) => {
     res.json({ ok: true, total: parceiros.length, updated, errors });
   } catch (e) {
     console.error('Populate UF error:', e);
-    res.status(500).json({ error: e.message });
+    res.status(500).json(safeErrorBody(e, 'Failed to populate UF'));
   }
 });
 

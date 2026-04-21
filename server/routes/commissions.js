@@ -131,7 +131,9 @@ router.post('/', authenticate, requireMinRole('gerente'), upload.single('file'),
     res.status(201).json({ commission });
   } catch (error) {
     console.error('Create commission error:', error.message, error.stack);
-    res.status(500).json({ error: 'Failed to create commission', detail: error.message });
+    const body = { error: 'Failed to create commission' };
+    if (process.env.NODE_ENV !== 'production') body.detail = error.message;
+    res.status(500).json(body);
   }
 });
 

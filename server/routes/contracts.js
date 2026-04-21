@@ -8,8 +8,14 @@ import { getDatabase } from '../config/database.js';
 import { authenticate } from '../middleware/auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const uploadsDir = path.join(__dirname, '..', 'data', 'contracts');
+const uploadsDir = path.resolve(path.join(__dirname, '..', 'data', 'contracts'));
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+function isInsideDir(candidate, base) {
+  const resolved = path.resolve(candidate);
+  const baseResolved = path.resolve(base) + path.sep;
+  return resolved === path.resolve(base) || resolved.startsWith(baseResolved);
+}
 
 const isPg = !!process.env.DATABASE_URL;
 
@@ -184,7 +190,7 @@ router.get('/templates/:id/download', authenticate, checkAccess, async (req, res
     } else {
       if (!template.file_path) return res.status(404).json({ error: 'Arquivo não encontrado' });
       const filePath = path.resolve(uploadsDir, path.basename(template.file_path));
-      if (!filePath.startsWith(uploadsDir) || !fs.existsSync(filePath)) {
+      if (!isInsideDir(filePath, uploadsDir) || !fs.existsSync(filePath)) {
         return res.status(404).json({ error: 'Arquivo não encontrado no disco' });
       }
       const safeName = path.basename(template.file_original_name || 'download').replace(/[^\w.\-]/g, '_');

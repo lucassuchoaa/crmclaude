@@ -62,7 +62,10 @@ router.post('/chat', authenticate, async (req, res) => {
     });
   } catch (err) {
     console.error('POST /ai/chat error:', err);
-    res.status(500).json({ error: err.message || 'Erro ao processar IA' });
+    const fallback = 'Erro ao processar IA';
+    const body = { error: fallback };
+    if (process.env.NODE_ENV !== 'production' && err?.message) body.detail = err.message;
+    res.status(500).json(body);
   }
 });
 
