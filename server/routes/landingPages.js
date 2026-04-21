@@ -1,12 +1,46 @@
 import express from 'express';
+import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../config/database.js';
 import { authenticate } from '../middleware/auth.js';
+import { requireMinRole } from '../middleware/rbac.js';
 import { calculateScore } from '../services/scoringEngine.js';
 import { triggerWorkflow } from '../services/workflowEngine.js';
 import { lookupCnpj } from '../utils/cnpjLookup.js';
 
 const router = express.Router();
+
+const HTML_ESCAPE_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+function escapeHtml(input) {
+  if (input == null) return '';
+  return String(input).replace(/[&<>"']/g, (c) => HTML_ESCAPE_MAP[c]);
+}
+
+const ALLOWED_INPUT_TYPES = new Set([
+  'text', 'email', 'tel', 'number', 'url', 'password', 'date', 'time', 'datetime-local'
+]);
+
+function sanitizeCss(css) {
+  if (!css) return '';
+  // Strip </style> closings, <script>, and CSS expressions/url(javascript:...) to prevent breakout
+  return String(css)
+    .replace(/<\/\s*style\s*>/gi, '')
+    .replace(/<\s*script\b/gi, '')
+    .replace(/expression\s*\(/gi, '')
+    .replace(/url\s*\(\s*['"]?\s*javascript:/gi, 'url(about:blank');
+}
+
+function sanitizeHtmlContent(html) {
+  if (!html) return '';
+  // Remove <script>...</script> and inline event handlers and javascript: URLs
+  return String(html)
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '')
+    .replace(/<script\b[^>]*\/?>/gi, '')
+    .replace(/\s(on[a-z]+)\s*=\s*"[^"]*"/gi, '')
+    .replace(/\s(on[a-z]+)\s*=\s*'[^']*'/gi, '')
+    .replace(/\s(on[a-z]+)\s*=\s*[^\s>]+/gi, '')
+    .replace(/(href|src|action|formaction)\s*=\s*(['"])\s*javascript:[^'"]*\2/gi, '$1=$2#$2');
+}
 
 // ══════════════════════════════════════════════
 // LANDING PAGES CRUD (authenticated)
@@ -33,7 +67,7 @@ router.get('/:id', authenticate, async (req, res) => {
   }
 });
 
-router.post('/', authenticate, async (req, res) => {
+router.post('/', authenticate, requireMinRole('gerente'), async (req, res) => {
   try {
     const db = getDatabase();
     const id = uuidv4();
@@ -63,7 +97,7 @@ router.post('/', authenticate, async (req, res) => {
   }
 });
 
-router.put('/:id', authenticate, async (req, res) => {
+router.put('/:id', authenticate, requireMinRole('gerente'), async (req, res) => {
   try {
     const db = getDatabase();
     const now = new Date().toISOString();
@@ -94,7 +128,7 @@ router.put('/:id', authenticate, async (req, res) => {
   }
 });
 
-router.delete('/:id', authenticate, async (req, res) => {
+router.delete('/:id', authenticate, requireMinRole('gerente'), async (req, res) => {
   try {
     const db = getDatabase();
     await db.prepare('DELETE FROM landing_pages WHERE id = ?').run(req.params.id);
@@ -105,7 +139,7 @@ router.delete('/:id', authenticate, async (req, res) => {
 });
 
 // POST /landing-pages/:id/duplicate
-router.post('/:id/duplicate', authenticate, async (req, res) => {
+router.post('/:id/duplicate', authenticate, requireMinRole('gerente'), async (req, res) => {
   try {
     const db = getDatabase();
     const orig = await db.prepare('SELECT * FROM landing_pages WHERE id = ?').get(req.params.id);
@@ -172,8 +206,15 @@ router.get('/public/:slug', async (req, res) => {
     await db.prepare('UPDATE landing_pages SET views = views + 1 WHERE id = ?').run(lp.id);
 
     const formFields = JSON.parse(lp.form_fields || '[]');
-    const html = buildLandingPageHtml(lp, formFields);
-    res.setHeader('Content-Type', 'text/html');
+    const nonce = crypto.randomBytes(16).toString('base64');
+    const html = buildLandingPageHtml(lp, formFields, nonce);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader(
+      'Content-Security-Policy',
+      `default-src 'self'; script-src 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`
+    );
     res.send(html);
   } catch (err) {
     res.status(500).send('Erro interno');
@@ -310,24 +351,35 @@ router.post('/public/:slug/submit', async (req, res) => {
   }
 });
 
-function buildLandingPageHtml(lp, formFields) {
+function buildLandingPageHtml(lp, formFields, nonce) {
   const formFieldsHtml = formFields.map(f => {
     const required = f.required ? 'required' : '';
-    const type = f.type || 'text';
+    const type = ALLOWED_INPUT_TYPES.has(f.type) ? f.type : 'text';
+    const name = escapeHtml(f.name);
+    const label = escapeHtml(f.label || f.name);
+    const placeholder = escapeHtml(f.placeholder || '');
     return `<div style="margin-bottom:12px">
-      <label style="display:block;margin-bottom:4px;font-weight:500">${f.label || f.name}</label>
-      <input type="${type}" name="${f.name}" placeholder="${f.placeholder || ''}" ${required}
+      <label style="display:block;margin-bottom:4px;font-weight:500">${label}</label>
+      <input type="${type}" name="${name}" placeholder="${placeholder}" ${required}
         style="width:100%;padding:10px;border:1px solid #ddd;border-radius:6px;font-size:14px" />
     </div>`;
   }).join('\n');
+
+  const title = escapeHtml(lp.meta_title || lp.name);
+  const metaDesc = lp.meta_description ? `<meta name="description" content="${escapeHtml(lp.meta_description)}">` : '';
+  const name = escapeHtml(lp.name);
+  const thankYou = escapeHtml(lp.thank_you_message || 'Obrigado!');
+  const slug = encodeURIComponent(lp.slug);
+  const cssContent = sanitizeCss(lp.css_content);
+  const htmlContent = sanitizeHtmlContent(lp.html_content);
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${lp.meta_title || lp.name}</title>
-  ${lp.meta_description ? `<meta name="description" content="${lp.meta_description}">` : ''}
+  <title>${title}</title>
+  ${metaDesc}
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f8f9fa; color:#333; }
@@ -339,13 +391,13 @@ function buildLandingPageHtml(lp, formFields) {
     button[type=submit]:hover { background:#4f46e5; }
     .thanks { text-align:center; padding:40px 20px; }
     .thanks h2 { color:#22c55e; margin-bottom:12px; }
-    ${lp.css_content || ''}
+    ${cssContent}
   </style>
 </head>
 <body>
-  <div class="container">
-    ${lp.html_content || `<div class="card">
-      <h1>${lp.name}</h1>
+  <div class="container" data-submit-url="/api/landing-pages/public/${slug}/submit">
+    ${htmlContent || `<div class="card">
+      <h1>${name}</h1>
       <p class="desc">Preencha o formulário abaixo</p>
       <form id="lpForm">
         ${formFieldsHtml || '<div style="margin-bottom:12px"><label>Nome</label><input type="text" name="nome" required style="width:100%;padding:10px;border:1px solid #ddd;border-radius:6px"></div><div style="margin-bottom:12px"><label>Email</label><input type="email" name="email" required style="width:100%;padding:10px;border:1px solid #ddd;border-radius:6px"></div>'}
@@ -353,45 +405,50 @@ function buildLandingPageHtml(lp, formFields) {
       </form>
       <div id="thanks" class="thanks" style="display:none">
         <h2>✓</h2>
-        <p>${lp.thank_you_message || 'Obrigado!'}</p>
+        <p>${thankYou}</p>
       </div>
     </div>`}
   </div>
-  <script>
-    // CNPJ mask
-    document.querySelectorAll('input[name="cnpj"]').forEach(el => {
-      el.addEventListener('input', function(e) {
-        let v = e.target.value.replace(/\\D/g, '').slice(0, 14);
-        if (v.length > 12) v = v.replace(/(\\d{2})(\\d{3})(\\d{3})(\\d{4})(\\d{1,2})/, '$1.$2.$3/$4-$5');
-        else if (v.length > 8) v = v.replace(/(\\d{2})(\\d{3})(\\d{3})(\\d{1,4})/, '$1.$2.$3/$4');
-        else if (v.length > 5) v = v.replace(/(\\d{2})(\\d{3})(\\d{1,3})/, '$1.$2.$3');
-        else if (v.length > 2) v = v.replace(/(\\d{2})(\\d{1,3})/, '$1.$2');
-        e.target.value = v;
-      });
-    });
-    document.getElementById('lpForm')?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const fd = new FormData(e.target);
-      const data = Object.fromEntries(fd);
-      // Validate CNPJ if present
-      if (data.cnpj) {
-        const digits = data.cnpj.replace(/\\D/g, '');
-        if (digits.length !== 14) { alert('CNPJ inválido. Deve conter 14 dígitos.'); return; }
-      }
-      // Add UTM params
-      const url = new URL(window.location.href);
-      ['utm_source','utm_medium','utm_campaign'].forEach(k => { if(url.searchParams.get(k)) data[k]=url.searchParams.get(k); });
-      try {
-        const res = await fetch('/api/landing-pages/public/${lp.slug}/submit', {
-          method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)
+  <script nonce="${nonce}">
+    (function() {
+      var submitUrl = document.querySelector('.container')?.getAttribute('data-submit-url') || '';
+      // CNPJ mask
+      document.querySelectorAll('input[name="cnpj"]').forEach(function(el) {
+        el.addEventListener('input', function(e) {
+          var v = e.target.value.replace(/\\D/g, '').slice(0, 14);
+          if (v.length > 12) v = v.replace(/(\\d{2})(\\d{3})(\\d{3})(\\d{4})(\\d{1,2})/, '$1.$2.$3/$4-$5');
+          else if (v.length > 8) v = v.replace(/(\\d{2})(\\d{3})(\\d{3})(\\d{1,4})/, '$1.$2.$3/$4');
+          else if (v.length > 5) v = v.replace(/(\\d{2})(\\d{3})(\\d{1,3})/, '$1.$2.$3');
+          else if (v.length > 2) v = v.replace(/(\\d{2})(\\d{1,3})/, '$1.$2');
+          e.target.value = v;
         });
-        const json = await res.json();
-        if (!res.ok) { alert(json.error || 'Erro ao enviar.'); return; }
-        if (json.redirect) { window.location.href = json.redirect; return; }
-        e.target.style.display='none';
-        document.getElementById('thanks').style.display='block';
-      } catch(err) { alert('Erro ao enviar. Tente novamente.'); }
-    });
+      });
+      var form = document.getElementById('lpForm');
+      if (form) form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        var fd = new FormData(e.target);
+        var data = Object.fromEntries(fd);
+        if (data.cnpj) {
+          var digits = data.cnpj.replace(/\\D/g, '');
+          if (digits.length !== 14) { alert('CNPJ inválido. Deve conter 14 dígitos.'); return; }
+        }
+        var url = new URL(window.location.href);
+        ['utm_source','utm_medium','utm_campaign'].forEach(function(k) {
+          if (url.searchParams.get(k)) data[k] = url.searchParams.get(k);
+        });
+        try {
+          var res = await fetch(submitUrl, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+          });
+          var json = await res.json();
+          if (!res.ok) { alert(json.error || 'Erro ao enviar.'); return; }
+          if (json.redirect) { window.location.href = json.redirect; return; }
+          e.target.style.display = 'none';
+          var thanks = document.getElementById('thanks');
+          if (thanks) thanks.style.display = 'block';
+        } catch(err) { alert('Erro ao enviar. Tente novamente.'); }
+      });
+    })();
   </script>
 </body>
 </html>`;

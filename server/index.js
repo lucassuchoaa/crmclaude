@@ -52,12 +52,38 @@ if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging')
 }
 
 // Security middleware
+// Global helmet with strict defaults; landing pages set their own per-response CSP.
 app.use(helmet({
-  contentSecurityPolicy: false,
+  contentSecurityPolicy: {
+    useDefaults: true,
+    directives: {
+      "default-src": ["'self'"],
+      "script-src": ["'self'"],
+      "style-src": ["'self'", "'unsafe-inline'"],
+      "img-src": ["'self'", "data:", "https:"],
+      "connect-src": ["'self'"],
+      "frame-ancestors": ["'none'"],
+      "base-uri": ["'none'"],
+      "object-src": ["'none'"],
+      "form-action": ["'self'"],
+    },
+  },
   crossOriginEmbedderPolicy: false,
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
 }));
+
+// CORS — accepts comma-separated list via CORS_ORIGIN, rejects '*' with credentials
+const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean)
+  .filter(o => o !== '*');
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true); // same-origin / curl
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(new Error('CORS: origin not allowed'));
+  },
   credentials: true
 }));
 
@@ -75,11 +101,17 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// Auth rate limiting (stricter)
+// Auth rate limiting (stricter) — per IP+email to reduce credential stuffing
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 15,
-  message: { error: 'Too many login attempts, please try again later.' }
+  max: 10,
+  keyGenerator: (req) => {
+    const email = (req.body && req.body.email ? String(req.body.email) : '').toLowerCase();
+    return `${req.ip}|${email}`;
+  },
+  message: { error: 'Too many login attempts, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 app.use('/api/auth/login', authLimiter);
 
@@ -125,80 +157,6 @@ app.use('/api/netsuite', netsuiteRoutes);
 app.get('/api/health', (req, res) => {
   const db = getDatabase();
   res.json({ status: 'ok', database: db.type, timestamp: new Date().toISOString() });
-});
-
-// Teste temporário da Lemit API — remover depois
-app.get('/api/test-lemit', async (req, res) => {
-  try {
-    const token = process.env.LEMIT_API_TOKEN;
-    if (!token) return res.json({ error: 'LEMIT_API_TOKEN não configurado' });
-
-    // Descobre o IP de saída do servidor
-    let serverIp = 'unknown';
-    try {
-      const ipRes = await fetch('https://api.ipify.org?format=json');
-      const ipData = await ipRes.json();
-      serverIp = ipData.ip;
-    } catch {}
-
-    // Testa saldo
-    const saldoRes = await fetch('https://api.lemit.com.br/api/v1/saldo', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` },
-    });
-    const saldoBody = await saldoRes.text();
-
-    // Testa consulta empresa - varias formas
-    const tests = {};
-
-    // Forma 1: x-www-form-urlencoded (como na doc)
-    const emp1 = await fetch('https://api.lemit.com.br/api/v1/consulta/empresa', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` },
-      body: 'documento=33000167000101',
-    });
-    tests.form_default = { status: emp1.status, body: await emp1.text() };
-
-    // Forma 2: com Content-Type explícito
-    const emp2 = await fetch('https://api.lemit.com.br/api/v1/consulta/empresa', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: 'documento=33000167000101',
-    });
-    tests.form_explicit = { status: emp2.status, body: await emp2.text() };
-
-    // Forma 3: com CNPJ no path (como na doc mostra /empresa/{cnpj})
-    const emp3 = await fetch('https://api.lemit.com.br/api/v1/consulta/empresa/33000167000101', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` },
-    });
-    tests.path_param = { status: emp3.status, body: await emp3.text() };
-
-    // Forma 4: JSON body
-    const emp4 = await fetch('https://api.lemit.com.br/api/v1/consulta/empresa', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ documento: '33000167000101' }),
-    });
-    tests.json_body = { status: emp4.status, body: await emp4.text() };
-
-    // Forma 5: URLSearchParams
-    const emp5 = await fetch('https://api.lemit.com.br/api/v1/consulta/empresa', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` },
-      body: new URLSearchParams({ documento: '33000167000101' }),
-    });
-    tests.urlsearchparams = { status: emp5.status, body: await emp5.text() };
-
-    res.json({
-      server_ip: serverIp,
-      lemit_token_preview: token.substring(0, 8) + '...',
-      saldo: { status: saldoRes.status, body: saldoBody },
-      tests,
-    });
-  } catch (err) {
-    res.json({ error: err.message });
-  }
 });
 
 // Serve frontend static files in production/staging

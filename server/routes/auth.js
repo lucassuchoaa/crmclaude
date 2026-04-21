@@ -1,4 +1,5 @@
 import express from 'express';
+import crypto from 'crypto';
 import { getDatabase } from '../config/database.js';
 import {
   comparePassword,
@@ -10,6 +11,10 @@ import {
 import { authenticate } from '../middleware/auth.js';
 
 const router = express.Router();
+
+function hashRefreshToken(token) {
+  return crypto.createHash('sha256').update(String(token)).digest('hex');
+}
 
 // Login
 router.post('/login', async (req, res) => {
@@ -39,10 +44,10 @@ router.post('/login', async (req, res) => {
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken(user);
 
-    // Store refresh token
+    // Store refresh token hash (never store the raw JWT)
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     await db.prepare('INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?, ?, ?)')
-      .run(user.id, refreshToken, expiresAt);
+      .run(user.id, hashRefreshToken(refreshToken), expiresAt);
 
     // Clean up old refresh tokens for this user
     await db.prepare('DELETE FROM refresh_tokens WHERE user_id = ? AND expires_at < ?')
@@ -82,9 +87,10 @@ router.post('/refresh', async (req, res) => {
 
     const db = getDatabase();
 
-    // Verify token exists in database
+    // Verify token hash exists in database
+    const tokenHash = hashRefreshToken(refreshToken);
     const storedToken = await db.prepare('SELECT * FROM refresh_tokens WHERE token = ? AND expires_at > ?')
-      .get(refreshToken, new Date().toISOString());
+      .get(tokenHash, new Date().toISOString());
 
     if (!storedToken) {
       return res.status(401).json({ error: 'Refresh token not found or expired' });
@@ -100,13 +106,13 @@ router.post('/refresh', async (req, res) => {
     const newAccessToken = generateAccessToken(user);
     const newRefreshToken = generateRefreshToken(user);
 
-    // Delete old refresh token
-    await db.prepare('DELETE FROM refresh_tokens WHERE token = ?').run(refreshToken);
+    // Delete old refresh token (by hash)
+    await db.prepare('DELETE FROM refresh_tokens WHERE token = ?').run(tokenHash);
 
-    // Store new refresh token
+    // Store new refresh token hash
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     await db.prepare('INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?, ?, ?)')
-      .run(user.id, newRefreshToken, expiresAt);
+      .run(user.id, hashRefreshToken(newRefreshToken), expiresAt);
 
     res.json({
       accessToken: newAccessToken,
@@ -163,8 +169,13 @@ router.post('/change-password', authenticate, async (req, res) => {
       return res.status(400).json({ error: 'Current and new password required' });
     }
 
-    if (newPassword.length < 8) {
-      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    if (typeof newPassword !== 'string' || newPassword.length < 10) {
+      return res.status(400).json({ error: 'Password must be at least 10 characters' });
+    }
+    // Require at least 3 of: lowercase, uppercase, digit, symbol
+    const classes = [/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9]/].filter(r => r.test(newPassword)).length;
+    if (classes < 3) {
+      return res.status(400).json({ error: 'Password must contain at least 3 of: lowercase, uppercase, number, symbol' });
     }
 
     const db = getDatabase();

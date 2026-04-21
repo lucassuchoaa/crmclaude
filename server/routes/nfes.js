@@ -50,8 +50,10 @@ router.get('/', authenticate, async (req, res) => {
 
     if (status) { query += ` AND n.status = ?`; params.push(status); }
 
+    const safeLimit = Math.min(Math.max(parseInt(limit) || 50, 1), 500);
+    const safeOffset = Math.max(parseInt(offset) || 0, 0);
     query += ` ORDER BY n.created_at DESC LIMIT ? OFFSET ?`;
-    params.push(parseInt(limit), parseInt(offset));
+    params.push(safeLimit, safeOffset);
 
     const nfes = await db.prepare(query).all(...params);
     res.json({ nfes });
@@ -122,7 +124,9 @@ router.post('/', authenticate, upload.single('file'), async (req, res) => {
     res.status(201).json({ nfe });
   } catch (error) {
     console.error('Create NFE error:', error.message, error.stack);
-    res.status(500).json({ error: 'Failed to create NFE', detail: error.message });
+    const body = { error: 'Failed to create NFE' };
+    if (process.env.NODE_ENV !== 'production') body.detail = error.message;
+    res.status(500).json(body);
   }
 });
 

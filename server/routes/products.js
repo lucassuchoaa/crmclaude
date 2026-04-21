@@ -2,6 +2,7 @@ import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../config/database.js';
 import { authenticate } from '../middleware/auth.js';
+import { safeErrorBody } from '../utils/errorResponse.js';
 
 const router = express.Router();
 
@@ -13,7 +14,7 @@ router.get('/', authenticate, async (req, res) => {
     res.json(rows);
   } catch (err) {
     console.error('GET /products error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeErrorBody(err, 'Failed to list products'));
   }
 });
 
@@ -29,7 +30,7 @@ router.post('/', authenticate, async (req, res) => {
     res.status(201).json({ id, name });
   } catch (err) {
     console.error('POST /products error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeErrorBody(err, 'Failed to create product'));
   }
 });
 
@@ -43,7 +44,7 @@ router.put('/:id', authenticate, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('PUT /products error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeErrorBody(err, 'Failed to update product'));
   }
 });
 
@@ -56,7 +57,7 @@ router.delete('/:id', authenticate, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('DELETE /products error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeErrorBody(err, 'Failed to delete product'));
   }
 });
 

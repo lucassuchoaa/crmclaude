@@ -2,6 +2,7 @@ import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase } from '../config/database.js';
 import { authenticate } from '../middleware/auth.js';
+import { safeErrorBody } from '../utils/errorResponse.js';
 
 const router = express.Router();
 
@@ -18,7 +19,7 @@ router.get('/', authenticate, async (req, res) => {
     res.json(rows);
   } catch (err) {
     console.error('GET /teams error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeErrorBody(err, 'Internal error'));
   }
 });
 
@@ -32,7 +33,7 @@ router.get('/:id', authenticate, async (req, res) => {
     res.json({ ...team, members });
   } catch (err) {
     console.error('GET /teams/:id error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeErrorBody(err, 'Internal error'));
   }
 });
 
@@ -44,7 +45,7 @@ router.get('/user/my-teams', authenticate, async (req, res) => {
     res.json(rows);
   } catch (err) {
     console.error('GET /teams/user/my-teams error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeErrorBody(err, 'Internal error'));
   }
 });
 
@@ -70,7 +71,7 @@ router.post('/', authenticate, async (req, res) => {
     res.status(201).json({ id, name });
   } catch (err) {
     console.error('POST /teams error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeErrorBody(err, 'Internal error'));
   }
 });
 
@@ -95,7 +96,7 @@ router.put('/:id', authenticate, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('PUT /teams error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeErrorBody(err, 'Internal error'));
   }
 });
 
@@ -108,7 +109,7 @@ router.delete('/:id', authenticate, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('DELETE /teams error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json(safeErrorBody(err, 'Internal error'));
   }
 });
 

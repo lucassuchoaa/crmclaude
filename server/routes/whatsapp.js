@@ -31,7 +31,9 @@ router.post('/instance/connect', authenticate, async (req, res) => {
     let qrData = null;
     try {
       const connectRes = await evo.connectInstance(instance.instance_name);
-      console.log('Evolution connectInstance response keys:', Object.keys(connectRes || {}));
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('Evolution connectInstance response keys:', Object.keys(connectRes || {}));
+      }
 
       const qr = connectRes?.base64 || connectRes?.qrcode?.base64 || connectRes?.qrcode || null;
       if (qr && typeof qr === 'string') {
@@ -146,13 +148,23 @@ router.post('/webhook', async (req, res) => {
   try {
     const apiKey = req.headers.apikey || req.headers['x-api-key'] || req.query.apikey;
     const expectedKey = process.env.EVOLUTION_API_KEY;
-    if (expectedKey && apiKey !== expectedKey) {
-      console.warn('Webhook: invalid API key received. Header keys:', Object.keys(req.headers).join(', '));
+    if (!expectedKey) {
+      // In production, require the webhook secret to be configured.
+      if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging') {
+        console.error('Webhook: EVOLUTION_API_KEY not configured — rejecting webhook');
+        return res.status(503).json({ error: 'Webhook not configured' });
+      }
+    } else if (apiKey !== expectedKey) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn('Webhook: invalid API key received');
+      }
       return res.status(401).json({ error: 'Invalid API key' });
     }
 
     const body = req.body;
-    console.log('[Webhook] Event received:', body?.event, 'Instance:', body?.instance || body?.data?.instance);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[Webhook] Event received:', body?.event, 'Instance:', body?.instance || body?.data?.instance);
+    }
 
     const { event, data, instance } = body;
     const instanceName = instance || data?.instance;
@@ -249,7 +261,9 @@ router.post('/webhook', async (req, res) => {
         }
 
         if (!parceiro) {
-          if (!matchedLead) console.warn(`Webhook: no parceiro/lead match for phone ${senderPhone} (gerente ${gerenteId})`);
+          if (!matchedLead && process.env.NODE_ENV !== 'production') {
+            console.warn(`Webhook: no parceiro/lead match for phone ${senderPhone} (gerente ${gerenteId})`);
+          }
           continue;
         }
 
