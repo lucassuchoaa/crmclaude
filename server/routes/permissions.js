@@ -69,7 +69,7 @@ const DEFAULT_PERMISSIONS = {
   },
   parceiro: {
     pages: ["dash", "inds", "fin", "mats", "notifs"],
-    features: ["criar_indicacao"],
+    features: ["criar_indicacao", "criar_nfe"],
   },
   convenio: {
     pages: ["dash", "convenio", "mats", "notifs"],

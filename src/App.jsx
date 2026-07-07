@@ -1533,9 +1533,9 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenc
           style={{ padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }}>
           {KCOLS.map(k => <option key={k.id} value={k.id}>{k.label}</option>)}
         </select>
-        <Btn v={sel.lib === "liberado" ? "danger" : "success"} sm onClick={() => cycleLib(sel.id, sel.lib)}>
+        {hasPerm("liberar_indicacao") && <Btn v={sel.lib === "liberado" ? "danger" : "success"} sm onClick={() => cycleLib(sel.id, sel.lib)}>
           {sel.lib === null ? "🔓 Liberar" : sel.lib === "liberado" ? "🔒 Bloquear" : "⏳ Pendente"}
-        </Btn>
+        </Btn>}
         <Btn v="secondary" onClick={() => setSel(null)}>Fechar</Btn>
       </> : null}>
         {sel && <div>
@@ -1616,7 +1616,7 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenc
           )}
 
           {/* Editar Limite da Trava */}
-          {canEdit && sel.lib === "liberado" && (
+          {canEdit && hasPerm("liberar_indicacao") && sel.lib === "liberado" && (
             <div style={{ marginTop: 10, padding: 12, background: T.wn + "0A", border: `1px solid ${T.wn}25`, borderRadius: 8 }}>
               <div style={{ fontSize: 11, fontWeight: 600, color: T.wn, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>📅 Editar Limite da Trava</div>
               <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -1632,7 +1632,7 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenc
           )}
 
           {/* Observações editáveis */}
-          {canEdit ? (
+          {canEdit && hasPerm("editar_indicacao") ? (
             <div style={{ marginTop: 12 }}>
               <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.t2, marginBottom: 5, textTransform: "uppercase" }}>Observações</label>
               <textarea value={sel.obs || ""} onChange={e => editObs(sel.id, e.target.value)}
@@ -1646,7 +1646,7 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenc
           {/* Histórico de Interações */}
           <div style={{ marginTop: 16 }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: T.t2, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 10 }}>📜 Histórico de Interações</div>
-            {canEdit && (
+            {canEdit && hasPerm("editar_indicacao") && (
               <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
                 <input value={newNote} onChange={e => setNewNote(e.target.value)} placeholder="Adicionar interação..."
                   onKeyDown={e => e.key === "Enter" && addNote(sel.id)}
@@ -2002,7 +2002,7 @@ function KanbanPage({ inds, setInds, users, travaDias, notifs, setNotifs, cadenc
   );
 }
 // ===== PARCEIROS =====
-function ParcPage({ users, setUsers, inds }) {
+function ParcPage({ users, setUsers, inds, hasPerm = () => true }) {
   const { user } = useAuth();
   const { breakpoint } = useBreakpoint();
   const [modal, setModal] = useState(false);
@@ -2199,7 +2199,7 @@ function ParcPage({ users, setUsers, inds }) {
             <span style={{ fontSize: 11, color: T.t2 }}>{parcs.length} de {allParcs.length}</span>
           </>}
         </div>
-        <Btn onClick={() => setModal(true)}>＋ Cadastrar Parceiro</Btn>
+        {hasPerm("criar_usuario") && <Btn onClick={() => setModal(true)}>＋ Cadastrar Parceiro</Btn>}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {parcs.map(p => {
@@ -2253,7 +2253,7 @@ function ParcPage({ users, setUsers, inds }) {
                     <div style={{ fontSize: 11, fontWeight: 600, color: T.t2 }}>{lastInd ? new Date(lastInd).toLocaleDateString("pt-BR") : "—"}</div>
                     <div style={{ fontSize: 9, color: T.t2 }}>Últ. Ind.</div>
                   </div>
-                  <Btn sm onClick={(e) => { e.stopPropagation(); openEditParc(p); }}>Editar</Btn>
+                  {hasPerm("editar_usuario") && <Btn sm onClick={(e) => { e.stopPropagation(); openEditParc(p); }}>Editar</Btn>}
                 </div>
               </div>
             </div>
@@ -2422,9 +2422,9 @@ function ParcPage({ users, setUsers, inds }) {
                 <div style={{ padding: 10, background: T.bg2, borderRadius: 6, fontFamily: "'Space Mono',monospace", fontSize: 14, fontWeight: 600, color: T.ac, marginBottom: 8 }}>{resetPwResult}</div>
                 <Btn sm onClick={() => navigator.clipboard.writeText(resetPwResult)}>Copiar senha</Btn>
               </div>
-            ) : (
+            ) : hasPerm("reset_senha") ? (
               <Btn v="danger" sm onClick={resetParcPw}>Resetar Senha</Btn>
-            )}
+            ) : null}
           </div>
         </div>}
       </Modal>
@@ -2577,7 +2577,7 @@ function ConvenioPage() {
 
 // ===== MINHAS INDICAÇÕES =====
 
-function MinhasInd({ inds, setInds, notifs, setNotifs, users, cadenceRules }) {
+function MinhasInd({ inds, setInds, notifs, setNotifs, users, cadenceRules, hasPerm = () => true }) {
   const { user } = useAuth();
   const { breakpoint } = useBreakpoint();
   const formatCnpj = (v) => {
@@ -2770,7 +2770,7 @@ function MinhasInd({ inds, setInds, notifs, setNotifs, users, cadenceRules }) {
           <button onClick={() => setView("list")} style={{ padding: "6px 14px", borderRadius: 4, border: "none", fontFamily: "'DM Sans',sans-serif", fontSize: 12, fontWeight: 600, cursor: "pointer", background: view === "list" ? T.ac : "transparent", color: view === "list" ? "#fff" : T.tm }}>📋 Lista</button>
           <button onClick={() => setView("kanban")} style={{ padding: "6px 14px", borderRadius: 4, border: "none", fontFamily: "'DM Sans',sans-serif", fontSize: 12, fontWeight: 600, cursor: "pointer", background: view === "kanban" ? T.ac : "transparent", color: view === "kanban" ? "#fff" : T.tm }}>📊 Funil</button>
         </div>
-        <Btn onClick={() => setModal(true)}>＋ Nova Indicação</Btn>
+        {hasPerm("criar_indicacao") && <Btn onClick={() => setModal(true)}>＋ Nova Indicação</Btn>}
       </div>
 
       {/* FILTERS */}
@@ -3174,7 +3174,10 @@ function NegociosPage({ users, selectedTeam, myTeams, hasPerm = () => true }) {
   const [actForm, setActForm] = useState({ type: "note", description: "", scheduled_at: "" });
   const [taskForm, setTaskForm] = useState({ title: "", assigned_to: "", due_date: "" });
   const [loading, setLoading] = useState(true);
-  const canEdit = ["gerente", "super_admin", "executivo"].includes(user.role);
+  const canEditRole = ["gerente", "super_admin", "executivo"].includes(user.role);
+  const canEdit = canEditRole && hasPerm("editar_deal");
+  const canCreateDeal = canEditRole && hasPerm("criar_deal");
+  const canMoveDeal = canEditRole && hasPerm("mover_deal");
   // Google integration
   const [googleConn, setGoogleConn] = useState({ connected: false, email: null });
   const [emailForm, setEmailForm] = useState({ to: "", subject: "", body: "", cc: "" });
@@ -3418,7 +3421,7 @@ function NegociosPage({ users, selectedTeam, myTeams, hasPerm = () => true }) {
           {totalEmps > 0 && <span>👥 {totalEmps} colaboradores</span>}
           {wonDeals.length > 0 && <span style={{ color: T.ok }}>✓ {wonDeals.length} ganhos{wonEmps > 0 ? ` (${wonEmps} colab.)` : ""}</span>}
         </div>
-        {canEdit && <Btn onClick={() => setShowDealModal(true)} sm>＋ Nova Negociação</Btn>}
+        {canCreateDeal && <Btn onClick={() => setShowDealModal(true)} sm>＋ Nova Negociação</Btn>}
       </div>
 
       {/* KANBAN VIEW */}
@@ -3429,8 +3432,8 @@ function NegociosPage({ users, selectedTeam, myTeams, hasPerm = () => true }) {
             const stageValue = stageDeals.reduce((s, d) => s + Number(d.value || 0), 0);
             return (
               <div key={stage.id} style={{ minWidth: isMobile ? 260 : 280, maxWidth: 320, flex: "0 0 auto" }}
-                onDragOver={canEdit ? e => e.preventDefault() : undefined}
-                onDrop={canEdit ? e => { const id = e.dataTransfer.getData("text/plain"); handleMoveDeal(id, stage.id); } : undefined}>
+                onDragOver={canMoveDeal ? e => e.preventDefault() : undefined}
+                onDrop={canMoveDeal ? e => { const id = e.dataTransfer.getData("text/plain"); handleMoveDeal(id, stage.id); } : undefined}>
                 <div style={{ background: stage.color + "22", borderRadius: "8px 8px 0 0", padding: "10px 14px", borderLeft: `3px solid ${stage.color}` }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <span style={{ fontSize: 13, fontWeight: 700, color: stage.color }}>{stage.name}</span>
@@ -3441,7 +3444,7 @@ function NegociosPage({ users, selectedTeam, myTeams, hasPerm = () => true }) {
                 </div>
                 <div style={{ background: T.bg2, borderRadius: "0 0 8px 8px", padding: 8, minHeight: 100, border: `1px solid ${T.bor}`, borderTop: "none" }}>
                   {stageDeals.map(deal => (
-                    <div key={deal.id} draggable={canEdit} onDragStart={canEdit ? e => e.dataTransfer.setData("text/plain", deal.id) : undefined}
+                    <div key={deal.id} draggable={canMoveDeal} onDragStart={canMoveDeal ? e => e.dataTransfer.setData("text/plain", deal.id) : undefined}
                       onClick={() => loadDealDetails(deal)}
                       style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 8, padding: 12, marginBottom: 8, cursor: "pointer", transition: "border-color .2s" }}
                       onMouseEnter={e => e.currentTarget.style.borderColor = T.ac}
@@ -3553,7 +3556,7 @@ function NegociosPage({ users, selectedTeam, myTeams, hasPerm = () => true }) {
           <div>
             {/* Tabs */}
             <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${T.bor}`, marginBottom: 16 }}>
-              {["detalhes", "atividades", "contatos", "tarefas", ...(canEdit && hasPerm("criar_proposta") ? ["proposta"] : []), ...(canEdit && hasPerm("emitir_contrato") ? ["contrato"] : []), "email", "agenda"].map(t => (
+              {["detalhes", "atividades", "contatos", "tarefas", ...(canEditRole && hasPerm("criar_proposta") ? ["proposta"] : []), ...(canEditRole && hasPerm("emitir_contrato") ? ["contrato"] : []), ...(hasPerm("enviar_email") ? ["email"] : []), ...(hasPerm("criar_evento") ? ["agenda"] : [])].map(t => (
                 <button key={t} onClick={() => setDetailTab(t)}
                   style={{ padding: "8px 16px", fontSize: 13, fontWeight: 500, cursor: "pointer", border: "none", background: "none", color: detailTab === t ? T.ac : T.tm, borderBottom: `2px solid ${detailTab === t ? T.ac : "transparent"}`, marginBottom: -1, textTransform: "capitalize" }}>{t}</button>
               ))}
@@ -3753,7 +3756,7 @@ function NegociosPage({ users, selectedTeam, myTeams, hasPerm = () => true }) {
             )}
 
             {/* PROPOSTA TAB */}
-            {detailTab === "proposta" && canEdit && (
+            {detailTab === "proposta" && canEditRole && hasPerm("criar_proposta") && (
               <div>
                 {propTemplates.length === 0 ? (
                   <div style={{ padding: 30, textAlign: "center", color: T.tm }}>
@@ -3914,7 +3917,7 @@ function NegociosPage({ users, selectedTeam, myTeams, hasPerm = () => true }) {
             )}
 
             {/* CONTRATO TAB */}
-            {detailTab === "contrato" && canEdit && (
+            {detailTab === "contrato" && canEditRole && hasPerm("emitir_contrato") && (
               <div>
                 {ctTemplates.length === 0 ? (
                   <div style={{ padding: 30, textAlign: "center", color: T.tm }}>
@@ -4718,11 +4721,11 @@ function BIPage({ users, selectedTeam, myTeams }) {
 }
 
 // ===== CONFIG =====
-function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias, notifs, setNotifs, cadenceRules, setCadenceRules, myTeams, setMyTeams }) {
+function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias, notifs, setNotifs, cadenceRules, setCadenceRules, myTeams, setMyTeams, hasPerm = () => true }) {
   const { user } = useAuth();
   const { breakpoint } = useBreakpoint();
   const isSA = user.role === "super_admin";
-  const canManagePipelines = isSA || user.role === "executivo" || user.role === "gerente";
+  const canManagePipelines = (isSA || user.role === "executivo" || user.role === "gerente") && hasPerm("gerenciar_funis");
   const [cfg, setCfg] = useState({ prazo: 5, minF: 20, hsKey: "", hsPipe: "", emOn: true, waOn: false });
   const [saved, setSaved] = useState(false);
   const [tab, setTab] = useState(canManagePipelines && !isSA ? "funis" : "geral");
@@ -5234,12 +5237,34 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
   const thS = { textAlign: "left", padding: "12px 14px", fontSize: 10, fontWeight: 600, color: T.tm, textTransform: "uppercase", borderBottom: `1px solid ${T.bor}`, background: T.bg2 };
   const tdS = { padding: "12px 14px", fontSize: 13, borderBottom: `1px solid ${T.bor}` };
 
-  const cfgGroups = isSA ? [
+  // Feature(s) required to see each config tab — visible if user has ANY of the listed features
+  const TAB_PERMS = {
+    "permissões": ["gerenciar_permissoes"],
+    "notificações": ["enviar_notificacao", "broadcast_notificacao"],
+    auditoria: ["ver_auditoria"],
+    google: ["configurar_integracoes"],
+    hubspot: ["configurar_integracoes"],
+    clicksign: ["configurar_integracoes"],
+    netsuite: ["configurar_netsuite"],
+    "usuários": ["criar_usuario", "editar_usuario", "deletar_usuario"],
+    parceiros: ["criar_usuario", "editar_usuario"],
+    "convênios": ["gerenciar_convenios"],
+    equipes: ["gerenciar_equipes"],
+    produtos: ["gerenciar_produtos"],
+    funis: ["gerenciar_funis"],
+    propostas: ["gerenciar_propostas"],
+    contratos: ["gerenciar_contratos"],
+    materiais: ["criar_material", "editar_material", "deletar_material"],
+  };
+  const tabAllowed = (t) => !TAB_PERMS[t] || TAB_PERMS[t].some(f => hasPerm(f));
+  const cfgGroups = (isSA ? [
     { label: "Sistema", items: ["geral", "permissões", "notificações", "auditoria"] },
     { label: "Integrações", items: ["google", "hubspot", "netsuite", "clicksign"] },
     { label: "Cadastros", items: ["usuários", "parceiros", "convênios", "equipes", "produtos"] },
     { label: "Pipeline", items: ["funis", "propostas", "contratos", "materiais"] },
-  ] : [{ label: "Pipeline", items: ["funis"] }];
+  ] : [{ label: "Pipeline", items: ["funis"] }])
+    .map(g => ({ ...g, items: g.items.filter(tabAllowed) }))
+    .filter(g => g.items.length > 0);
   const [openGroup, setOpenGroup] = useState(null);
 
   return (
@@ -5839,7 +5864,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
         </Modal>
 
         {/* Segmented Communication */}
-        <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20, marginBottom: 16 }}>
+        {hasPerm("broadcast_notificacao") && <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20, marginBottom: 16 }}>
           <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>📢 Comunicação Segmentada</h3>
           <p style={{ fontSize: 12, color: T.tm, marginBottom: 16 }}>Envie comunicados direcionados para perfis ou usuários específicos.</p>
 
@@ -5931,7 +5956,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
             }} disabled={!commForm.titulo || !commForm.msg || commForm.perfis.length === 0}>📤 Enviar Comunicado</Btn>
             {commSent && <span style={{ fontSize: 13, color: T.ok, fontWeight: 600 }}>✓ Comunicado enviado com sucesso!</span>}
           </div>
-        </div>
+        </div>}
 
         {/* Communication History */}
         <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, padding: 20 }}>
@@ -5959,7 +5984,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
             <div style={{ fontSize: 13, color: T.t2 }}>{(() => { const filtered = users.filter(u => u.role !== "parceiro").filter(u => { if (uRoleFilter && u.role !== uRoleFilter) return false; if (uSearch) { const s = uSearch.toLowerCase(); return u.name.toLowerCase().includes(s) || u.email.toLowerCase().includes(s); } return true; }); return `${filtered.length} usuário(s) interno(s)`; })()}</div>
-            <Btn onClick={() => setUserModal(true)}>＋ Adicionar Usuário</Btn>
+            {hasPerm("criar_usuario") && <Btn onClick={() => setUserModal(true)}>＋ Adicionar Usuário</Btn>}
           </div>
           <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
             <input value={uSearch} onChange={e => setUSearch(e.target.value)} placeholder="Buscar por nome ou e-mail..." style={{ flex: 1, minWidth: 180, padding: "8px 12px", background: T.inp, border: `1px solid ${T.bor}`, borderRadius: 6, color: T.txt, fontFamily: "'DM Sans',sans-serif", fontSize: 13 }} />
@@ -5999,8 +6024,8 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
                         </div>
                       ) : (
                         <div style={{ display: "flex", gap: 6 }}>
-                          <Btn sm onClick={() => openEditUser(u)}>Editar</Btn>
-                          <Btn v="danger" sm onClick={() => setDelUserConf(u.id)}>Excluir</Btn>
+                          {hasPerm("editar_usuario") && <Btn sm onClick={() => openEditUser(u)}>Editar</Btn>}
+                          {hasPerm("deletar_usuario") && <Btn v="danger" sm onClick={() => setDelUserConf(u.id)}>Excluir</Btn>}
                         </div>
                       )
                     }
@@ -6142,9 +6167,9 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
                     <div style={{ padding: 10, background: T.bg2, borderRadius: 6, fontFamily: "'Space Mono',monospace", fontSize: 14, fontWeight: 600, color: T.ac, marginBottom: 8 }}>{euResetPw}</div>
                     <Btn sm onClick={() => navigator.clipboard.writeText(euResetPw)}>Copiar senha</Btn>
                   </div>
-                ) : (
+                ) : hasPerm("reset_senha") ? (
                   <Btn v="danger" sm onClick={resetUserPw}>Resetar Senha</Btn>
-                )}
+                ) : null}
               </div>
             </div>}
           </Modal>
@@ -6217,8 +6242,8 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
                   <td style={tdS}><Badge type={indCount > 0 ? "info" : "default"}>{indCount}</Badge></td>
                   <td style={tdS}>
                     <div style={{ display: "flex", gap: 6 }}>
-                      <Btn sm onClick={() => openEditParcCfg(p)}>Editar</Btn>
-                      <Btn v="danger" sm onClick={() => { setDelParcCfg(p); setDelParcTransfer(""); }}>Excluir</Btn>
+                      {hasPerm("editar_usuario") && <Btn sm onClick={() => openEditParcCfg(p)}>Editar</Btn>}
+                      {hasPerm("deletar_usuario") && <Btn v="danger" sm onClick={() => { setDelParcCfg(p); setDelParcTransfer(""); }}>Excluir</Btn>}
                     </div>
                   </td>
                 </tr>;
@@ -6268,9 +6293,9 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
                     <div style={{ padding: 10, background: T.bg2, borderRadius: 6, fontFamily: "'Space Mono',monospace", fontSize: 14, fontWeight: 600, color: T.ac, marginBottom: 8 }}>{epResetPw}</div>
                     <Btn sm onClick={() => navigator.clipboard.writeText(epResetPw)}>Copiar senha</Btn>
                   </div>
-                ) : (
+                ) : hasPerm("reset_senha") ? (
                   <Btn v="danger" sm onClick={resetParcCfgPw}>Resetar Senha</Btn>
-                )}
+                ) : null}
               </div>
             </div>}
           </Modal>
@@ -7011,7 +7036,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
             <div style={{ fontSize: 13, color: T.t2 }}>{mats.length} material(is) cadastrado(s)</div>
-            <Btn onClick={() => setMatModal(true)}>＋ Adicionar Material</Btn>
+            {hasPerm("criar_material") && <Btn onClick={() => setMatModal(true)}>＋ Adicionar Material</Btn>}
           </div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
             <div className="table-responsive"><table className="data-table">
@@ -7033,9 +7058,9 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
                           <Btn v="danger" sm onClick={() => delMat(m.id)}>Sim</Btn>
                           <Btn v="secondary" sm onClick={() => setDelConf(null)}>Não</Btn>
                         </div>
-                      ) : (
+                      ) : hasPerm("deletar_material") ? (
                         <Btn v="danger" sm onClick={() => setDelConf(m.id)}>🗑 Excluir</Btn>
-                      )}
+                      ) : null}
                     </td>
                   </tr>
                 ))}
@@ -7158,7 +7183,7 @@ function CfgPage({ mats, setMats, users, setUsers, inds, travaDias, setTravaDias
 // ===== FINANCEIRO =====
 function fmtBRL(v) { return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }); }
 
-function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cadenceRules }) {
+function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cadenceRules, hasPerm = () => true }) {
   const { user } = useAuth();
   const { breakpoint } = useBreakpoint();
   const downloadFile = async (url, fallbackName) => {
@@ -7418,7 +7443,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
         <div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 14 }}>
             {(isAdmin || isFinanceiro) && <Btn v="secondary" onClick={() => { const params = new URLSearchParams(); if (dateFrom) params.set('from_date', dateFrom); if (dateTo) params.set('to_date', dateTo); downloadFile(`/commissions/export/csv?${params}`, `comissoes_${new Date().toISOString().slice(0,10)}.csv`); }}>📥 Exportar CSV</Btn>}
-            {canWrite && <Btn onClick={() => setCommModal(true)}>📤 Enviar Relatório</Btn>}
+            {canWrite && hasPerm("criar_comissao") && <Btn onClick={() => setCommModal(true)}>📤 Enviar Relatório</Btn>}
           </div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
             <div className="table-responsive"><table className="data-table">
@@ -7479,8 +7504,8 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
                       <td style={tdStyle}>
                         <div style={{ display: "flex", gap: 6 }}>
                           <Btn v="secondary" sm onClick={() => { downloadFile(`/nfes/${n.id}/download`, `nfe_${n.id}.pdf`); }}>⬇</Btn>
-                          {canWrite && <Btn v="secondary" sm onClick={() => { setEditNfe({ id: n.id, origStatus: n.st }); setEditNfeForm({ num: n.num, valor: String(n.valor), status: n.st, pgDt: n.pgDt || "" }); }}>✏️</Btn>}
-                          {n.st === "pendente" && canWrite && <Btn v="success" sm onClick={() => markPago(n.id)}>💰 Pagar</Btn>}
+                          {canWrite && hasPerm("editar_nfe") && <Btn v="secondary" sm onClick={() => { setEditNfe({ id: n.id, origStatus: n.st }); setEditNfeForm({ num: n.num, valor: String(n.valor), status: n.st, pgDt: n.pgDt || "" }); }}>✏️</Btn>}
+                          {n.st === "pendente" && canWrite && hasPerm("editar_nfe") && <Btn v="success" sm onClick={() => markPago(n.id)}>💰 Pagar</Btn>}
                         </div>
                       </td>
                     </tr>
@@ -7521,7 +7546,7 @@ function FinPage({ comms, setComms, nfes, setNfes, users, notifs, setNotifs, cad
       {(tab === "minhasNfes") && (
         <div>
           <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
-            <Btn onClick={() => setNfeModal(true)}>📤 Enviar NFe</Btn>
+            {hasPerm("criar_nfe") && <Btn onClick={() => setNfeModal(true)}>📤 Enviar NFe</Btn>}
           </div>
           <div style={{ background: T.card, border: `1px solid ${T.bor}`, borderRadius: 10, overflow: "hidden" }}>
             <div className="table-responsive"><table className="data-table">
@@ -8536,7 +8561,7 @@ function ProspectingPage({ users, hasPerm, initialTab }) {
     <div>
       {/* Tabs */}
       <div style={{ display: "flex", gap: 0, borderBottom: `1px solid ${T.bor}`, marginBottom: 16, overflowX: "auto" }}>
-        {["leads", "listgen", "cadences", "scoring", "segments", "workflows", "dashboard", "landing", "inbox"].map(t => (
+        {["leads", "listgen", "cadences", "scoring", "segments", "workflows", "dashboard", ...(hasPerm("ver_landing_pages") ? ["landing"] : []), "inbox"].map(t => (
           <button key={t} onClick={() => setTab(t)} style={tabStyle(t)}>
             {t === "leads" ? "Leads" : t === "listgen" ? "Gerador de Listas" : t === "cadences" ? "Cadências" : t === "scoring" ? "Scoring" : t === "segments" ? "Segmentos" : t === "workflows" ? "Workflows" : t === "dashboard" ? "Dashboard" : t === "landing" ? "📄 Landing Pages" : "📨 Inbox"}
           </button>
@@ -8563,7 +8588,7 @@ function ProspectingPage({ users, hasPerm, initialTab }) {
               </select>
               <Btn v="primary" sm onClick={() => { setEditLead({}); setShowCreateLead(true); }}>+ Lead</Btn>
               <Btn v="ghost" sm onClick={() => setShowImport(true)}>Importar CSV</Btn>
-              {selectedLeadIds.length > 0 && cadences.length > 0 && (
+              {hasPerm("enviar_cadence") && selectedLeadIds.length > 0 && cadences.length > 0 && (
                 <Btn v="primary" sm onClick={() => setEnrollCadenceId("pick")}>Inscrever ({selectedLeadIds.length})</Btn>
               )}
             </div>
@@ -8666,7 +8691,7 @@ function ProspectingPage({ users, hasPerm, initialTab }) {
                   pipelinesApi.getAll().then(r => { setPipelines(r.data); if (r.data[0]) { setPipelineStages([]); pipelinesApi.getStages(r.data[0].id).then(s => setPipelineStages(s.data)); setConvertData(d => ({ ...d, pipeline_id: r.data[0].id })); } });
                   setShowConvert(true);
                 }}>Converter em Deal</Btn>}
-                <Btn sm v="ghost" onClick={() => { setAiOpen(true); setAiMessages([]); setAiConvId(null); }}>IA</Btn>
+                {hasPerm("usar_ai_agent") && <Btn sm v="ghost" onClick={() => { setAiOpen(true); setAiMessages([]); setAiConvId(null); }}>IA</Btn>}
                 <Btn sm v="danger" onClick={() => deleteLead(selectedLead.id)}>Excluir</Btn>
               </div>
               {/* Quick status change */}
@@ -8988,7 +9013,7 @@ function ProspectingPage({ users, hasPerm, initialTab }) {
                 </div>
                 <div style={{ display: "flex", gap: 6 }}>
                   <Btn sm v="ghost" onClick={exportCsv}>Exportar CSV</Btn>
-                  {cadences.length > 0 && lgSelectedIds.length > 0 && (
+                  {hasPerm("enviar_cadence") && cadences.length > 0 && lgSelectedIds.length > 0 && (
                     <select onChange={e => { if (e.target.value) { const ids = lgSelectedIds; cadencesApi.enroll(e.target.value, ids).then(() => { alert(`${ids.length} leads inscritos!`); setLgSelectedIds([]); }).catch(err => alert(err.response?.data?.error || "Erro")); e.target.value = ""; } }} style={selStyle}>
                       <option value="">Inscrever em cadência...</option>
                       {cadences.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -9057,7 +9082,7 @@ function ProspectingPage({ users, hasPerm, initialTab }) {
       {tab === "cadences" && (
         <div>
           <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-            <Btn v="primary" sm onClick={() => { setEditCadence({ name: "", description: "", type: "outbound", steps: [] }); setShowCreateCadence(true); }}>+ Cadência</Btn>
+            {hasPerm("criar_cadence") && <Btn v="primary" sm onClick={() => { setEditCadence({ name: "", description: "", type: "outbound", steps: [] }); setShowCreateCadence(true); }}>+ Cadência</Btn>}
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(340px,1fr))", gap: 12 }}>
             {cadences.map(c => (
@@ -10246,16 +10271,16 @@ export default function App() {
             {pg === "kanban" && <KanbanPage inds={inds} setInds={setInds} users={users} travaDias={travaDias} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} hasPerm={hasPerm} />}
             {pg === "negocios" && <NegociosPage users={users} selectedTeam={selectedTeam} myTeams={myTeams} hasPerm={hasPerm} />}
             {pg === "bi" && <BIPage users={users} selectedTeam={selectedTeam} myTeams={myTeams} />}
-            {pg === "inds" && <MinhasInd inds={inds} setInds={setInds} notifs={notifs} setNotifs={setNotifs} users={users} cadenceRules={cadenceRules} />}
+            {pg === "inds" && <MinhasInd inds={inds} setInds={setInds} notifs={notifs} setNotifs={setNotifs} users={users} cadenceRules={cadenceRules} hasPerm={hasPerm} />}
             {pg === "convenio" && <ConvenioPage />}
-            {pg === "parcs" && <ParcPage users={users} setUsers={setUsers} inds={inds} />}
+            {pg === "parcs" && <ParcPage users={users} setUsers={setUsers} inds={inds} hasPerm={hasPerm} />}
             {pg === "groups" && <GroupsPage users={users} inds={inds} />}
             {pg === "diretoria" && <DiretoriaPage />}
-            {pg === "fin" && <FinPage comms={comms} setComms={setComms} nfes={nfes} setNfes={setNfes} users={users} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} />}
+            {pg === "fin" && <FinPage comms={comms} setComms={setComms} nfes={nfes} setNfes={setNfes} users={users} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} hasPerm={hasPerm} />}
             {pg === "mats" && <MatsPage mats={mats} />}
             {pg === "notifs" && <NotifsPage notifs={notifs} setNotifs={setNotifs} users={users} userId={user.id} />}
             {pg === "prospecting" && <ProspectingPage users={users} hasPerm={hasPerm} />}
-            {pg === "cfg" && <CfgPage mats={mats} setMats={setMats} users={users} setUsers={setUsers} inds={inds} travaDias={travaDias} setTravaDias={setTravaDias} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} setCadenceRules={setCadenceRules} myTeams={myTeams} setMyTeams={setMyTeams} />}
+            {pg === "cfg" && <CfgPage mats={mats} setMats={setMats} users={users} setUsers={setUsers} inds={inds} travaDias={travaDias} setTravaDias={setTravaDias} notifs={notifs} setNotifs={setNotifs} cadenceRules={cadenceRules} setCadenceRules={setCadenceRules} myTeams={myTeams} setMyTeams={setMyTeams} hasPerm={hasPerm} />}
           </div>
         </main>
       </div>
